@@ -200,7 +200,7 @@ function StatTile({ icon, label, count, href, isArabic, withLang }) {
   );
 }
 
-function QuickActions({ isArabic, onAddPatient, onAddReport }) {
+function QuickActions({ isArabic, onAddPatient, onAddReport, onOpenClinicReports }) {
   return (
     <SectionCard
       isArabic={isArabic}
@@ -249,6 +249,7 @@ function QuickActions({ isArabic, onAddPatient, onAddReport }) {
           >
             {isArabic ? 'إضافة مريض' : 'Add Patient'}
           </Button>
+
           <Button
             fullWidth
             variant="outlined"
@@ -257,6 +258,17 @@ function QuickActions({ isArabic, onAddPatient, onAddReport }) {
             sx={{ borderRadius: 2, minHeight: 44 }}
           >
             {isArabic ? 'إضافة تقرير' : 'Add Report'}
+          </Button>
+
+          {/* NEW: Clinic Reports button */}
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<AnalyticsIcon />}
+            onClick={onOpenClinicReports}
+            sx={{ borderRadius: 2, minHeight: 44 }}
+          >
+            {isArabic ? 'تقارير العيادة' : 'Clinic Reports'}
           </Button>
         </Stack>
       </Stack>
@@ -383,7 +395,7 @@ export default function DashboardIndexPage() {
         // ----- patients count (registeredBy = doctor) -----
         const patSnap = await getDocs(query(collection(db, 'patients'), where('registeredBy', '==', doctorUID)));
 
-        // ----- reports TODAY (use same source/field as patient_reports: collection 'reports', field 'date') -----
+        // ----- reports TODAY (collection 'reports', field 'date') -----
         const repSnap = await getDocs(query(collection(db, 'reports'), where('doctorUID', '==', doctorUID)));
         const repRows = repSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         const reportsTodayCount = repRows.filter((r) => isToday(toDate(r?.date))).length;
@@ -409,6 +421,7 @@ export default function DashboardIndexPage() {
 
   const addPatient = () => setOpenAddPatient(true);
   const addReport = () => router.push(withLang('/patient-reports/new'));
+  const openClinicReports = () => router.push(withLang('/clinic-reports')); // NEW
 
   if (!mounted) return null;
 
@@ -545,6 +558,7 @@ export default function DashboardIndexPage() {
                   isArabic={isArabic}
                   onAddPatient={addPatient}
                   onAddReport={addReport}
+                  onOpenClinicReports={openClinicReports} // NEW
                 />
               </Box>
 
