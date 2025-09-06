@@ -28,6 +28,10 @@ export default function SupportPage() {
   const label = React.useCallback((en, ar) => (isArabic ? ar : en), [isArabic]);
   const withLang = React.useCallback((path) => (isArabic ? `${path}${path.includes('?') ? '&' : '?'}lang=ar` : path), [isArabic]);
 
+  // Final WhatsApp deep links (wa.me requires country code and digits only)
+  const WHATSAPP_SUPPORT = 'https://wa.me/201019264094';  // +20 10 19264094
+  const WHATSAPP_BUGS    = 'https://wa.me/201028177021';  // 01028177021 (Egypt +20)
+
   return (
     <Protected>
       <AppLayout>
@@ -49,31 +53,38 @@ export default function SupportPage() {
                 <Divider sx={{ my: 1 }} />
 
                 <Stack spacing={1} direction={{ xs: 'column', sm: isArabic ? 'row-reverse' : 'row' }}>
+                  {/* Email Support */}
                   <Button
                     startIcon={<MailOutlineRoundedIcon />}
                     variant="contained"
                     component={Link}
-                    href="mailto:support@yourapp.example"
+                    href="mailto:shafyHealth@gmail.com"
                     sx={{ borderRadius: 2 }}
                   >
                     {label('Email Support', 'أرسل بريدًا للدعم')}
                   </Button>
+
+                  {/* WhatsApp Support */}
                   <Button
                     startIcon={<WhatsAppIcon />}
                     variant="outlined"
                     component={Link}
-                    href="https://wa.me/0000000000"
+                    href={WHATSAPP_SUPPORT}
                     target="_blank"
                     rel="noopener noreferrer"
                     sx={{ borderRadius: 2 }}
                   >
                     {label('WhatsApp', 'واتساب')}
                   </Button>
+
+                  {/* Report a Bug via WhatsApp */}
                   <Button
-                    startIcon={<BugReportRoundedIcon />}
+                    startIcon={<WhatsAppIcon />}
                     variant="outlined"
                     component={Link}
-                    href={withLang('/feedback')}
+                    href={WHATSAPP_BUGS}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     sx={{ borderRadius: 2 }}
                   >
                     {label('Report a Bug', 'الإبلاغ عن خلل')}
