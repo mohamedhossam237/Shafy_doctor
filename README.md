@@ -1,40 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+hafy Patient App
 
-## Getting Started
+Shafy Patient App is a mobile healthcare application that connects patients with doctors, clinics, and labs.
+It provides real-time access to appointments, medical records, reports, and AI-powered assistance, aiming to simplify healthcare access for patients.
 
-First, run the development server:
+🚀 Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Authentication
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sign up & sign in with email and password (Firebase Authentication).
 
-You can start editing the page by modifying `pages/index.js`. The page auto-updates as you edit the file.
+Password reset via email verification.
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.js`.
+Appointments
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+Book, view, and manage upcoming appointments.
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Appointment reminders and notifications.
 
-## Learn More
+Patient Dashboard
 
-To learn more about Next.js, take a look at the following resources:
+Overview of personal health data, reports, and appointments.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+Quick navigation to key sections.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Medical Records
 
-## Deploy on Vercel
+Access to clinic reports, lab results, and uploaded documents.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Records categorized by type (Clinic / Lab / Other).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+Doctor & Assistant Integration
+
+Patients can connect with their assigned doctor and assistant.
+
+View doctor’s details and linked reports.
+
+AI Assistant (Shafy AI)
+
+Get quick answers about health, medications, and general care.
+
+Powered by Google Gemini integration.
+
+Notifications
+
+Real-time updates for appointments, doctor notes, and reports.
+
+Firebase Cloud Messaging (FCM) integration.
+
+Multilingual Support
+
+Arabic (default) and English.
+
+Automatic RTL/LTR UI adjustments.
