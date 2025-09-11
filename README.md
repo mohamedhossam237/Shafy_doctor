@@ -1,4 +1,4 @@
-hafy Patient App
+Shafy Patient App
 
 Shafy Patient App is a mobile healthcare application that connects patients with doctors, clinics, and labs.
 It provides real-time access to appointments, medical records, reports, and AI-powered assistance, aiming to simplify healthcare access for patients.
