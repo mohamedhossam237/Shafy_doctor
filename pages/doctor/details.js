@@ -27,8 +27,33 @@ import EditSubspecialtiesDialog from '@/components/Profile/EditSubspecialtiesDia
 import EditHoursDialog from '@/components/Profile/EditHoursDialog';
 
 /* ---------- helpers ---------- */
-const isEgMobile = (v) => /^01[0-25]\d{8}$/.test(String(v||'').trim());
-const isInstaPayId = (v) => /@/.test(String(v||''));
+const isEgMobile = (v) => /^01[0-25]\d{8}$/.test(String(v || '').trim());
+const isInstaPayId = (v) => /@/.test(String(v || ''));
+
+/** Normalize a subspecialty item to a safe label (never return an object). */
+const makeSubLabelFactory = (isArabic) => (s) => {
+  if (s == null) return '';
+  if (typeof s === 'string' || typeof s === 'number') return String(s);
+  // common shapes: {id, name_en, name_ar}, or {id, label}
+  return (
+    (isArabic ? s.name_ar : s.name_en) ||
+    s.label ||
+    String(s.id ?? '')
+  );
+};
+
+/** Normalize subspecialty detail for saving. */
+const normalizeSubDetail = (s) => {
+  if (s && typeof s === 'object') {
+    return {
+      id: s.id,
+      name_en: s.name_en ?? s.label ?? String(s.id ?? ''),
+      name_ar: s.name_ar ?? s.label ?? String(s.id ?? ''),
+    };
+  }
+  // primitive fallback
+  return { id: s, name_en: String(s ?? ''), name_ar: String(s ?? '') };
+};
 
 export default function DoctorDetailsPage() {
   const router = useRouter();
@@ -36,6 +61,7 @@ export default function DoctorDetailsPage() {
   const isArabic = router?.query?.lang === 'ar' || router?.query?.ar === '1';
   const dir = isArabic ? 'rtl' : 'ltr';
   const t = (en, ar) => (isArabic ? ar : en);
+  const subLabel = React.useMemo(() => makeSubLabelFactory(isArabic), [isArabic]);
 
   /* ---------- form state ---------- */
   const [form, setForm] = React.useState({
@@ -49,9 +75,9 @@ export default function DoctorDetailsPage() {
     specialtyEn: '', specialtyAr: '',
   });
 
-  const [images, setImages] = React.useState([]);               // profileImages (URL strings)
-  const [subspecialties, setSubspecialties] = React.useState([]); // array of objects from dialog
-  const [workingHours, setWorkingHours] = React.useState(null); // object from dialog
+  const [images, setImages] = React.useState([]);                 // profileImages (URL strings)
+  const [subspecialties, setSubspecialties] = React.useState([]); // array of objects or strings
+  const [workingHours, setWorkingHours] = React.useState(null);   // object from dialog
 
   // dialogs
   const [openSubs, setOpenSubs] = React.useState(false);
@@ -68,7 +94,7 @@ export default function DoctorDetailsPage() {
 
   const [loading, setLoading] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, message: '', severity: 'info' });
-  const openSnack = (m, s='info') => setSnack({ open: true, message: m, severity: s });
+  const openSnack = (m, s = 'info') => setSnack({ open: true, message: m, severity: s });
 
   const fileInputRef = React.useRef(null);
   const dropRef = React.useRef(null);
@@ -98,7 +124,7 @@ export default function DoctorDetailsPage() {
       }));
 
       setImages(Array.isArray(d.profileImages) ? d.profileImages.filter(Boolean) : []);
-      setSubspecialties(Array.isArray(d.subspecialties_detail) ? d.subspecialties_detail : []);
+      setSubspecialties(Array.isArray(d.subspecialties_detail) ? d.subspecialties_detail.filter(Boolean) : []);
       setWorkingHours(d.working_hours || null);
 
       const p = d.payment || {};
@@ -205,14 +231,19 @@ export default function DoctorDetailsPage() {
       const mobOk = instapayMobile ? isEgMobile(instapayMobile) : false;
       if (!idOk && !mobOk) {
         return openSnack(
-          t('Add a valid InstaPay ID (name@bank) or an Egyptian mobile number (01xxxxxxxxx).',
-            'أضف مُعرّف إنستا باي صحيح (name@bank) أو رقم موبايل مصري صحيح (01xxxxxxxxx).'),
+          t(
+            'Add a valid InstaPay ID (name@bank) or an Egyptian mobile number (01xxxxxxxxx).',
+            'أضف مُعرّف إنستا باي صحيح (name@bank) أو رقم موبايل مصري صحيح (01xxxxxxxxx).'
+          ),
           'warning'
         );
       }
     }
     if (payType === 'wallet' && walletNumber && !isEgMobile(walletNumber)) {
-      return openSnack(t('Enter a valid Egyptian wallet number (01xxxxxxxxx).', 'أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).'), 'warning');
+      return openSnack(
+        t('Enter a valid Egyptian wallet number (01xxxxxxxxx).', 'أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).'),
+        'warning'
+      );
     }
 
     const payload = {
@@ -229,8 +260,10 @@ export default function DoctorDetailsPage() {
       // specialty
       specialty_en: form.specialtyEn.trim(),
       specialty_ar: form.specialtyAr.trim(),
-      subspecialties: subspecialties.map((s) => s.id),
-      subspecialties_detail: subspecialties,
+
+      // subspecialties (keep ids and normalized detail)
+      subspecialties: subspecialties.map((s) => (typeof s === 'object' ? s.id : s)),
+      subspecialties_detail: subspecialties.map(normalizeSubDetail),
 
       // hours
       working_hours: workingHours || {},
@@ -268,7 +301,9 @@ export default function DoctorDetailsPage() {
       <Container maxWidth="md" sx={{ py: 3 }} dir={dir}>
         <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} alignItems="center" justifyContent="space-between" sx={{ mb: 1.25 }}>
           <Typography variant="h5" fontWeight={900}>{t('Doctor Details', 'تفاصيل الطبيب')}</Typography>
-          <IconButton onClick={loadData}><RefreshIcon /></IconButton>
+          <IconButton onClick={loadData} aria-label={t('Reload', 'إعادة التحميل')}>
+            <RefreshIcon />
+          </IconButton>
         </Stack>
 
         {/* Photos (imgbb) */}
@@ -279,7 +314,13 @@ export default function DoctorDetailsPage() {
             </Typography>
             <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1}>
               <input ref={fileInputRef} type="file" accept="image/*" hidden multiple onChange={onPickImages} />
-              <Button startIcon={<AddAPhotoIcon />} variant="outlined" onClick={() => fileInputRef.current?.click()} sx={{ borderRadius: 2 }} disabled={loading || !user?.uid}>
+              <Button
+                startIcon={<AddAPhotoIcon />}
+                variant="outlined"
+                onClick={() => fileInputRef.current?.click()}
+                sx={{ borderRadius: 2 }}
+                disabled={loading || !user?.uid}
+              >
                 {t('Upload', 'رفع')}
               </Button>
             </Stack>
@@ -291,7 +332,7 @@ export default function DoctorDetailsPage() {
               mt: 1,
               p: 1.5,
               borderRadius: 2,
-              border: (t) => `2px dashed ${t.palette.divider}`,
+              border: (th) => `2px dashed ${th.palette.divider}`,
               textAlign: 'center',
               transition: 'border-color .15s ease, background-color .15s ease',
               bgcolor: 'transparent',
@@ -319,7 +360,7 @@ export default function DoctorDetailsPage() {
                     position: 'relative',
                     borderRadius: 2,
                     overflow: 'hidden',
-                    border: (t) => `1px solid ${t.palette.divider}`,
+                    border: (th) => `1px solid ${th.palette.divider}`,
                     aspectRatio: '1 / 1',
                     backgroundImage: `url(${src})`,
                     backgroundSize: 'cover',
@@ -393,9 +434,10 @@ export default function DoctorDetailsPage() {
 
           {Array.isArray(subspecialties) && subspecialties.length > 0 && (
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-              {subspecialties.map((s, i) => (
-                <Chip key={`${s?.id || s}-${i}`} label={s?.label || s?.name || s} />
-              ))}
+              {subspecialties.map((s, i) => {
+                const keyVal = typeof s === 'object' ? (s?.id ?? i) : s ?? i;
+                return <Chip key={String(keyVal)} label={subLabel(s)} />;
+              })}
             </Stack>
           )}
         </Paper>
@@ -515,7 +557,7 @@ export default function DoctorDetailsPage() {
           doctorUID={user?.uid || 'temp'}
           isArabic={isArabic}
           initialSelected={subspecialties}
-          onSaved={(arr) => { setSubspecialties(arr); setOpenSubs(false); }}
+          onSaved={(arr) => { setSubspecialties(arr || []); setOpenSubs(false); }}
         />
         <EditHoursDialog
           open={openHours}
@@ -523,7 +565,7 @@ export default function DoctorDetailsPage() {
           doctorUID={user?.uid || 'temp'}
           isArabic={isArabic}
           initialHours={workingHours}
-          onSaved={(obj) => { setWorkingHours(obj); setOpenHours(false); }}
+          onSaved={(obj) => { setWorkingHours(obj || {}); setOpenHours(false); }}
         />
 
         <Snackbar
