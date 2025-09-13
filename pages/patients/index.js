@@ -1,4 +1,4 @@
-// /pages/patients/index.js (PatientsIndexPage)
+// /pages/patients/index.js (PatientsIndexPage) — PHONE NUMBER AS THE PATIENT DOC ID
 'use client';
 import * as React from 'react';
 import { useRouter } from 'next/router';
@@ -13,7 +13,15 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, getDocs, query, where, addDoc, serverTimestamp
+  collection,
+  getDocs,
+  query,
+  where,
+  addDoc,
+  serverTimestamp,
+  setDoc,
+  doc,
+  arrayUnion,
 } from 'firebase/firestore';
 
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
@@ -23,11 +31,21 @@ import PatientListEmpty from '@/components/patients/PatientListEmpty';
 // ⬇️ NEW: Add Patient Dialog
 import AddPatientDialog from '@/components/patients/AddPatientDialog';
 
+/* ---------------- helpers ---------------- */
+const normalizePhoneId = (raw) => {
+  // keep leading '+' if present, drop everything else but digits
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const hasPlus = s[0] === '+';
+  const digits = s.replace(/\D/g, '');
+  return hasPlus ? `+${digits}` : digits; // doc id = normalized phone
+};
+
 export default function PatientsIndexPage() {
   const router = useRouter();
   const { user } = useAuth();
 
-  // ⬇️ Arabic is DEFAULT unless explicitly set to EN (align with AppTopBar & Dashboard)
+  // Arabic is DEFAULT unless explicitly set to EN
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
     if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
@@ -41,10 +59,10 @@ export default function PatientsIndexPage() {
   const [patients, setPatients] = React.useState([]);
   const [queryText, setQueryText] = React.useState('');
 
-  // ⬇️ NEW: Add patient dialog state
+  // Add patient dialog state
   const [openAddPatient, setOpenAddPatient] = React.useState(false);
 
-  // ⬇️ NEW: Compose message dialog state
+  // Compose message dialog state
   const [openMsg, setOpenMsg] = React.useState(false);
   const [msgPatient, setMsgPatient] = React.useState(null); // {id, name}
   const [msgSubject, setMsgSubject] = React.useState('');
@@ -52,21 +70,97 @@ export default function PatientsIndexPage() {
   const [sending, setSending] = React.useState(false);
 
   React.useEffect(() => {
-    if (!user) return; // Protected handles redirect
+    if (!user?.uid) return;
+    const uid = String(user.uid);
+
     (async () => {
       setLoading(true);
       setError('');
       try {
-        // NOTE: removed orderBy('name') to avoid composite index requirement
-        const qPatients = query(collection(db, 'patients'), where('registeredBy', '==', user.uid));
-        const snap = await getDocs(qPatients);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const patientsCol = collection(db, 'patients');
 
-        // Client-side sort by name (case-insensitive, null-safe)
+        // 1) Patients already in the doctor's list
+        const [snapRegistered, snapAssoc] = await Promise.all([
+          getDocs(query(patientsCol, where('registeredBy', '==', uid))),
+          getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid))),
+        ]);
+
+        const map = new Map();
+        snapRegistered.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+        snapAssoc.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+
+        // 2) Ensure **anyone who booked** (appointments) appears — use PHONE NUMBER as the ONLY ID
+        const apptCol = collection(db, 'appointments');
+        const [snapA, snapB] = await Promise.all([
+          getDocs(query(apptCol, where('doctorId', '==', uid))),
+          getDocs(query(apptCol, where('doctorUID', '==', uid))),
+        ]);
+
+        const bookedPhones = new Map(); // phoneId -> {name, email, lang}
+        const takeFromAppt = (docSnap) => {
+          const a = docSnap.data() || {};
+          const phoneId = normalizePhoneId(a.patientPhone || a.phone || a.patient_phone);
+          if (!phoneId) return;
+          if (!bookedPhones.has(phoneId)) {
+            bookedPhones.set(phoneId, {
+              name: a.patientName || '',
+              email: a.patientEmail || '',
+              lang: a.lang || '',
+            });
+          }
+        };
+        snapA.docs.forEach(takeFromAppt);
+        snapB.docs.forEach(takeFromAppt);
+
+        const missingIds = [...bookedPhones.keys()].filter((phoneId) => !map.has(phoneId));
+
+        // 3) Try fetch missing (if they already exist with the phone id)
+        const chunk = (arr, n = 10) => {
+          const out = [];
+          for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+          return out;
+        };
+        for (const ch of chunk(missingIds, 10)) {
+          try {
+            const snap = await getDocs(query(patientsCol, where('__name__', 'in', ch)));
+            snap.docs.forEach((d) => map.set(d.id, { id: d.id, ...d.data() }));
+          } catch {
+            // ignore; will upsert below
+          }
+        }
+
+        // 4) Upsert any still-missing phones into /patients with that phone as the doc id
+        for (const phoneId of missingIds) {
+          if (map.has(phoneId)) continue;
+          const src = bookedPhones.get(phoneId) || {};
+          const payload = {
+            name: src.name || (isArabic ? 'بدون اسم' : 'Unnamed'),
+            ...(isArabic ? { name_ar: src.name || '' } : { name_en: src.name || '' }),
+            phone: phoneId,
+            mobile: phoneId,
+            email: src.email || '',
+            preferredLanguage: src.lang || (isArabic ? 'ar' : 'en'),
+            registeredBy: uid,
+            registered_by: uid, // legacy
+            associatedDoctors: arrayUnion(uid),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            lastVisit: null,
+          };
+          try {
+            await setDoc(doc(db, 'patients', phoneId), payload, { merge: true });
+            map.set(phoneId, { id: phoneId, ...payload });
+          } catch {
+            // show placeholder even if write fails (at least visible in list)
+            map.set(phoneId, { id: phoneId, name: payload.name, phone: phoneId, _placeholder: true });
+          }
+        }
+
+        // 5) Sort and set
+        const rows = Array.from(map.values());
         rows.sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
-
         setPatients(rows);
       } catch (e) {
         console.error(e);
@@ -82,21 +176,18 @@ export default function PatientsIndexPage() {
     if (!q) return patients;
     return patients.filter((p) => {
       const name = String(p?.name ?? '').toLowerCase();
-      const id = String(p?.id ?? '').toLowerCase();
+      const id = String(p?.id ?? '').toLowerCase(); // phone id
       return name.includes(q) || id.includes(q);
     });
   }, [patients, queryText]);
 
-  const goToPatient = (newId) => {
-    const pathname = `/patients/${newId}`;
-    if (isArabic) {
-      router.push({ pathname, query: { lang: 'ar' } });
-    } else {
-      router.push(pathname);
-    }
+  const goToPatient = (patientIdPhone) => {
+    const pathname = `/patients/${patientIdPhone}`;
+    if (isArabic) router.push({ pathname, query: { lang: 'ar' } });
+    else router.push(pathname);
   };
 
-  // ⬇️ NEW: Submit message to Firestore "messages" collection
+  // Send message (unchanged)
   const sendMessage = async () => {
     if (!user?.uid) return;
     if (!msgPatient?.id || !msgBody.trim()) {
@@ -105,19 +196,17 @@ export default function PatientsIndexPage() {
     }
     setSending(true);
     try {
-      const payload = {
-        type: 'direct',                 // for future filtering (direct / broadcast)
+      await addDoc(collection(db, 'messages'), {
+        type: 'direct',
         doctorUID: user.uid,
         doctorName: user.displayName || user.email || null,
-        patientId: String(msgPatient.id),
+        patientId: String(msgPatient.id), // phone id
         patientName: msgPatient.name || null,
         subject: msgSubject?.trim() || null,
         body: msgBody?.trim(),
         lang: isArabic ? 'ar' : 'en',
         createdAt: serverTimestamp(),
-        // You can add delivery metadata later (seenByPatient, deliveredAt, etc.)
-      };
-      await addDoc(collection(db, 'messages'), payload);
+      });
       setOpenMsg(false);
       setMsgPatient(null);
       setMsgSubject('');
@@ -131,11 +220,11 @@ export default function PatientsIndexPage() {
     }
   };
 
-  // ⬇️ Helper: quick options for Autocomplete
+  // Autocomplete options
   const patientOptions = React.useMemo(
     () =>
       patients.map((p) => ({
-        id: p.id,
+        id: p.id, // phone id
         name: p.name || (isArabic ? 'بدون اسم' : 'Unnamed'),
       })),
     [patients, isArabic]
@@ -144,7 +233,7 @@ export default function PatientsIndexPage() {
   return (
     <Protected>
       <AppLayout>
-        {/* ⬇️ AddPatientDialog mounted once; PatientSearchBar "Add New" opens it */}
+        {/* Add Patient Dialog */}
         <AddPatientDialog
           open={openAddPatient}
           onClose={() => setOpenAddPatient(false)}
@@ -152,7 +241,7 @@ export default function PatientsIndexPage() {
           onSaved={(newId) => goToPatient(newId)}
         />
 
-        {/* ⬇️ NEW: Compose Message Dialog */}
+        {/* Compose Message Dialog */}
         <Dialog open={openMsg} onClose={() => !sending && setOpenMsg(false)} fullWidth maxWidth="sm">
           <DialogTitle sx={{ fontWeight: 800 }}>
             {isArabic ? 'رسالة إلى المريض' : 'Message Patient'}
@@ -173,13 +262,11 @@ export default function PatientsIndexPage() {
                   />
                 )}
               />
-
               <TextField
                 label={isArabic ? 'الموضوع (اختياري)' : 'Subject (optional)'}
                 value={msgSubject}
                 onChange={(e) => setMsgSubject(e.target.value)}
               />
-
               <TextField
                 label={isArabic ? 'الرسالة' : 'Message'}
                 value={msgBody}
@@ -188,8 +275,6 @@ export default function PatientsIndexPage() {
                 minRows={5}
                 placeholder={isArabic ? 'اكتب رسالتك هنا…' : 'Type your message…'}
               />
-
-              {/* (Optional) preview of recipient */}
               {msgPatient?.id && (
                 <Box sx={{ fontSize: 13, color: 'text.secondary' }}>
                   {isArabic ? 'سيتم إرسال الرسالة إلى: ' : 'Will send to: '}
@@ -214,8 +299,6 @@ export default function PatientsIndexPage() {
               <Typography variant="h5" fontWeight={700}>
                 {isArabic ? 'قائمة المرضى' : 'Patient List'}
               </Typography>
-
-              {/* ⬇️ NEW: Message button (opens compose dialog) */}
               <Button variant="contained" onClick={() => setOpenMsg(true)}>
                 {isArabic ? 'رسالة جديدة' : 'New Message'}
               </Button>
@@ -225,7 +308,6 @@ export default function PatientsIndexPage() {
               isArabic={isArabic}
               value={queryText}
               onChange={(v) => setQueryText(v)}
-              // ⬇️ Previously navigated to /patients/new — now opens the dialog
               onAddNew={() => setOpenAddPatient(true)}
             />
 

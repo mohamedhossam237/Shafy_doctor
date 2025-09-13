@@ -20,6 +20,11 @@ import {
   Grid,
   TextField,
   MenuItem,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EventIcon from '@mui/icons-material/Event';
@@ -32,6 +37,12 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DescriptionIcon from '@mui/icons-material/Description';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import PaymentIcon from '@mui/icons-material/Payment';
+import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import ImageIcon from '@mui/icons-material/Image';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
@@ -64,6 +75,15 @@ function toDate(val) {
   if (val?.toDate) return val.toDate();
   if (typeof val === 'object' && 'seconds' in val) return new Date(val.seconds * 1000);
   return null;
+}
+
+function fmtDateTime(dt) {
+  const d = toDate(dt);
+  if (!d) return '—';
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  }).format(d);
 }
 
 function apptLocalDate(appt) {
@@ -115,6 +135,7 @@ function fmtReportDate(d) {
     hour: '2-digit', minute: '2-digit'
   }).format(dt);
 }
+const currencyLabel = (isAr) => (isAr ? 'ج.م' : 'EGP');
 
 /* ---------------- mini view dialog for a report ---------------- */
 
@@ -282,6 +303,115 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
   );
 }
 
+/* ---------------- Update Appointment Dialog (Doctor) ---------------- */
+
+function UpdateAppointmentDialog({
+  open,
+  onClose,
+  appointment,
+  onSaved,
+  isAr,
+}) {
+  const t = (en, ar) => (isAr ? ar : en);
+  const [saving, setSaving] = React.useState(false);
+
+  const [dateStr, setDateStr] = React.useState('');
+  const [timeStr, setTimeStr] = React.useState('');
+  const [status, setStatus] = React.useState('pending');
+  const statusOptions = [
+    { v: 'pending',    label: t('Pending', 'قيد الانتظار') },
+    { v: 'confirmed',  label: t('Confirmed', 'مؤكد') },
+    { v: 'completed',  label: t('Completed', 'تم') },
+    { v: 'cancelled',  label: t('Cancelled', 'أُلغي') },
+  ];
+
+  React.useEffect(() => {
+    if (!open || !appointment) return;
+    const ds = apptLocalDate(appointment) || toYMD(new Date());
+    const mins = apptTimeMinutes(appointment);
+    const hh = pad(Math.floor(mins / 60));
+    const mm = pad(mins % 60);
+    setDateStr(ds);
+    setTimeStr(`${hh}:${mm}`);
+    setStatus(String(appointment?.status || 'pending'));
+  }, [open, appointment]);
+
+  const handleSave = async () => {
+    if (!appointment?.id) return;
+    if (!dateStr || !timeStr) return;
+    setSaving(true);
+    try {
+      const appointmentDate = new Date(`${dateStr}T${timeStr}:00`);
+      await updateDoc(doc(db, 'appointments', appointment.id), {
+        date: dateStr,
+        time: timeStr,
+        appointmentDate,
+        status,
+        updatedAt: serverTimestamp(),
+      });
+      onSaved?.({ date: dateStr, time: timeStr, appointmentDate, status });
+      onClose?.();
+    } catch (e) {
+      // surface error inline via alert if needed
+      // eslint-disable-next-line no-alert
+      alert(e?.message || t('Failed to update appointment', 'تعذر تحديث الموعد'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ fontWeight: 900 }}>
+        {t('Update Appointment', 'تحديث الموعد')}
+      </DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={1.25}>
+          <TextField
+            label={t('Date', 'التاريخ')}
+            type="date"
+            InputLabelProps={{ shrink: true }}
+            value={dateStr}
+            onChange={(e) => setDateStr(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label={t('Time', 'الوقت')}
+            type="time"
+            InputLabelProps={{ shrink: true }}
+            value={timeStr}
+            onChange={(e) => setTimeStr(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            select
+            label={t('Status', 'الحالة')}
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            fullWidth
+          >
+            {statusOptions.map((opt) => (
+              <MenuItem key={opt.v} value={opt.v}>{opt.label}</MenuItem>
+            ))}
+          </TextField>
+          <Alert severity="info">
+            {t('Changing date/time will update the computed appointmentDate as well.',
+               'تغيير التاريخ/الوقت سيُحدّث حقل appointmentDate تلقائيًا.')}
+          </Alert>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={saving}>
+          {t('Cancel', 'إلغاء')}
+        </Button>
+        <Button variant="contained" onClick={handleSave} disabled={saving || !dateStr || !timeStr}>
+          {saving ? t('Saving…', 'جارٍ الحفظ…') : t('Save Changes', 'حفظ التغييرات')}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /* ---------------- page ---------------- */
 
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
@@ -309,6 +439,12 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
 
   // add-report dialog control
   const [reportOpen, setReportOpen] = React.useState(false);
+
+  // image preview dialog (payment proof)
+  const [proofOpen, setProofOpen] = React.useState(false);
+
+  // update appointment dialog
+  const [updateOpen, setUpdateOpen] = React.useState(false);
 
   const statusOptions = [
     { v: 'pending',    label: t('Pending', 'قيد الانتظار') },
@@ -352,12 +488,10 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
       const qRef = query(collection(db, 'reports'), where('appointmentId', '==', String(id)));
       const snap = await getDocs(qRef);
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // newest first
       rows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
       setReports(rows);
     } catch (e) {
       console.error(e);
-      // Don't block the page; just show a snackbar
       setSnack({ open: true, severity: 'error', msg: t('Failed to load reports', 'تعذر تحميل التقارير') });
     } finally {
       setReportsLoading(false);
@@ -401,7 +535,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     })();
   }, [appt]);
 
-  // Persist queue number on doc if different (optional)
+  // Persist queue number
   React.useEffect(() => {
     if (!appt || !appt.id) return;
     if (queueNo == null) return;
@@ -416,7 +550,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           setAppt((prev) => ({ ...prev, queueNumber: queueNo }));
         }
       } catch {
-        // ignore write errors
+        // ignore
       } finally {
         if (!cancelled) setSavingQueue(false);
       }
@@ -427,7 +561,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
 
   const backHref = `/appointments${isAr ? '?lang=ar' : ''}`;
 
-  // --- status updates ---
+  // --- status updates from the page quick control ---
   const applyStatus = async (newStatus) => {
     if (!appt?.id) return;
     setSavingStatus(true);
@@ -450,12 +584,17 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     if (status !== 'confirmed') applyStatus('confirmed');
   };
 
-  // When a report is saved from the dialog, refresh list
   const handleReportSaved = React.useCallback(() => {
     setSnack({ open: true, severity: 'success', msg: t('Report saved', 'تم حفظ التقرير') });
     setReportOpen(false);
     fetchReports();
   }, [fetchReports, t]);
+
+  // Pull normalized payment data (saved by booking page)
+  const payment = appt?.payment || {};
+  const price = appt?.doctorPrice ?? null;
+  const priceCurrency = appt?.doctorPriceCurrency || payment?.currency || 'EGP';
+  const paymentProofURL = appt?.paymentProofURL || '';
 
   return (
     <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
@@ -475,7 +614,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
             <Alert severity="error">{err}</Alert>
           ) : !appt ? null : (
             <Stack spacing={1.5}>
-              {/* Header / Queue number + Status + Reports */}
+              {/* Header / Queue number + Status + Actions */}
               <Box
                 sx={{
                   display: 'flex',
@@ -540,6 +679,16 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     onClick={() => setReportOpen(true)}
                   >
                     {t('Add Report', 'إضافة تقرير')}
+                  </Button>
+
+                  {/* Update Appointment */}
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ScheduleIcon />}
+                    onClick={() => setUpdateOpen(true)}
+                  >
+                    {t('Update Appointment', 'تحديث الموعد')}
                   </Button>
                 </Stack>
               </Box>
@@ -624,6 +773,139 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                           <Typography color="text.secondary">{appt.patientEmail}</Typography>
                         </>
                       )}
+                    </Stack>
+                  </Paper>
+                </Grid>
+
+                {/* Payment & Fees */}
+                <Grid item xs={12}>
+                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                    <Stack spacing={1.25}>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <PaymentIcon color="action" />
+                        <Typography sx={{ fontWeight: 700 }}>
+                          {t('Payment & Fees', 'الدفع والرسوم')}
+                        </Typography>
+                      </Stack>
+
+                      {/* Fee */}
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <MonetizationOnIcon color="disabled" />
+                        <Typography color="text.secondary">
+                          {t('Checkup Fee', 'رسوم الكشف')}:
+                        </Typography>
+                        <Typography fontWeight={800}>
+                          {price != null ? `${price} ${currencyLabel(isAr)}` : '—'}
+                        </Typography>
+                      </Stack>
+
+                      {/* Type */}
+                      {payment?.type && (
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <PaymentIcon color="disabled" />
+                          <Typography color="text.secondary">{t('Payment Type', 'طريقة الدفع')}:</Typography>
+                          <Typography>{payment.type}</Typography>
+                        </Stack>
+                      )}
+
+                      {/* Wallet */}
+                      {(payment?.walletNumber || payment?.walletProvider) && (
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <AccountBalanceWalletIcon color="disabled" />
+                          <Typography color="text.secondary">{t('Wallet', 'المحفظة')}:</Typography>
+                          <Typography>
+                            {[payment.walletNumber, payment.walletProvider].filter(Boolean).join(' — ') || '—'}
+                          </Typography>
+                        </Stack>
+                      )}
+
+                      {/* Instapay */}
+                      {(payment?.instapayId || payment?.instapayMobile) && (
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <AccountBalanceIcon color="disabled" />
+                          <Typography color="text.secondary">{t('Instapay', 'إنستا باي')}:</Typography>
+                          <Typography>
+                            {[
+                              payment.instapayId && (isAr ? `المعرّف: ${payment.instapayId}` : `ID: ${payment.instapayId}`),
+                              payment.instapayMobile && (isAr ? `الموبايل: ${payment.instapayMobile}` : `Mobile: ${payment.instapayMobile}`)
+                            ].filter(Boolean).join(' · ') || '—'}
+                          </Typography>
+                        </Stack>
+                      )}
+
+                      {/* Bank */}
+                      {payment?.bankName && (
+                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                          <AccountBalanceIcon color="disabled" />
+                          <Typography color="text.secondary">{t('Bank', 'البنك')}:</Typography>
+                          <Typography>{payment.bankName}</Typography>
+                        </Stack>
+                      )}
+
+                      {/* Payment notes */}
+                      {payment?.notes && (
+                        <Alert severity="info" sx={{ whiteSpace: 'pre-wrap' }}>
+                          {payment.notes}
+                        </Alert>
+                      )}
+
+                      {/* Payment screenshot (no extra meta) */}
+                      <Divider />
+
+                      <Stack spacing={1}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <ImageIcon color="disabled" />
+                          <Typography sx={{ fontWeight: 700 }}>
+                            {t('Payment Screenshot', 'صورة التحويل')}
+                          </Typography>
+                        </Stack>
+
+                        {paymentProofURL ? (
+                          <Stack spacing={1}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<OpenInNewIcon />}
+                                component="a"
+                                href={paymentProofURL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {t('Open in new tab', 'فتح في تبويب')}
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => setProofOpen(true)}
+                              >
+                                {t('Preview', 'معاينة')}
+                              </Button>
+                            </Box>
+
+                            {/* Thumbnail */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={paymentProofURL}
+                              alt="payment proof"
+                              onClick={() => setProofOpen(true)}
+                              style={{
+                                cursor: 'zoom-in',
+                                maxWidth: '100%',
+                                height: 'auto',
+                                maxHeight: 260,
+                                borderRadius: 8,
+                                border: '1px solid rgba(0,0,0,.12)'
+                              }}
+                            />
+                          </Stack>
+                        ) : (
+                          <Stack direction="row" spacing={1} alignItems="center" color="text.secondary">
+                            <ImageIcon fontSize="small" />
+                            <Typography variant="body2">{t('No payment image attached.', 'لا توجد صورة تحويل مرفقة.')}</Typography>
+                          </Stack>
+                        )}
+                      </Stack>
                     </Stack>
                   </Paper>
                 </Grid>
@@ -744,6 +1026,52 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           onClose={() => setViewReport(null)}
           report={viewReport}
           isAr={isAr}
+        />
+
+        {/* Payment proof full-size preview */}
+        <Dialog open={proofOpen} onClose={() => setProofOpen(false)} fullWidth maxWidth="md">
+          <DialogTitle>{t('Payment Screenshot', 'صورة التحويل')}</DialogTitle>
+          <DialogContent dividers>
+            {paymentProofURL ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={paymentProofURL}
+                alt="payment proof large"
+                style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 8 }}
+              />
+            ) : (
+              <Typography color="text.secondary">{t('No image available.', 'لا توجد صورة.')}</Typography>
+            )}
+          </DialogContent>
+          <DialogActions>
+            {paymentProofURL && (
+              <Button
+                startIcon={<OpenInNewIcon />}
+                component="a"
+                href={paymentProofURL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('Open Original', 'فتح الأصل')}
+              </Button>
+            )}
+            <Button onClick={() => setProofOpen(false)} variant="contained">
+              {t('Close', 'إغلاق')}
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Update Appointment Dialog */}
+        <UpdateAppointmentDialog
+          open={updateOpen}
+          onClose={() => setUpdateOpen(false)}
+          appointment={appt}
+          isAr={isAr}
+          onSaved={(patch) => {
+            setSnack({ open: true, severity: 'success', msg: t('Appointment updated', 'تم تحديث الموعد') });
+            setAppt((prev) => prev ? { ...prev, ...patch } : prev);
+            // If date/time changed, recompute queue later via effect
+          }}
         />
 
         <Snackbar
