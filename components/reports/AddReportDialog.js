@@ -27,6 +27,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
+import { debounce } from '@mui/material/utils';
 
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import CloseIcon from '@mui/icons-material/Close';
@@ -87,7 +88,7 @@ function Section({ icon, title, children }) {
   );
 }
 
-/* ---------- imgbb helpers (same behavior as /pages/reports/new.jsx) ---------- */
+/* ---------- imgbb helpers ---------- */
 function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
@@ -137,7 +138,7 @@ export default function AddReportDialog({
   const [form, setForm] = React.useState({
     titleEn: '',
     titleAr: '',
-    dateStr: new Date().toISOString().slice(0, 16), // meta date (used if no image too)
+    dateStr: new Date().toISOString().slice(0, 16),
     patientName: '',
     patientID: '',
     chiefComplaint: '',
@@ -160,7 +161,7 @@ export default function AddReportDialog({
   ]);
   const [testsList, setTestsList] = React.useState([{ name: '', notes: '' }]);
 
-  // --- image attach (now at the top; OR-details flow) ---
+  // --- image attach ---
   const [fileName, setFileName] = React.useState('');
   const [previewURL, setPreviewURL] = React.useState('');
   const [imgbbURL, setImgbbURL] = React.useState('');   // hosted URL after upload
@@ -173,6 +174,32 @@ export default function AddReportDialog({
 
   // demographics
   const [demo, setDemo] = React.useState({ mrn: '', sex: '', dobStr: '', phone: '' });
+
+  // --- Drug dictionary state ---
+  const [drugOptions, setDrugOptions] = React.useState([]);
+  const [drugLoading, setDrugLoading] = React.useState(false);
+  const [drugQuery, setDrugQuery] = React.useState('');
+  const debouncedSetQuery = React.useMemo(() => debounce((v) => setDrugQuery(v), 180), []);
+
+  // normalizer + filter for drug list
+  const filterDrugs = React.useMemo(() => {
+    const norm = (s = '') => s.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').trim();
+    return (q, list) => {
+      const n = norm(q);
+      if (!n) return list.slice(0, 100);
+      const starts = [];
+      const contains = [];
+      for (const d of list) {
+        const disp = norm(d.displayName);
+        const brand = norm(d.brandName);
+        const gen = norm(d.genericName);
+        if (disp.startsWith(n) || brand.startsWith(n) || gen.startsWith(n)) starts.push(d);
+        else if (disp.includes(n) || brand.includes(n) || gen.includes(n)) contains.push(d);
+        if (starts.length >= 60) break;
+      }
+      return starts.concat(contains).slice(0, 100);
+    };
+  }, []);
 
   // reset on close
   React.useEffect(() => {
@@ -207,6 +234,8 @@ export default function AddReportDialog({
       setFileName('');
       setImgbbURL('');
       setAttaching(false);
+
+      setDrugQuery('');
     }
   }, [open, previewURL]);
 
@@ -374,22 +403,14 @@ export default function AddReportDialog({
     );
   };
 
-  /**
-   * VALIDATION:
-   * - Patient is ALWAYS required.
-   * - EITHER an attached image (imgbbURL) OR clinical details.
-   *   If image exists -> all other fields optional (we'll default date on save).
-   *   If NO image -> require minimal details: diagnosis (and date valid).
-   */
+  /** Validation */
   const validate = () => {
     const next = {};
     if (!form.patientID) next.patientID = true;
 
     if (!imgbbURL) {
-      // no image → need minimal details
       if (!form.diagnosis.trim()) next.diagnosis = true;
       if (!form.dateStr || isNaN(new Date(form.dateStr).getTime())) next.dateStr = true;
-      // optional: at least one of titleAr/titleEn
       if (!form.titleAr && !form.titleEn) {
         next.titleEn = true;
         next.titleAr = true;
@@ -398,6 +419,37 @@ export default function AddReportDialog({
     setErrors(next);
     return Object.keys(next).length === 0;
   };
+
+  // Load drug dictionary on open
+  React.useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    (async () => {
+      try {
+        setDrugLoading(true);
+        // place file at: public/data/medicines.min.json
+        const res = await fetch('/data/medicines.min.json', { cache: 'force-cache' });
+        const all = await res.json();
+        if (!alive) return;
+        const slim = (all || []).map((d) => ({
+          displayName: d.displayName || '',
+          genericName: d.genericName || '',
+          brandName: d.brandName || '',
+          strength: d.strength || '',
+          form: d.form || '',
+          route: d.route || '',
+          atc: d.atc || '',
+        }));
+        setDrugOptions(slim);
+      } catch (e) {
+        console.error('Failed loading drug dictionary', e);
+        setSnack({ open: true, severity: 'error', msg: t('Failed to load drug dictionary', 'فشل تحميل القاموس الدوائي') });
+      } finally {
+        setDrugLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [open, t]);
 
   const submit = async () => {
     if (!user) return;
@@ -414,7 +466,7 @@ export default function AddReportDialog({
     try {
       const when = form.dateStr && !isNaN(new Date(form.dateStr).getTime())
         ? new Date(form.dateStr)
-        : new Date(); // default if image-only
+        : new Date();
 
       const followUpDate = form.followUpStr ? new Date(form.followUpStr) : null;
       const attachments = imgbbURL ? [imgbbURL] : [];
@@ -456,7 +508,7 @@ export default function AddReportDialog({
         appointmentId: appointmentId ? String(appointmentId) : null,
         patientName: form.patientName || '',
         patientID: form.patientID || '',
-        // Clinical (all optional when image exists)
+        // Clinical
         chiefComplaint: form.chiefComplaint || '',
         findings: form.findings || '',
         diagnosis: form.diagnosis || '',
@@ -824,11 +876,103 @@ export default function AddReportDialog({
                   >
                     <Grid container spacing={1.25} alignItems="center">
                       <Grid item xs={12} md={3.5}>
-                        <TextField
-                          label={t('Medicine name', 'اسم الدواء')}
-                          fullWidth
-                          value={m.name}
-                          onChange={(e) => updateMedication(idx, 'name', e.target.value)}
+                        {/* Drug dictionary autocomplete (freeSolo enabled, clearer option UI) */}
+                        <Autocomplete
+                          freeSolo
+                          autoHighlight
+                          loading={drugLoading}
+                          options={filterDrugs(drugQuery, drugOptions)}
+                          value={m.name || ''}
+                          onInputChange={(_, v) => {
+                            updateMedication(idx, 'name', v || '');
+                            debouncedSetQuery(v || '');
+                          }}
+                          onChange={(_, val) => {
+                            if (typeof val === 'string') {
+                              updateMedication(idx, 'name', val);
+                            } else if (val) {
+                              const primary = val.brandName || val.displayName || val.genericName || '';
+                              updateMedication(idx, 'name', primary);
+                              if (!m.dose && val.strength) updateMedication(idx, 'dose', val.strength);
+                              const hint = [val.form, val.route, val.genericName && `(${val.genericName})`]
+                                .filter(Boolean)
+                                .join(' • ');
+                              if (!m.notes && hint) updateMedication(idx, 'notes', hint);
+                            }
+                          }}
+                          getOptionLabel={(opt) => {
+                            if (typeof opt === 'string') return opt;
+                            const primary = opt.brandName || opt.displayName || opt.genericName || '';
+                            const extra = [opt.strength, opt.form, opt.route].filter(Boolean).join(' ');
+                            return extra ? `${primary} ${extra}` : primary;
+                          }}
+                          isOptionEqualToValue={(a, b) => {
+                            const av = (a?.displayName || a?.brandName || a?.genericName || '').toLowerCase();
+                            const bv = (typeof b === 'string'
+                              ? b
+                              : (b?.displayName || b?.brandName || b?.genericName || '')
+                            ).toLowerCase();
+                            return av === bv;
+                          }}
+                          loadingText={t('Searching medicines…', 'جارٍ البحث عن الأدوية…')}
+                          noOptionsText={t('No matches. Press Enter to use your text.', 'لا نتائج. اضغط Enter لاستخدام النص.')}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              label={t('Medicine name', 'اسم الدواء')}
+                              fullWidth
+                              placeholder={t('Type brand or generic…', 'اكتب الاسم التجاري أو العلمي…')}
+                              InputProps={{
+                                ...params.InputProps,
+                                endAdornment: (
+                                  <>
+                                    {drugLoading ? <CircularProgress size={18} /> : null}
+                                    {params.InputProps.endAdornment}
+                                  </>
+                                ),
+                              }}
+                            />
+                          )}
+                          renderOption={(props, opt) => {
+                            const primary = opt.brandName || opt.displayName || opt.genericName || '';
+                            const secondary = [opt.genericName && `(${opt.genericName})`].filter(Boolean).join(' ');
+                            const meta = [
+                              opt.strength && `${opt.strength}`,
+                              opt.form && `${opt.form}`,
+                              opt.route && `${opt.route}`,
+                              opt.atc && `ATC: ${opt.atc}`,
+                            ].filter(Boolean).join(' • ');
+
+                            return (
+                              <li {...props} key={`${primary}-${opt.strength}-${opt.form}-${opt.route}`}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                                  <Typography variant="body2" fontWeight={700} sx={{ lineHeight: 1.2 }}>
+                                    {primary}{secondary ? ' ' : ''}<Typography component="span" variant="body2" color="text.secondary">{secondary}</Typography>
+                                  </Typography>
+                                  {meta && (
+                                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
+                                      {meta}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </li>
+                            );
+                          }}
+                          ListboxProps={{
+                            sx: {
+                              maxHeight: 48 * 7, // ~7 rows
+                              '& .MuiAutocomplete-option': { alignItems: 'flex-start', py: 1 },
+                            },
+                          }}
+                          slotProps={{
+                            paper: {
+                              sx: { minWidth: 360, maxWidth: 520 },
+                            },
+                            popper: {
+                              modifiers: [{ name: 'flip', enabled: true }],
+                              sx: { zIndex: (t2) => t2.zIndex.modal + 1, direction: isArabic ? 'rtl' : 'ltr' },
+                            },
+                          }}
                         />
                       </Grid>
                       <Grid item xs={6} md={2}>
