@@ -119,6 +119,122 @@ async function uploadImageToImgbb(file) {
   return json.data.url;
 }
 
+/** Small helpers for printing */
+function safe(val) {
+  return (val ?? '').toString();
+}
+function fmtDate(dt) {
+  try {
+    const d = dt instanceof Date ? dt : new Date(dt);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleString();
+  } catch {
+    return '';
+  }
+}
+function buildClinicHeader({ logoUrl, clinicName, doctorName, doctorEmail, clinicPhone, clinicAddress }) {
+  return `
+    <header class="hdr">
+      <div class="brand">
+        ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="logo" />` : ''}
+        <div class="brand-meta">
+          ${clinicName ? `<div class="clinic">${clinicName}</div>` : ''}
+          <div class="doc">${doctorName || ''}</div>
+          ${doctorEmail ? `<div class="meta">${doctorEmail}</div>` : ''}
+          ${clinicPhone ? `<div class="meta">${clinicPhone}</div>` : ''}
+          ${clinicAddress ? `<div class="meta">${clinicAddress}</div>` : ''}
+        </div>
+      </div>
+      <div class="divider"></div>
+    </header>
+  `;
+}
+
+/** Print CSS (single-page A4; no phantom second page) */
+const BASE_PRINT_CSS = `
+  @page { size: A4; margin: 8mm; }
+  @media print {
+    html, body { width: 210mm; height: auto; }
+    /* Use zoom instead of transform to avoid layout reflow height issues */
+    body { zoom: 0.92; }
+    .page { width: auto; max-height: none; overflow: visible; }
+    .card, table, tr, td, th, header, section, img, .block { break-inside: avoid; page-break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  :root { --muted:#6b7280; --line:#e5e7eb; --title:#111827; --accent:#2563eb; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; color:#111827; }
+  .page { padding: 10mm 6mm; }
+  .hdr .brand{ display:flex; align-items:center; gap:12px; }
+  .hdr .logo{ width:56px; height:56px; object-fit:contain; }
+  .hdr .clinic{ font-size:16px; font-weight:800; letter-spacing:.2px; }
+  .hdr .doc{ font-size:14px; font-weight:700; margin-top:2px; }
+  .hdr .meta{ font-size:12px; color:var(--muted); line-height:1.2; }
+  .hdr .divider{ height:1px; background:var(--line); margin:8px 0 10px; }
+  h2 { font-size:14px; margin:6px 0 4px; font-weight:800; color:#0f172a; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; margin:4px 0; }
+  .cell{ min-width:140px; font-size:12px; }
+  .label{ color:var(--muted); }
+  .value{ font-weight:700; }
+  .card{ border:1px solid var(--line); border-radius:8px; padding:8px; margin:6px 0; }
+  .ul{ margin:4px 0 0 14px; padding:0; }
+  .ul li{ margin:2px 0; }
+  .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+  .attach{ width:100%; max-height:280px; object-fit:contain; border:1px solid var(--line); border-radius:6px; }
+  .footer{ border-top:1px dashed var(--line); margin-top:8px; padding-top:6px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between; }
+`;
+
+/** Compact Rx print CSS (slightly larger zoom to be crisp) */
+const RX_PRINT_CSS = `
+  @page { size: A4; margin: 10mm; }
+  @media print {
+    html, body { width: 210mm; height: auto; }
+    body { zoom: 0.96; }
+    .page { width: auto; max-height: none; overflow: visible; }
+    .card, header, ul, li { break-inside: avoid; page-break-inside: avoid; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+  :root { --muted:#6b7280; --line:#e5e7eb; --title:#111827; --accent:#2563eb; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; color:#111827; }
+  .page { padding: 8mm 6mm; }
+  .hdr .brand{ display:flex; align-items:center; gap:10px; }
+  .hdr .logo{ width:50px; height:50px; object-fit:contain; }
+  .hdr .clinic{ font-size:15px; font-weight:800; letter-spacing:.2px; }
+  .hdr .doc{ font-size:13px; font-weight:700; margin-top:2px; }
+  .hdr .meta{ font-size:11px; color:var(--muted); line-height:1.2; }
+  .hdr .divider{ height:1px; background:var(--line); margin:8px 0 8px; }
+  h2 { font-size:13px; margin:6px 0 4px; font-weight:800; color:#0f172a; }
+  .row{ display:flex; gap:8px; flex-wrap:wrap; margin:4px 0; }
+  .cell{ min-width:140px; font-size:12px; }
+  .label{ color:var(--muted); }
+  .value{ font-weight:700; }
+  .card{ border:1px solid var(--line); border-radius:8px; padding:8px; margin:6px 0; }
+  .ul{ margin:4px 0 0 14px; padding:0; }
+  .ul li{ margin:3px 0; }
+  .footer{ border-top:1px dashed var(--line); margin-top:8px; padding-top:6px; font-size:11px; color:var(--muted); display:flex; justify-content:space-between; }
+`;
+
+/** Render HTML in a hidden iframe and trigger print */
+function printHTML(html) {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow?.document;
+  if (!doc) return;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  iframe.onload = () => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => document.body.removeChild(iframe), 1000);
+  };
+}
+
 export default function AddReportDialog({
   open,
   onClose,
@@ -513,10 +629,10 @@ export default function AddReportDialog({
         findings: form.findings || '',
         diagnosis: form.diagnosis || '',
         procedures: form.procedures || '',
-        medications: medsText,
-        medicationsList,
-        testsRequired: testsText,
-        testsRequiredList: testsList,
+        medications: medsText,            // legacy string (Firetore string)
+        medicationsList,                  // structured array
+        testsRequired: testsText,         // legacy string (Firestore string)
+        testsRequiredList: testsList,     // structured array
         // Vitals
         vitals: {
           bp: form.vitalsBP || '',
@@ -559,6 +675,199 @@ export default function AddReportDialog({
       setSubmitting(false);
     }
   };
+
+  /** -------- Printing builders -------- */
+  const buildFullHTML = React.useCallback(() => {
+    const doctorName = safe(user?.displayName) || t('Attending Physician', 'الطبيب المعالج');
+    const doctorEmail = safe(user?.email);
+    const clinicName = safe(user?.clinicName);
+    const clinicPhone = safe(user?.clinicPhone);
+    const clinicAddress = safe(user?.clinicAddress);
+    const logoUrl = '/logo.png'; // optional
+
+    const when = form.dateStr && !isNaN(new Date(form.dateStr).getTime())
+      ? new Date(form.dateStr)
+      : new Date();
+
+    const meds = medicationsList
+      .filter(m => Object.values(m).some(v => String(v||'').trim()))
+      .map(m => {
+        const parts = [
+          m.name,
+          m.dose && `(${m.dose})`,
+          m.frequency,
+          m.duration && `x ${m.duration}`,
+          m.notes && `- ${m.notes}`,
+        ].filter(Boolean).join(' ');
+        return `<li>${parts}</li>`;
+      }).join('');
+
+    const tests = testsList
+      .filter(x => Object.values(x).some(v => String(v||'').trim()))
+      .map(x => `<li>${[x.name, x.notes && `- ${x.notes}`].filter(Boolean).join(' ')}</li>`)
+      .join('');
+
+    const attachImg = imgbbURL ? `<img class="attach" src="${imgbbURL}" alt="attachment" />` : '';
+
+    return `
+      <html>
+      <head>
+        <meta charSet="utf-8" />
+        <title>Clinical Report</title>
+        <style>${BASE_PRINT_CSS}</style>
+      </head>
+      <body>
+        <div class="page">
+          ${buildClinicHeader({ logoUrl, clinicName, doctorName, doctorEmail, clinicPhone, clinicAddress })}
+
+          <section class="card">
+            <h2>Patient</h2>
+            <div class="row">
+              <div class="cell"><span class="label">Name: </span><span class="value">${safe(form.patientName)}</span></div>
+              <div class="cell"><span class="label">ID: </span><span class="value mono">${safe(form.patientID)}</span></div>
+              <div class="cell"><span class="label">Date: </span><span class="value">${fmtDate(when)}</span></div>
+            </div>
+          </section>
+
+          ${(form.titleEn || form.titleAr) ? `
+          <section class="card">
+            <h2>Report Title</h2>
+            <div class="value">${safe(form.titleEn || form.titleAr)}</div>
+          </section>` : ''}
+
+          ${(form.chiefComplaint || form.findings || form.diagnosis || form.procedures) ? `
+          <section class="card">
+            <h2>Clinical Details</h2>
+            ${form.chiefComplaint ? `<div><span class="label">Chief Complaint: </span>${safe(form.chiefComplaint)}</div>` : ''}
+            ${form.findings ? `<div style="margin-top:4px;"><span class="label">Findings: </span>${safe(form.findings)}</div>` : ''}
+            ${form.diagnosis ? `<div style="margin-top:4px;"><span class="label">Diagnosis: </span><strong>${safe(form.diagnosis)}</strong></div>` : ''}
+            ${form.procedures ? `<div style="margin-top:4px;"><span class="label">Procedures: </span>${safe(form.procedures)}</div>` : ''}
+          </section>` : ''}
+
+          ${(form.vitalsBP || form.vitalsHR || form.vitalsTemp || form.vitalsSpO2) ? `
+          <section class="card">
+            <h2>Vitals</h2>
+            <div class="row">
+              ${form.vitalsBP ? `<div class="cell"><span class="label">BP: </span><span class="value">${safe(form.vitalsBP)}</span></div>` : ''}
+              ${form.vitalsHR ? `<div class="cell"><span class="label">HR: </span><span class="value">${safe(form.vitalsHR)}</span></div>` : ''}
+              ${form.vitalsTemp ? `<div class="cell"><span class="label">Temp: </span><span class="value">${safe(form.vitalsTemp)}</span></div>` : ''}
+              ${form.vitalsSpO2 ? `<div class="cell"><span class="label">SpO₂: </span><span class="value">${safe(form.vitalsSpO2)}</span></div>` : ''}
+            </div>
+          </section>` : ''}
+
+          ${meds ? `
+          <section class="card">
+            <h2>Medications / Prescriptions</h2>
+            <ul class="ul">${meds}</ul>
+          </section>` : ''}
+
+          ${tests ? `
+          <section class="card">
+            <h2>Required Tests / Investigations</h2>
+            <ul class="ul">${tests}</ul>
+          </section>` : ''}
+
+          ${form.notes ? `
+          <section class="card">
+            <h2>Notes</h2>
+            <div>${safe(form.notes)}</div>
+          </section>` : ''}
+
+          ${attachImg ? `
+          <section class="card">
+            <h2>Attachment</h2>
+            ${attachImg}
+          </section>` : ''}
+
+          <footer class="footer">
+            <div>Generated: ${fmtDate(new Date())}</div>
+            <div>${doctorName}</div>
+          </footer>
+        </div>
+      </body>
+      </html>
+    `;
+  }, [user, form, medicationsList, testsList, imgbbURL, t]);
+
+  const buildRxHTML = React.useCallback(() => {
+    const doctorName = safe(user?.displayName) || t('Attending Physician', 'الطبيب المعالج');
+    const doctorEmail = safe(user?.email);
+    const clinicName = safe(user?.clinicName);
+    const clinicPhone = safe(user?.clinicPhone);
+    const clinicAddress = safe(user?.clinicAddress);
+    const logoUrl = '/logo.png'; // optional
+    const when = form.dateStr && !isNaN(new Date(form.dateStr).getTime())
+      ? new Date(form.dateStr)
+      : new Date();
+
+    const meds = medicationsList
+      .filter(m => Object.values(m).some(v => String(v||'').trim()))
+      .map(m => {
+        const parts = [
+          m.name,
+          m.dose && `(${m.dose})`,
+          m.frequency,
+          m.duration && `x ${m.duration}`,
+          m.notes && `- ${m.notes}`,
+        ].filter(Boolean).join(' ');
+        return `<li>${parts}</li>`;
+      }).join('');
+
+    const tests = testsList
+      .filter(x => Object.values(x).some(v => String(v||'').trim()))
+      .map(x => `<li>${[x.name, x.notes && `- ${x.notes}`].filter(Boolean).join(' ')}</li>`)
+      .join('');
+
+    return `
+      <html>
+      <head>
+        <meta charSet="utf-8" />
+        <title>Prescription & Tests</title>
+        <style>${RX_PRINT_CSS}</style>
+      </head>
+      <body>
+        <div class="page">
+          ${buildClinicHeader({ logoUrl, clinicName, doctorName, doctorEmail, clinicPhone, clinicAddress })}
+
+          <section class="card">
+            <div class="row">
+              <div class="cell"><span class="label">Patient: </span><span class="value">${safe(form.patientName)}</span></div>
+              <div class="cell"><span class="label">ID: </span><span class="value mono">${safe(form.patientID)}</span></div>
+              <div class="cell"><span class="label">Date: </span><span class="value">${fmtDate(when)}</span></div>
+            </div>
+          </section>
+
+          ${meds ? `
+          <section class="card">
+            <h2>Medications / Prescriptions</h2>
+            <ul class="ul">${meds}</ul>
+          </section>` : ''}
+
+          ${tests ? `
+          <section class="card">
+            <h2>Required Tests / Investigations</h2>
+            <ul class="ul">${tests}</ul>
+          </section>` : ''}
+
+          <footer class="footer">
+            <div>Generated: ${fmtDate(new Date())}</div>
+            <div>${doctorName}</div>
+          </footer>
+        </div>
+      </body>
+      </html>
+    `;
+  }, [user, form, medicationsList, testsList, t]);
+
+  const printFull = React.useCallback(() => {
+    const html = buildFullHTML();
+    printHTML(html);
+  }, [buildFullHTML]);
+
+  const printRx = React.useCallback(() => {
+    const html = buildRxHTML();
+    printHTML(html);
+  }, [buildRxHTML]);
 
   const dir = isArabic ? 'rtl' : 'ltr';
 
@@ -876,7 +1185,7 @@ export default function AddReportDialog({
                   >
                     <Grid container spacing={1.25} alignItems="center">
                       <Grid item xs={12} md={3.5}>
-                        {/* Drug dictionary autocomplete (freeSolo enabled, clearer option UI) */}
+                        {/* Drug dictionary autocomplete (freeSolo enabled) */}
                         <Autocomplete
                           freeSolo
                           autoHighlight
@@ -960,7 +1269,7 @@ export default function AddReportDialog({
                           }}
                           ListboxProps={{
                             sx: {
-                              maxHeight: 48 * 7, // ~7 rows
+                              maxHeight: 48 * 7,
                               '& .MuiAutocomplete-option': { alignItems: 'flex-start', py: 1 },
                             },
                           }}
@@ -1078,7 +1387,17 @@ export default function AddReportDialog({
           </Stack>
         </DialogContent>
 
-        <DialogActions sx={{ px: 2, py: 1.5 }}>
+        <DialogActions sx={{ px: 2, py: 1.5, gap: 1, flexWrap: 'wrap' }}>
+          {/* Print buttons */}
+          <Button onClick={printRx} variant="outlined">
+            {t('Print Rx & Tests', 'طباعة الوصفة والفحوصات')}
+          </Button>
+          <Button onClick={printFull} variant="outlined">
+            {t('Print Full Report', 'طباعة التقرير الكامل')}
+          </Button>
+
+          <Box sx={{ flex: 1 }} />
+
           <Button onClick={() => !submitting && onClose?.()} disabled={submitting}>
             {t('Cancel', 'إلغاء')}
           </Button>
