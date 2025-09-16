@@ -9,6 +9,9 @@ import {
 } from '@mui/material';
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import ToggleOnIcon from '@mui/icons-material/ToggleOn';
+import ToggleOffIcon from '@mui/icons-material/ToggleOff';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
@@ -43,6 +46,8 @@ const toSubStrings = (arr) => {
     })
     .filter(Boolean);
 };
+
+const makeId = () => `svc_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
 
 export default function DoctorDetailsPage() {
   const router = useRouter();
@@ -84,6 +89,14 @@ export default function DoctorDetailsPage() {
   const [specialtiesLoading, setSpecialtiesLoading] = React.useState(false);
   const [selectedSpecialty, setSelectedSpecialty] = React.useState(null); // one of specialties[] or null
 
+  // NEW: Extra services (saved on doctor doc -> extraServices[])
+  const [extraServices, setExtraServices] = React.useState([]); // [{id,name_ar,name_en?,price,active}]
+  const [newSvcName, setNewSvcName] = React.useState('');
+  const [newSvcPrice, setNewSvcPrice] = React.useState('');
+  const [editingId, setEditingId] = React.useState(null);
+  const [editName, setEditName] = React.useState('');
+  const [editPrice, setEditPrice] = React.useState('');
+
   const [loading, setLoading] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, message: '', severity: 'info' });
   const openSnack = (m, s = 'info') => setSnack({ open: true, message: m, severity: s });
@@ -118,7 +131,7 @@ export default function DoctorDetailsPage() {
     }
   }, []); // eslint-disable-line
 
-  /* ---------- prefill (load Arabic + images + hours + payment + preselect specialty) ---------- */
+  /* ---------- prefill (load Arabic + images + hours + payment + preselect specialty + extraServices) ---------- */
   const loadData = React.useCallback(async () => {
     if (!user?.uid) return;
     try {
@@ -154,6 +167,20 @@ export default function DoctorDetailsPage() {
       setWalletNumber(p.walletNumber || '');
       setBankName(p.bankName || '');
       setPaymentNotes(p.notes || '');
+
+      // NEW: load extra services (sanitize)
+      const extras = Array.isArray(d.extraServices) ? d.extraServices : [];
+      setExtraServices(
+        extras
+          .filter(Boolean)
+          .map((e) => ({
+            id: e.id || makeId(),
+            name_ar: e.name_ar || e.name || '',
+            name_en: e.name_en || '',
+            price: Number(e.price || 0) || 0,
+            active: e.active !== false,
+          }))
+      );
 
       // wait specialties then preselect
       const list = await spPromise;
@@ -394,6 +421,15 @@ export default function DoctorDetailsPage() {
           updatedAt: serverTimestamp(),
         },
 
+        // NEW: include extraServices as-is from state
+        extraServices: extraServices.map(e => ({
+          id: e.id,
+          name_ar: e.name_ar || '',
+          name_en: e.name_en || '',
+          price: Number(e.price || 0) || 0,
+          active: e.active !== false,
+        })),
+
         profileCompleted: true,
         updatedAt: new Date().toISOString(),
       };
@@ -406,6 +442,79 @@ export default function DoctorDetailsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /* ---------- Extra Services: CRUD helpers ---------- */
+  const persistExtras = async (next) => {
+    setExtraServices(next);
+    try {
+      await updateDoc(doc(db, 'doctors', user.uid), {
+        extraServices: next.map(e => ({
+          id: e.id,
+          name_ar: e.name_ar || '',
+          name_en: e.name_en || '',
+          price: Number(e.price || 0) || 0,
+          active: e.active !== false,
+        })),
+        updatedAt: serverTimestamp(),
+      });
+      openSnack('تم تحديث الخدمات الإضافية', 'success');
+    } catch {
+      // fallback create
+      await setDoc(doc(db, 'doctors', user.uid), {
+        extraServices: next.map(e => ({
+          id: e.id,
+          name_ar: e.name_ar || '',
+          name_en: e.name_en || '',
+          price: Number(e.price || 0) || 0,
+          active: e.active !== false,
+        })),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      openSnack('تم حفظ الخدمات الإضافية', 'success');
+    }
+  };
+
+  const addExtra = async () => {
+    const name = String(newSvcName || '').trim();
+    const price = Number(newSvcPrice);
+    if (!name) return openSnack('اكتب اسم الخدمة', 'warning');
+    if (!Number.isFinite(price) || price <= 0) return openSnack('أدخل سعرًا صحيحًا', 'warning');
+
+    const next = [
+      ...extraServices,
+      { id: makeId(), name_ar: name, name_en: '', price, active: true }
+    ];
+    setNewSvcName('');
+    setNewSvcPrice('');
+    await persistExtras(next);
+  };
+
+  const startEdit = (svc) => {
+    setEditingId(svc.id);
+    setEditName(svc.name_ar || svc.name_en || '');
+    setEditPrice(String(svc.price ?? ''));
+  };
+  const cancelEdit = () => { setEditingId(null); setEditName(''); setEditPrice(''); };
+
+  const saveEdit = async (svc) => {
+    const name = String(editName || '').trim();
+    const price = Number(editPrice);
+    if (!name) return openSnack('اكتب اسم الخدمة', 'warning');
+    if (!Number.isFinite(price) || price <= 0) return openSnack('أدخل سعرًا صحيحًا', 'warning');
+    const next = extraServices.map(e => e.id === svc.id ? { ...e, name_ar: name, price } : e);
+    await persistExtras(next);
+    cancelEdit();
+  };
+
+  const toggleActive = async (svc) => {
+    const next = extraServices.map(e => e.id === svc.id ? { ...e, active: !e.active } : e);
+    await persistExtras(next);
+  };
+
+  const deleteSvc = async (svc) => {
+    const next = extraServices.filter(e => e.id !== svc.id);
+    await persistExtras(next);
   };
 
   return (
@@ -666,6 +775,124 @@ export default function DoctorDetailsPage() {
             multiline minRows={2}
             fullWidth
           />
+        </Paper>
+
+        {/* NEW: Extra Services (Arabic name + price) */}
+        <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <Chip icon={<MonetizationOnIcon />} label="خدمات إضافية" color="primary" />
+          </Stack>
+
+          {/* Add new service */}
+          <Grid container spacing={1}>
+            <Grid item xs={12} md={7}>
+              <TextField
+                label="اسم الخدمة (عربي)"
+                value={newSvcName}
+                onChange={(e) => setNewSvcName(e.target.value)}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={7} md={3}>
+              <TextField
+                type="number"
+                label="السعر"
+                value={newSvcPrice}
+                onChange={(e) => setNewSvcPrice(e.target.value)}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={5} md={2} sx={{ display: 'flex', alignItems: 'stretch' }}>
+              <Button
+                onClick={addExtra}
+                variant="contained"
+                sx={{ borderRadius: 2, width: '100%' }}
+                disabled={!user?.uid}
+              >
+                إضافة
+              </Button>
+            </Grid>
+          </Grid>
+
+          {/* List services */}
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            {extraServices.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                لا توجد خدمات إضافية بعد.
+              </Typography>
+            ) : (
+              extraServices.map((svc) => {
+                const editing = editingId === svc.id;
+                return (
+                  <Paper key={svc.id} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
+                    {editing ? (
+                      <Grid container spacing={1} alignItems="center">
+                        <Grid item xs={12} md={7}>
+                          <TextField
+                            label="اسم الخدمة (عربي)"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            fullWidth
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={7} md={3}>
+                          <TextField
+                            type="number"
+                            label="السعر"
+                            value={editPrice}
+                            onChange={(e) => setEditPrice(e.target.value)}
+                            fullWidth
+                            size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={5} md={2}>
+                          <Stack direction="row" spacing={1}>
+                            <Button size="small" variant="contained" onClick={() => saveEdit(svc)}>حفظ</Button>
+                            <Button size="small" onClick={cancelEdit}>إلغاء</Button>
+                          </Stack>
+                        </Grid>
+                      </Grid>
+                    ) : (
+                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                          <Typography fontWeight={800} sx={{ maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {svc.name_ar || '—'}
+                          </Typography>
+                          <Chip
+                            label={`${Number(svc.price || 0)} ج.م`}
+                            size="small"
+                            sx={{ fontWeight: 700 }}
+                          />
+                          <Chip
+                            label={svc.active ? 'مفعل' : 'موقوف'}
+                            size="small"
+                            color={svc.active ? 'success' : 'default'}
+                            sx={{ fontWeight: 700 }}
+                          />
+                        </Stack>
+                        <Stack direction="row" spacing={0.5}>
+                          <IconButton aria-label="تبديل الحالة" onClick={() => toggleActive(svc)}>
+                            {svc.active ? <ToggleOnIcon color="success" /> : <ToggleOffIcon />}
+                          </IconButton>
+                          <IconButton aria-label="تعديل" onClick={() => startEdit(svc)}>
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton aria-label="حذف" onClick={() => deleteSvc(svc)}>
+                            <DeleteOutlineIcon color="error" />
+                          </IconButton>
+                        </Stack>
+                      </Stack>
+                    )}
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Alert severity="info" sx={{ mt: 1 }}>
+            ستكون هذه الخدمات الإضافية متاحة للمريض ليختار منها أثناء الحجز، وسيظهر إجمالي تقديري.
+          </Alert>
         </Paper>
 
         {/* Save Bar */}

@@ -19,6 +19,7 @@ import {
   Alert,
   ToggleButtonGroup,
   ToggleButton,
+  Switch,
 } from '@mui/material';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
@@ -27,6 +28,8 @@ import PeopleIcon from '@mui/icons-material/People';
 import CancelIcon from '@mui/icons-material/Cancel';
 import SaveIcon from '@mui/icons-material/Save';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -184,18 +187,89 @@ export default function ClinicReportsPage() {
   const [finRange, setFinRange] = React.useState('month'); // 'week' | 'month' | 'year'
   const [apptRevenue, setApptRevenue] = React.useState(0);
 
+  // ---------- NEW: Extra Services (doctor-configurable) ----------
+  // Will be saved under doctors/{uid}.extraServices : [{id,name_ar,name_en,price,active}]
+  const [extras, setExtras] = React.useState([]);
+  const [newExtraNameAr, setNewExtraNameAr] = React.useState('');
+  const [newExtraNameEn, setNewExtraNameEn] = React.useState('');
+  const [newExtraPrice, setNewExtraPrice] = React.useState('');
+
+  const addExtra = () => {
+    const name_ar = String(newExtraNameAr || '').trim();
+    const name_en = String(newExtraNameEn || '').trim() || name_ar;
+    const priceNum = Number(newExtraPrice);
+    if (!name_ar || !Number.isFinite(priceNum) || priceNum <= 0) {
+      setSnack({
+        open: true,
+        severity: 'warning',
+        message: isArabic ? 'أدخل اسم الخدمة باللغة العربية وسعرًا صحيحًا.' : 'Enter Arabic name and a valid price.',
+      });
+      return;
+    }
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setExtras((prev) => [...prev, { id, name_ar, name_en, price: priceNum, active: true }]);
+    setNewExtraNameAr('');
+    setNewExtraNameEn('');
+    setNewExtraPrice('');
+  };
+
+  const updateExtra = (id, patch) => {
+    setExtras((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  };
+
+  const deleteExtra = (id) => {
+    setExtras((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  const saveExtras = async () => {
+    if (!user?.uid) return;
+    try {
+      await updateDoc(doc(db, 'doctors', user.uid), {
+        extraServices: extras,
+        updatedAt: new Date().toISOString(),
+      });
+      setSnack({
+        open: true,
+        severity: 'success',
+        message: isArabic ? 'تم حفظ الخدمات الإضافية' : 'Extra services saved',
+      });
+    } catch (e) {
+      setSnack({
+        open: true,
+        severity: 'error',
+        message: e?.message || (isArabic ? 'تعذر حفظ الخدمات الإضافية' : 'Failed to save extra services'),
+      });
+    }
+  };
+  // ---------------------------------------------------------------
+
   React.useEffect(() => {
     if (!user?.uid) return;
     (async () => {
       setLoading(true);
       try {
-        // 1) load doctor price
+        // 1) load doctor price + extra services
         try {
           const dref = doc(db, 'doctors', user.uid);
           const dsnap = await getDoc(dref);
           if (dsnap.exists()) {
             const d = dsnap.data() || {};
             setCheckupPrice(Number(d.checkupPrice ?? 0));
+            // Load extras (if any)
+            const ex = Array.isArray(d.extraServices) ? d.extraServices : [];
+            // Backward compatibility: if you previously had plain "services" strings,
+            // we won't auto-convert them to priced extras here.
+            setExtras(
+              ex
+                .filter(Boolean)
+                .map((e) => ({
+                  id: e.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                  name_ar: e.name_ar || e.name || '',
+                  name_en: e.name_en || e.name || e.name_ar || '',
+                  price: Number(e.price || 0),
+                  active: e.active !== false,
+                }))
+            );
           }
         } catch {}
 
@@ -415,6 +489,116 @@ export default function ClinicReportsPage() {
                   </Button>
                 </Stack>
               </Paper>
+
+              {/* ---------- NEW: Extra Services Editor ---------- */}
+              <Paper sx={{ mt: 2, p: 2, borderRadius: 3 }} elevation={0}>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>
+                  {isArabic ? 'الخدمات الإضافية (يختارها المريض أثناء الحجز)' : 'Extra Services (Selectable by patient during booking)'}
+                </Typography>
+
+                {/* Add new extra service */}
+                <Stack
+                  direction={{ xs: 'column', md: isArabic ? 'row-reverse' : 'row' }}
+                  spacing={1}
+                  sx={{ mb: 1 }}
+                >
+                  <TextField
+                    label={isArabic ? 'اسم الخدمة (عربي)' : 'Service name (Arabic)'}
+                    value={newExtraNameAr}
+                    onChange={(e) => setNewExtraNameAr(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label={isArabic ? 'اسم الخدمة (إنجليزي)' : 'Service name (English)'}
+                    value={newExtraNameEn}
+                    onChange={(e) => setNewExtraNameEn(e.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label={isArabic ? 'السعر' : 'Price'}
+                    type="number"
+                    value={newExtraPrice}
+                    onChange={(e) => setNewExtraPrice(e.target.value)}
+                    sx={{ minWidth: 160 }}
+                  />
+                  <Button
+                    startIcon={<AddIcon />}
+                    variant="outlined"
+                    onClick={addExtra}
+                    sx={{ whiteSpace: 'nowrap' }}
+                  >
+                    {isArabic ? 'إضافة' : 'Add'}
+                  </Button>
+                </Stack>
+
+                <Divider sx={{ my: 1 }} />
+
+                {/* List / edit existing extras */}
+                {extras.length === 0 ? (
+                  <Typography color="text.secondary" sx={{ py: 1 }}>
+                    {isArabic ? 'لا توجد خدمات إضافية بعد.' : 'No extra services yet.'}
+                  </Typography>
+                ) : (
+                  <Stack spacing={1}>
+                    {extras.map((e) => (
+                      <Paper
+                        key={e.id}
+                        variant="outlined"
+                        sx={{
+                          p: 1,
+                          borderRadius: 2,
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr 140px auto',
+                          gap: 8,
+                          alignItems: 'center',
+                          ...(isArabic && { direction: 'rtl' }),
+                        }}
+                      >
+                        <TextField
+                          size="small"
+                          label={isArabic ? 'الاسم (عربي)' : 'Name (Arabic)'}
+                          value={e.name_ar}
+                          onChange={(ev) => updateExtra(e.id, { name_ar: ev.target.value })}
+                        />
+                        <TextField
+                          size="small"
+                          label={isArabic ? 'الاسم (إنجليزي)' : 'Name (English)'}
+                          value={e.name_en}
+                          onChange={(ev) => updateExtra(e.id, { name_en: ev.target.value })}
+                        />
+                        <TextField
+                          size="small"
+                          type="number"
+                          label={isArabic ? 'السعر' : 'Price'}
+                          value={e.price}
+                          onChange={(ev) => updateExtra(e.id, { price: Number(ev.target.value) })}
+                        />
+                        <Stack direction="row" alignItems="center" spacing={1} justifyContent={isArabic ? 'flex-start' : 'flex-end'}>
+                          <Stack direction="row" alignItems="center" spacing={1}>
+                            <Typography variant="caption" color="text.secondary">
+                              {isArabic ? 'مفعّل' : 'Active'}
+                            </Typography>
+                            <Switch
+                              checked={e.active !== false}
+                              onChange={(ev) => updateExtra(e.id, { active: ev.target.checked })}
+                            />
+                          </Stack>
+                          <IconButton aria-label="delete" onClick={() => deleteExtra(e.id)}>
+                            <DeleteIcon />
+                          </IconButton>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+
+                <Stack direction="row" justifyContent={isArabic ? 'flex-start' : 'flex-end'} sx={{ mt: 1 }}>
+                  <Button startIcon={<SaveIcon />} variant="contained" onClick={saveExtras}>
+                    {isArabic ? 'حفظ الخدمات' : 'Save Services'}
+                  </Button>
+                </Stack>
+              </Paper>
+              {/* ---------- /Extra Services Editor ---------- */}
 
               {/* Financial chart (appointments-only) */}
               <Paper sx={{ mt: 2, p: 2, borderRadius: 3 }} elevation={0}>

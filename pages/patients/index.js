@@ -1,3 +1,4 @@
+// /pages/patients/index.jsx
 'use client';
 import * as React from 'react';
 import { useRouter } from 'next/router';
@@ -57,6 +58,7 @@ export default function PatientsIndexPage() {
   const [msgBody, setMsgBody] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
+  /* ---------- load: include all booked (phones + patientIds) ---------- */
   React.useEffect(() => {
     if (!user?.uid) return;
     const uid = String(user.uid);
@@ -67,7 +69,7 @@ export default function PatientsIndexPage() {
       try {
         const patientsCol = collection(db, 'patients');
 
-        // A) direct & associated lists
+        // (A) docs registered by doctor or already associated
         const [snapRegistered, snapAssoc] = await Promise.all([
           getDocs(query(patientsCol, where('registeredBy', '==', uid))),
           getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid))),
@@ -76,59 +78,88 @@ export default function PatientsIndexPage() {
         const rawDocs = new Map();
         const push = (d) => {
           const data = { id: d.id, ...d.data() };
-          // hide any record already merged to the canonical (phone-id) doc
+          // ignore records that have been merged into a canonical doc
           if (data.mergedInto) return;
           rawDocs.set(d.id, data);
         };
         snapRegistered.docs.forEach(push);
         snapAssoc.docs.forEach(push);
 
-        // B) ensure anyone who booked appears (by phone)
+        // (B) collect all booked patients (phones + patientIds)
         const apptCol = collection(db, 'appointments');
         const [snapA, snapB] = await Promise.all([
           getDocs(query(apptCol, where('doctorId', '==', uid))),
           getDocs(query(apptCol, where('doctorUID', '==', uid))),
         ]);
+
         const bookedPhones = new Set();
-        const pickPhone = (a) => {
-          const p = normalizePhone(a.patientPhone || a.phone || a.patient_phone || a.patientUid || a.patientUID);
-          if (p) bookedPhones.add(p);
-        };
-        [...snapA.docs, ...snapB.docs].forEach(s => pickPhone(s.data()));
+        const bookedIds = new Set();
 
-        // C) group by normalized phone to de-dupe
+        const collectFromAppt = (a) => {
+          // phones from explicit phone fields only
+          const phone = normalizePhone(a.patientPhone || a.phone || a.patient_phone);
+          if (phone) bookedPhones.add(phone);
+
+          // ids from id/uid variants
+          const pid = String(a.patientId || a.patientID || a.patientUid || a.patientUID || '').trim();
+          if (pid) bookedIds.add(pid);
+        };
+        [...snapA.docs, ...snapB.docs].forEach(s => collectFromAppt(s.data()));
+
+        // (C) build maps by id and by phone; choose best record per key
+        const byId = new Map();
         const byPhone = new Map();
-        const choose = (prev, cur, phone) => {
+        const ts = (x) => (x?.updatedAt?.seconds || x?.createdAt?.seconds || 0);
+        const score = (x) => (x?.name ? 1 : 0) + (x?.phone || x?.mobile ? 1 : 0);
+        const choose = (prev, cur) => {
           if (!prev) return cur;
-          // prefer phone-id doc
-          if (prev.id === phone && cur.id !== phone) return prev;
-          if (cur.id === phone && prev.id !== phone) return cur;
-          // else prefer newer
-          const ts = (x) => x.updatedAt?.seconds || x.createdAt?.seconds || 0;
-          return ts(cur) >= ts(prev) ? cur : prev;
+          const sPrev = score(prev), sCur = score(cur);
+          if (sCur !== sPrev) return sCur > sPrev ? cur : prev;
+          return ts(cur) >= ts(prev) ? cur : prev; // newer wins
         };
 
+        // seed with existing patient docs
         for (const row of rawDocs.values()) {
-          const phone = normalizePhone(row.phone || row.mobile || row.id);
-          const key = phone || row.id;
-          byPhone.set(key, choose(byPhone.get(key), row, key));
+          const phone = normalizePhone(row.phone || row.mobile);
+          byId.set(row.id, choose(byId.get(row.id), row));
+          if (phone) byPhone.set(phone, choose(byPhone.get(phone), row));
         }
 
+        // ensure EVERY booked phone exists
         for (const phone of bookedPhones) {
           if (!byPhone.has(phone)) {
-            byPhone.set(phone, {
-              id: phone,
+            const placeholder = {
+              id: phone, // use phone as id for routing when no doc exists
               name: isArabic ? 'بدون اسم' : 'Unnamed',
               phone,
               mobile: phone,
-            });
+            };
+            byPhone.set(phone, placeholder);
           }
         }
 
-        const rows = Array.from(byPhone.values());
-        rows.sort((a, b) =>
+        // ensure EVERY booked patientId exists
+        for (const pid of bookedIds) {
+          if (!byId.has(pid)) {
+            const placeholder = {
+              id: pid,
+              name: isArabic ? 'بدون اسم' : 'Unnamed',
+            };
+            byId.set(pid, placeholder);
+          }
+        }
+
+        // (D) merge (prefer richer records), then sort
+        const merged = new Map();
+        for (const v of [...byId.values(), ...byPhone.values()]) {
+          const key = v.id || v.phone || v.mobile;
+          merged.set(key, choose(merged.get(key), v));
+        }
+
+        const rows = Array.from(merged.values()).sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
+
         setPatients(rows);
       } catch (e) {
         console.error(e);
