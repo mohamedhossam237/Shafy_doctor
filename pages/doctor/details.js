@@ -18,38 +18,30 @@ import Autocomplete from '@mui/material/Autocomplete';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
-import { db } from '@/lib/firebase'; // if your app uses "@/firebase", change this import
+import { db } from '@/lib/firebase';
 import {
   doc, getDoc, setDoc, updateDoc, serverTimestamp,
   collection, getDocs, query, where
 } from 'firebase/firestore';
 
-/* dialogs already used in your project */
-import EditSubspecialtiesDialog from '@/components/Profile/EditSubspecialtiesDialog';
+/* dialog used for hours only (we remove the subspecialties dialog) */
 import EditHoursDialog from '@/components/Profile/EditHoursDialog';
 
 /* ---------- helpers ---------- */
 const isEgMobile = (v) => /^01[0-25]\d{8}$/.test(String(v || '').trim());
 const isInstaPayId = (v) => /@/.test(String(v || ''));
 
-/** Normalize a subspecialty item to a safe Arabic label (never return an object). */
-const makeSubArLabel = (s) => {
-  if (s == null) return '';
-  if (typeof s === 'string' || typeof s === 'number') return String(s);
-  return s.name_ar || s.label || String(s.id ?? '');
-};
-
-/** Normalize subspecialty detail for saving (ensure both ar & en, en may be filled later). */
-const normalizeSubDetail = (s) => {
-  if (s && typeof s === 'object') {
-    return {
-      id: s.id,
-      name_en: s.name_en ?? s.label ?? String(s.id ?? ''),
-      name_ar: s.name_ar ?? s.label ?? String(s.id ?? ''),
-    };
-  }
-  // primitive fallback
-  return { id: s, name_en: String(s ?? ''), name_ar: String(s ?? '') };
+/** Convert maybe-array input (strings/objects) to clean array of Arabic strings */
+const toSubStrings = (arr) => {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((s) => {
+      if (!s) return '';
+      if (typeof s === 'string' || typeof s === 'number') return String(s).trim();
+      // object shape from older version
+      return (s.name_ar || s.label || String(s.id ?? '')).trim();
+    })
+    .filter(Boolean);
 };
 
 export default function DoctorDetailsPage() {
@@ -72,11 +64,10 @@ export default function DoctorDetailsPage() {
   });
 
   const [images, setImages] = React.useState([]);                 // profileImages (URL strings)
-  const [subspecialties, setSubspecialties] = React.useState([]); // array of objects or strings
+  const [subspecialties, setSubspecialties] = React.useState([]); // array of Arabic strings only
   const [workingHours, setWorkingHours] = React.useState(null);   // object from dialog
 
   // dialogs
-  const [openSubs, setOpenSubs] = React.useState(false);
   const [openHours, setOpenHours] = React.useState(false);
 
   // payment
@@ -105,11 +96,11 @@ export default function DoctorDetailsPage() {
     try {
       setSpecialtiesLoading(true);
       // No orderBy here => no composite index needed
-      const q = query(
+      const qy = query(
         collection(db, 'specialties'),
         where('active', '==', true)
       );
-      const snap = await getDocs(q);
+      const snap = await getDocs(qy);
       // Client-side Arabic sort to replace orderBy('label_ar')
       const list = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
@@ -150,7 +141,9 @@ export default function DoctorDetailsPage() {
       }));
 
       setImages(Array.isArray(d.profileImages) ? d.profileImages.filter(Boolean) : []);
-      setSubspecialties(Array.isArray(d.subspecialties_detail) ? d.subspecialties_detail.filter(Boolean) : []);
+      // Normalize subspecialties to Arabic strings
+      const subs = toSubStrings(d.subspecialties_detail || d.subspecialties || []);
+      setSubspecialties(subs);
       setWorkingHours(d.working_hours || null);
 
       const p = d.payment || {};
@@ -324,10 +317,8 @@ export default function DoctorDetailsPage() {
       return openSnack('أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).', 'warning');
     }
 
-    // Build the list of Arabic subspecialty labels
-    const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : [])
-      .filter(Boolean)
-      .map((s) => makeSubArLabel(s));
+    // Arabic subspecialty list already strings
+    const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : []).map((s) => String(s || '').trim()).filter(Boolean);
 
     setLoading(true);
     try {
@@ -352,14 +343,16 @@ export default function DoctorDetailsPage() {
         translations?.specialty_en ||
         String(selectedSpecialty?.label_ar || '').trim();
 
-      const subs_en_list = Array.isArray(translations?.subspecialties_en) ? translations.subspecialties_en : subs_ar_list;
+      const subs_en_list = Array.isArray(translations?.subspecialties_en)
+        ? translations.subspecialties_en.map((s) => String(s || '').trim())
+        : subs_ar_list;
 
-      // 2) Build subspecialties_detail with English filled (preserve existing IDs if any)
-      const subs_detail = (Array.isArray(subspecialties) ? subspecialties : []).map((s, i) => {
-        const base = normalizeSubDetail(s);
-        const enName = subs_en_list?.[i] || base.name_en || base.name_ar;
-        return { ...base, name_en: String(enName || '').trim() };
-      });
+      // 2) Build subspecialties_detail from strings
+      const subs_detail = subs_ar_list.map((ar, i) => ({
+        id: ar,                    // use Arabic label as id (stable enough for now)
+        name_ar: ar,
+        name_en: subs_en_list?.[i] || ar,
+      }));
 
       // 3) Save payload with both Arabic and English + specialty_key
       const payload = {
@@ -382,8 +375,8 @@ export default function DoctorDetailsPage() {
         checkupPrice: form.checkupPrice ? Number(form.checkupPrice) : 0,
         phone: String(form.phone || '').trim(),
 
-        // subspecialties (ids) + details
-        subspecialties: subspecialties.map((s) => (typeof s === 'object' ? s.id : s)),
+        // subspecialties (Arabic strings) + details
+        subspecialties: subs_ar_list,
         subspecialties_detail: subs_detail,
 
         // hours
@@ -555,23 +548,24 @@ export default function DoctorDetailsPage() {
             sx={{ mb: 1.5 }}
           />
 
-          <Button
-            variant="outlined"
-            startIcon={<EditIcon />}
-            onClick={() => setOpenSubs(true)}
-            sx={{ borderRadius: 2 }}
-          >
-            تعديل التخصصات الفرعية
-          </Button>
-
-          {Array.isArray(subspecialties) && subspecialties.length > 0 && (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-              {subspecialties.map((s, i) => {
-                const keyVal = typeof s === 'object' ? (s?.id ?? i) : s ?? i;
-                return <Chip key={String(keyVal)} label={makeSubArLabel(s)} />;
-              })}
-            </Stack>
-          )}
+          {/* Subspecialties as TextField (comma-separated), replaces dialog/checkboxes */}
+          <TextField
+            label="التخصصات الفرعية (اكتبها مفصولة بفواصل)"
+            value={subspecialties.join('، ')}
+            onChange={(e) => {
+              // accept both Arabic '،' and English ',' separators
+              const raw = e.target.value;
+              const arr = raw
+                .split(/,|،/g)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              setSubspecialties(arr);
+            }}
+            fullWidth
+            multiline
+            minRows={2}
+            placeholder="مثال: أسنان الأطفال، التركيبات، علاج الجذور"
+          />
         </Paper>
 
         {/* Clinic Hours */}
@@ -682,14 +676,6 @@ export default function DoctorDetailsPage() {
         </Box>
 
         {/* dialogs */}
-        <EditSubspecialtiesDialog
-          open={openSubs}
-          onClose={() => setOpenSubs(false)}
-          doctorUID={user?.uid || 'temp'}
-          isArabic={true}
-          initialSelected={subspecialties}
-          onSaved={(arr) => { setSubspecialties(arr || []); setOpenSubs(false); }}
-        />
         <EditHoursDialog
           open={openHours}
           onClose={() => setOpenHours(false)}

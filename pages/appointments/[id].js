@@ -20,11 +20,12 @@ import {
   Grid,
   TextField,
   MenuItem,
-  IconButton,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EventIcon from '@mui/icons-material/Event';
@@ -43,6 +44,9 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import ImageIcon from '@mui/icons-material/Image';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
@@ -63,7 +67,7 @@ import {
 /* ---------------- helpers ---------------- */
 
 const pad = (n) => String(n).padStart(2, '0');
-const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 function toDate(val) {
   if (!val) return null;
@@ -81,8 +85,11 @@ function fmtDateTime(dt) {
   const d = toDate(dt);
   if (!d) return '—';
   return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit'
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(d);
 }
 
@@ -96,7 +103,7 @@ function apptTimeMinutes(appt) {
   if (appt?.time) {
     const [h, m] = String(appt.time).split(':').map((x) => parseInt(x, 10));
     return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-  }
+    }
   const d = toDate(appt?.appointmentDate);
   if (!d) return 24 * 60;
   return d.getHours() * 60 + d.getMinutes();
@@ -131,11 +138,22 @@ function fmtReportDate(d) {
   const dt = toDate(d);
   if (!dt) return '—';
   return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit'
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(dt);
 }
+
 const currencyLabel = (isAr) => (isAr ? 'ج.م' : 'EGP');
+
+const safeNum = (v) => {
+  const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const uid = () => Math.random().toString(36).slice(2, 10);
 
 /* ---------------- mini view dialog for a report ---------------- */
 
@@ -144,7 +162,8 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
 
   const t = (en, ar) => (isAr ? ar : en);
   const meds =
-    Array.isArray(report?.medicationsList) && report.medicationsList.some(m => Object.values(m || {}).some(v => String(v || '').trim()))
+    Array.isArray(report?.medicationsList) &&
+    report.medicationsList.some((m) => Object.values(m || {}).some((v) => String(v || '').trim()))
       ? report.medicationsList
       : null;
 
@@ -175,7 +194,9 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
               {fmtReportDate(report?.date)}
             </Typography>
           </Stack>
-          <Button onClick={onClose} variant="outlined">{t('Close', 'إغلاق')}</Button>
+          <Button onClick={onClose} variant="outlined">
+            {t('Close', 'إغلاق')}
+          </Button>
         </Stack>
 
         <Divider />
@@ -197,25 +218,33 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
         <Grid container spacing={1.25}>
           {report?.chiefComplaint && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Chief Complaint', 'الشكوى الرئيسية')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Chief Complaint', 'الشكوى الرئيسية')}
+              </Typography>
               <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.chiefComplaint}</Typography>
             </Grid>
           )}
           {report?.findings && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Findings / Examination', 'النتائج / الفحص')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Findings / Examination', 'النتائج / الفحص')}
+              </Typography>
               <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.findings}</Typography>
             </Grid>
           )}
           {report?.diagnosis && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Diagnosis', 'التشخيص')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Diagnosis', 'التشخيص')}
+              </Typography>
               <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.diagnosis}</Typography>
             </Grid>
           )}
           {report?.procedures && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Procedures', 'الإجراءات')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Procedures', 'الإجراءات')}
+              </Typography>
               <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.procedures}</Typography>
             </Grid>
           )}
@@ -223,7 +252,9 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
           {/* Medications */}
           {(meds || report?.medications) && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Medications / Prescriptions', 'الأدوية / الوصفات')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Medications / Prescriptions', 'الأدوية / الوصفات')}
+              </Typography>
               {meds ? (
                 <Stack component="ul" sx={{ pl: 3, my: 0 }}>
                   {meds.map((m, i) => {
@@ -233,8 +264,14 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
                       m?.frequency,
                       m?.duration && `× ${m.duration}`,
                       m?.notes && `- ${m.notes}`,
-                    ].filter(Boolean).join(' ');
-                    return <li key={i}><Typography sx={{ whiteSpace: 'pre-wrap' }}>{parts || '—'}</Typography></li>;
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <li key={i}>
+                        <Typography sx={{ whiteSpace: 'pre-wrap' }}>{parts || '—'}</Typography>
+                      </li>
+                    );
                   })}
                 </Stack>
               ) : (
@@ -244,9 +281,11 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
           )}
 
           {/* Vitals */}
-          {report?.vitals && Object.values(report.vitals).some(v => String(v || '').trim()) && (
+          {report?.vitals && Object.values(report.vitals).some((v) => String(v || '').trim()) && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Vitals', 'العلامات الحيوية')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Vitals', 'العلامات الحيوية')}
+              </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap">
                 {report.vitals.bp && <Chip label={`${t('BP', 'ضغط')}: ${report.vitals.bp}`} />}
                 {report.vitals.hr && <Chip label={`${t('HR', 'نبض')}: ${report.vitals.hr}`} />}
@@ -271,13 +310,18 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
           {/* Attachments */}
           {Array.isArray(report?.attachments) && report.attachments.length > 0 && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Attachments', 'المرفقات')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Attachments', 'المرفقات')}
+              </Typography>
               <Stack direction="row" spacing={1} flexWrap="wrap">
                 {report.attachments.map((url, i) => (
                   <a key={i} href={url} target="_blank" rel="noopener noreferrer">
                     <Box
                       sx={{
-                        width: 120, height: 80, borderRadius: 1.5, overflow: 'hidden',
+                        width: 120,
+                        height: 80,
+                        borderRadius: 1.5,
+                        overflow: 'hidden',
                         border: (th) => `1px solid ${th.palette.divider}`,
                         backgroundImage: `url(${url})`,
                         backgroundSize: 'cover',
@@ -293,13 +337,89 @@ function ReportViewDialog({ open, onClose, report, isAr }) {
           {/* Notes */}
           {report?.notes && (
             <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Additional Notes / Plan', 'ملاحظات إضافية / خطة')}</Typography>
+              <Typography variant="subtitle2" fontWeight={800}>
+                {t('Additional Notes / Plan', 'ملاحظات إضافية / خطة')}
+              </Typography>
               <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.notes}</Typography>
             </Grid>
           )}
         </Grid>
       </Stack>
     </Paper>
+  );
+}
+
+/* ---------------- Extra Fees Editor ---------------- */
+
+function ExtraFeeDialog({ open, onClose, onSave, initial, isAr }) {
+  const t = (en, ar) => (isAr ? ar : en);
+  const [title, setTitle] = React.useState('');
+  const [amount, setAmount] = React.useState('');
+  const [note, setNote] = React.useState('');
+
+  React.useEffect(() => {
+    if (!open) return;
+    setTitle(initial?.title || '');
+    setAmount(String(initial?.amount ?? ''));
+    setNote(initial?.note || '');
+  }, [open, initial]);
+
+  const handleSave = () => {
+    const payload = {
+      id: initial?.id || uid(),
+      title: title.trim(),
+      amount: safeNum(amount),
+      note: note.trim(),
+      updatedAt: new Date().toISOString(),
+      createdAt: initial?.createdAt || new Date().toISOString(),
+    };
+    onSave?.(payload);
+  };
+
+  const disabled = !title.trim() || !Number.isFinite(safeNum(amount)) || safeNum(amount) <= 0;
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ fontWeight: 900 }}>
+        {initial ? t('Edit Extra Fee', 'تعديل تكلفة إضافية') : t('Add Extra Fee', 'إضافة تكلفة إضافية')}
+      </DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={1.25}>
+          <TextField
+            label={t('Title / Reason', 'العنوان / السبب')}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label={t('Amount', 'المبلغ')}
+            type="number"
+            inputProps={{ step: '0.01', min: '0' }}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            fullWidth
+          />
+          <TextField
+            label={t('Notes (optional)', 'ملاحظات (اختياري)')}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            fullWidth
+            multiline
+            minRows={2}
+          />
+          <Alert severity="info">
+            {t('This will be saved on the appointment and included in the total.',
+               'سيتم حفظ هذا على الموعد وسيُضاف إلى الإجمالي.')}
+          </Alert>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>{t('Cancel', 'إلغاء')}</Button>
+        <Button variant="contained" onClick={handleSave} disabled={disabled}>
+          {t('Save', 'حفظ')}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -319,10 +439,10 @@ function UpdateAppointmentDialog({
   const [timeStr, setTimeStr] = React.useState('');
   const [status, setStatus] = React.useState('pending');
   const statusOptions = [
-    { v: 'pending',    label: t('Pending', 'قيد الانتظار') },
-    { v: 'confirmed',  label: t('Confirmed', 'مؤكد') },
-    { v: 'completed',  label: t('Completed', 'تم') },
-    { v: 'cancelled',  label: t('Cancelled', 'أُلغي') },
+    { v: 'pending', label: t('Pending', 'قيد الانتظار') },
+    { v: 'confirmed', label: t('Confirmed', 'مؤكد') },
+    { v: 'completed', label: t('Completed', 'تم') },
+    { v: 'cancelled', label: t('Cancelled', 'أُلغي') },
   ];
 
   React.useEffect(() => {
@@ -361,9 +481,7 @@ function UpdateAppointmentDialog({
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} fullWidth maxWidth="sm">
-      <DialogTitle sx={{ fontWeight: 900 }}>
-        {t('Update Appointment', 'تحديث الموعد')}
-      </DialogTitle>
+      <DialogTitle sx={{ fontWeight: 900 }}>{t('Update Appointment', 'تحديث الموعد')}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={1.25}>
           <TextField
@@ -382,15 +500,11 @@ function UpdateAppointmentDialog({
             onChange={(e) => setTimeStr(e.target.value)}
             fullWidth
           />
-          <TextField
-            select
-            label={t('Status', 'الحالة')}
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            fullWidth
-          >
+          <TextField select label={t('Status', 'الحالة')} value={status} onChange={(e) => setStatus(e.target.value)} fullWidth>
             {statusOptions.map((opt) => (
-              <MenuItem key={opt.v} value={opt.v}>{opt.label}</MenuItem>
+              <MenuItem key={opt.v} value={opt.v}>
+                {opt.label}
+              </MenuItem>
             ))}
           </TextField>
           <Alert severity="info">
@@ -416,7 +530,7 @@ function UpdateAppointmentDialog({
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
   const { id } = router.query || {};
-  const isAr = (String(router?.query?.lang || '').toLowerCase() === 'ar');
+  const isAr = String(router?.query?.lang || '').toLowerCase() === 'ar';
   const t = React.useCallback((en, ar) => (isAr ? ar : en), [isAr]);
 
   const [loading, setLoading] = React.useState(true);
@@ -445,11 +559,15 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   // update appointment dialog
   const [updateOpen, setUpdateOpen] = React.useState(false);
 
+  // extra fees state
+  const [extraDialogOpen, setExtraDialogOpen] = React.useState(false);
+  const [editingFee, setEditingFee] = React.useState(null);
+
   const statusOptions = [
-    { v: 'pending',    label: t('Pending', 'قيد الانتظار') },
-    { v: 'confirmed',  label: t('Confirmed', 'مؤكد') },
-    { v: 'completed',  label: t('Completed', 'تم') },
-    { v: 'cancelled',  label: t('Cancelled', 'أُلغي') },
+    { v: 'pending', label: t('Pending', 'قيد الانتظار') },
+    { v: 'confirmed', label: t('Confirmed', 'مؤكد') },
+    { v: 'completed', label: t('Completed', 'تم') },
+    { v: 'cancelled', label: t('Cancelled', 'أُلغي') },
   ];
 
   // Load the appointment
@@ -497,7 +615,9 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     }
   }, [id, t]);
 
-  React.useEffect(() => { fetchReports(); }, [fetchReports]);
+  React.useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
 
   // Compute queue number
   React.useEffect(() => {
@@ -555,7 +675,9 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [appt, queueNo]);
 
   const backHref = `/appointments${isAr ? '?lang=ar' : ''}`;
@@ -570,10 +692,14 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         updatedAt: serverTimestamp(),
       });
       setStatus(newStatus);
-      setAppt((prev) => prev ? { ...prev, status: newStatus } : prev);
+      setAppt((prev) => (prev ? { ...prev, status: newStatus } : prev));
       setSnack({ open: true, severity: 'success', msg: t('Status updated', 'تم تحديث الحالة') });
     } catch (e) {
-      setSnack({ open: true, severity: 'error', msg: e?.message || t('Failed to update status', 'تعذر تحديث الحالة') });
+      setSnack({
+        open: true,
+        severity: 'error',
+        msg: e?.message || t('Failed to update status', 'تعذر تحديث الحالة'),
+      });
     } finally {
       setSavingStatus(false);
     }
@@ -589,18 +715,79 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     fetchReports();
   }, [fetchReports, t]);
 
-  // Pull normalized payment data (saved by booking page)
+  // Payment-related derived values
   const payment = appt?.payment || {};
   const price = appt?.doctorPrice ?? null;
   const priceCurrency = appt?.doctorPriceCurrency || payment?.currency || 'EGP';
   const paymentProofURL = appt?.paymentProofURL || '';
+
+  // ---- Extra Fees helpers ----
+  const extraFees = React.useMemo(() => Array.isArray(appt?.extraFees) ? appt.extraFees : [], [appt?.extraFees]);
+  const extraTotal = React.useMemo(() => extraFees.reduce((s, it) => s + safeNum(it?.amount), 0), [extraFees]);
+  const grandTotal = React.useMemo(() => (safeNum(price) || 0) + extraTotal, [price, extraTotal]);
+
+  const persistExtraFees = async (list) => {
+    if (!appt?.id) return;
+    try {
+      await updateDoc(doc(db, 'appointments', appt.id), {
+        extraFees: list,
+        extraFeesTotal: list.reduce((s, it) => s + safeNum(it?.amount), 0),
+        updatedAt: serverTimestamp(),
+      });
+      setAppt((prev) =>
+        prev
+          ? {
+              ...prev,
+              extraFees: list,
+              extraFeesTotal: list.reduce((s, it) => s + safeNum(it?.amount), 0),
+            }
+          : prev
+      );
+      setSnack({ open: true, severity: 'success', msg: t('Extra fees updated', 'تم تحديث التكاليف الإضافية') });
+    } catch (e) {
+      setSnack({
+        open: true,
+        severity: 'error',
+        msg: e?.message || t('Failed to update extra fees', 'تعذر تحديث التكاليف الإضافية'),
+      });
+    }
+  };
+
+  const openAddFee = () => {
+    setEditingFee(null);
+    setExtraDialogOpen(true);
+  };
+  const openEditFee = (fee) => {
+    setEditingFee(fee);
+    setExtraDialogOpen(true);
+  };
+  const deleteFee = async (feeId) => {
+    const list = extraFees.filter((f) => f.id !== feeId);
+    await persistExtraFees(list);
+  };
+  const saveFee = async (payload) => {
+    let list;
+    if (editingFee) {
+      list = extraFees.map((f) => (f.id === editingFee.id ? payload : f));
+    } else {
+      list = [...extraFees, payload];
+    }
+    await persistExtraFees(list);
+    setExtraDialogOpen(false);
+    setEditingFee(null);
+  };
 
   return (
     <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
       <Container maxWidth="sm" sx={{ py: { xs: 1, md: 2 } }}>
         {/* Back */}
         <Box sx={{ mb: 1, display: 'flex', justifyContent: isAr ? 'flex-end' : 'flex-start' }}>
-          <Button component={Link} href={backHref} startIcon={isAr ? null : <ArrowBackIcon />} endIcon={isAr ? <ArrowBackIcon /> : null}>
+          <Button
+            component={Link}
+            href={backHref}
+            startIcon={isAr ? null : <ArrowBackIcon />}
+            endIcon={isAr ? <ArrowBackIcon /> : null}
+          >
             {t('Back to list', 'العودة للقائمة')}
           </Button>
         </Box>
@@ -608,7 +795,9 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         {/* Content */}
         <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: 3 }}>
           {loading ? (
-            <Stack alignItems="center" spacing={1}><CircularProgress size={24} /></Stack>
+            <Stack alignItems="center" spacing={1}>
+              <CircularProgress size={24} />
+            </Stack>
           ) : err ? (
             <Alert severity="error">{err}</Alert>
           ) : !appt ? null : (
@@ -632,8 +821,8 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                       {t('Appointment Details', 'تفاصيل الموعد')}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {t('Queue number for the day', 'الرقم التسلسلي لليوم')}:
-                      &nbsp;<strong>{queueNo ?? t('N/A', 'غير متاح')}</strong>
+                      {t('Queue number for the day', 'الرقم التسلسلي لليوم')}:&nbsp;
+                      <strong>{queueNo ?? t('N/A', 'غير متاح')}</strong>
                       {savingQueue && <>&nbsp;•&nbsp;{t('saving…', 'جارٍ الحفظ…')}</>}
                     </Typography>
                   </Stack>
@@ -649,9 +838,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   <Chip
                     icon={<DescriptionIcon />}
                     label={
-                      reportsLoading
-                        ? t('Loading reports…', 'جارٍ تحميل التقارير…')
-                        : `${t('Reports', 'التقارير')}: ${reports.length}`
+                      reportsLoading ? t('Loading reports…', 'جارٍ تحميل التقارير…') : `${t('Reports', 'التقارير')}: ${reports.length}`
                     }
                     variant="outlined"
                     sx={{ borderRadius: 2 }}
@@ -671,22 +858,12 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   )}
 
                   {/* Add Report */}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<DescriptionIcon />}
-                    onClick={() => setReportOpen(true)}
-                  >
+                  <Button size="small" variant="outlined" startIcon={<DescriptionIcon />} onClick={() => setReportOpen(true)}>
                     {t('Add Report', 'إضافة تقرير')}
                   </Button>
 
                   {/* Update Appointment */}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ScheduleIcon />}
-                    onClick={() => setUpdateOpen(true)}
-                  >
+                  <Button size="small" variant="outlined" startIcon={<ScheduleIcon />} onClick={() => setUpdateOpen(true)}>
                     {t('Update Appointment', 'تحديث الموعد')}
                   </Button>
                 </Stack>
@@ -703,7 +880,9 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   sx={{ minWidth: 200 }}
                 >
                   {statusOptions.map((opt) => (
-                    <MenuItem key={opt.v} value={opt.v}>{opt.label}</MenuItem>
+                    <MenuItem key={opt.v} value={opt.v}>
+                      {opt.label}
+                    </MenuItem>
                   ))}
                 </TextField>
                 {savingStatus && <CircularProgress size={18} />}
@@ -717,12 +896,8 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                       <EventIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Date/Time', 'التاريخ/الوقت')}:
-                      </Typography>
-                      <Typography color="text.secondary">
-                        {fmtFullDateTime(appt)}
-                      </Typography>
+                      <Typography sx={{ fontWeight: 700 }}>{t('Date/Time', 'التاريخ/الوقت')}:</Typography>
+                      <Typography color="text.secondary">{fmtFullDateTime(appt)}</Typography>
                     </Stack>
                   </Paper>
                 </Grid>
@@ -731,9 +906,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                       <LocalHospitalIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Doctor', 'الطبيب')}:
-                      </Typography>
+                      <Typography sx={{ fontWeight: 700 }}>{t('Doctor', 'الطبيب')}:</Typography>
                       <Typography color="text.secondary">
                         {field(appt, 'doctorName_en', 'doctorName_ar') || appt?.doctorId || appt?.doctorUID || '—'}
                       </Typography>
@@ -754,12 +927,8 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                       <PersonIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Patient', 'المريض')}:
-                      </Typography>
-                      <Typography color="text.secondary">
-                        {appt?.patientName || '—'}
-                      </Typography>
+                      <Typography sx={{ fontWeight: 700 }}>{t('Patient', 'المريض')}:</Typography>
+                      <Typography color="text.secondary">{appt?.patientName || '—'}</Typography>
                       {appt?.patientPhone && (
                         <>
                           <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
@@ -776,29 +945,94 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   </Paper>
                 </Grid>
 
-                {/* Payment & Fees */}
+                {/* Payment & Fees (includes Extra Fees editor) */}
                 <Grid item xs={12}>
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                     <Stack spacing={1.25}>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <PaymentIcon color="action" />
-                        <Typography sx={{ fontWeight: 700 }}>
-                          {t('Payment & Fees', 'الدفع والرسوم')}
-                        </Typography>
+                        <Typography sx={{ fontWeight: 700 }}>{t('Payment & Fees', 'الدفع والرسوم')}</Typography>
                       </Stack>
 
-                      {/* Fee */}
+                      {/* Base Fee */}
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                         <MonetizationOnIcon color="disabled" />
-                        <Typography color="text.secondary">
-                          {t('Checkup Fee', 'رسوم الكشف')}:
-                        </Typography>
+                        <Typography color="text.secondary">{t('Checkup Fee', 'رسوم الكشف')}:</Typography>
                         <Typography fontWeight={800}>
-                          {price != null ? `${price} ${currencyLabel(isAr)}` : '—'}
+                          {price != null ? `${price} ${priceCurrency || currencyLabel(isAr)}` : '—'}
                         </Typography>
                       </Stack>
 
-                      {/* Type */}
+                      {/* Extra Fees header */}
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.5 }}>
+                        <Typography variant="subtitle2" fontWeight={900}>
+                          {t('Extra Fees', 'تكاليف إضافية')}
+                        </Typography>
+                        <Button size="small" startIcon={<AddIcon />} variant="outlined" onClick={openAddFee}>
+                          {t('Add Extra Fee', 'إضافة تكلفة')}
+                        </Button>
+                      </Stack>
+
+                      {/* Extra Fees list */}
+                      {extraFees.length === 0 ? (
+                        <Typography color="text.secondary">{t('No extra fees yet.', 'لا توجد تكاليف إضافية.')}</Typography>
+                      ) : (
+                        <Stack spacing={0.75}>
+                          {extraFees.map((fee) => (
+                            <Paper
+                              key={fee.id}
+                              variant="outlined"
+                              sx={{ p: 1, borderRadius: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}
+                            >
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography fontWeight={700} noWrap title={fee.title}>
+                                  {fee.title}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
+                                  {fee.note || ''}
+                                </Typography>
+                              </Box>
+                              <Typography fontWeight={800} sx={{ mr: 1 }}>
+                                {safeNum(fee.amount).toFixed(2)} {priceCurrency || currencyLabel(isAr)}
+                              </Typography>
+                              <Tooltip title={t('Edit', 'تعديل')}>
+                                <IconButton size="small" onClick={() => openEditFee(fee)}>
+                                  <EditIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title={t('Delete', 'حذف')}>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  onClick={() => {
+                                    // simple confirm; replace with nicer dialog if you prefer
+                                    // eslint-disable-next-line no-restricted-globals
+                                    const ok = confirm(t('Delete this fee?', 'حذف هذه التكلفة؟'));
+                                    if (ok) deleteFee(fee.id);
+                                  }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Paper>
+                          ))}
+                        </Stack>
+                      )}
+
+                      {/* Totals */}
+                      <Divider />
+                      <Stack spacing={0.5} sx={{ textAlign: 'right' }}>
+                        <Typography>
+                          {t('Extras Total', 'إجمالي الإضافي')}: <strong>{extraTotal.toFixed(2)}</strong>{' '}
+                          {priceCurrency || currencyLabel(isAr)}
+                        </Typography>
+                        <Typography variant="h6" fontWeight={900}>
+                          {t('Grand Total', 'الإجمالي النهائي')}: <strong>{grandTotal.toFixed(2)}</strong>{' '}
+                          {priceCurrency || currencyLabel(isAr)}
+                        </Typography>
+                      </Stack>
+
+                      {/* Payment meta */}
                       {payment?.type && (
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                           <PaymentIcon color="disabled" />
@@ -807,7 +1041,6 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                         </Stack>
                       )}
 
-                      {/* Wallet */}
                       {(payment?.walletNumber || payment?.walletProvider) && (
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                           <AccountBalanceWalletIcon color="disabled" />
@@ -818,7 +1051,6 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                         </Stack>
                       )}
 
-                      {/* Instapay */}
                       {(payment?.instapayId || payment?.instapayMobile) && (
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                           <AccountBalanceIcon color="disabled" />
@@ -826,13 +1058,15 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                           <Typography>
                             {[
                               payment.instapayId && (isAr ? `المعرّف: ${payment.instapayId}` : `ID: ${payment.instapayId}`),
-                              payment.instapayMobile && (isAr ? `الموبايل: ${payment.instapayMobile}` : `Mobile: ${payment.instapayMobile}`)
-                            ].filter(Boolean).join(' · ') || '—'}
+                              payment.instapayMobile &&
+                                (isAr ? `الموبايل: ${payment.instapayMobile}` : `Mobile: ${payment.instapayMobile}`),
+                            ]
+                              .filter(Boolean)
+                              .join(' · ') || '—'}
                           </Typography>
                         </Stack>
                       )}
 
-                      {/* Bank */}
                       {payment?.bankName && (
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                           <AccountBalanceIcon color="disabled" />
@@ -841,22 +1075,14 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                         </Stack>
                       )}
 
-                      {/* Payment notes */}
-                      {payment?.notes && (
-                        <Alert severity="info" sx={{ whiteSpace: 'pre-wrap' }}>
-                          {payment.notes}
-                        </Alert>
-                      )}
+                      {payment?.notes && <Alert severity="info" sx={{ whiteSpace: 'pre-wrap' }}>{payment.notes}</Alert>}
 
-                      {/* Payment screenshot (no extra meta) */}
+                      {/* Payment screenshot */}
                       <Divider />
-
                       <Stack spacing={1}>
                         <Stack direction="row" spacing={1} alignItems="center">
                           <ImageIcon color="disabled" />
-                          <Typography sx={{ fontWeight: 700 }}>
-                            {t('Payment Screenshot', 'صورة التحويل')}
-                          </Typography>
+                          <Typography sx={{ fontWeight: 700 }}>{t('Payment Screenshot', 'صورة التحويل')}</Typography>
                         </Stack>
 
                         {paymentProofURL ? (
@@ -873,11 +1099,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                               >
                                 {t('Open in new tab', 'فتح في تبويب')}
                               </Button>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => setProofOpen(true)}
-                              >
+                              <Button size="small" variant="outlined" onClick={() => setProofOpen(true)}>
                                 {t('Preview', 'معاينة')}
                               </Button>
                             </Box>
@@ -894,14 +1116,16 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                                 height: 'auto',
                                 maxHeight: 260,
                                 borderRadius: 8,
-                                border: '1px solid rgba(0,0,0,.12)'
+                                border: '1px solid rgba(0,0,0,.12)',
                               }}
                             />
                           </Stack>
                         ) : (
                           <Stack direction="row" spacing={1} alignItems="center" color="text.secondary">
                             <ImageIcon fontSize="small" />
-                            <Typography variant="body2">{t('No payment image attached.', 'لا توجد صورة تحويل مرفقة.')}</Typography>
+                            <Typography variant="body2">
+                              {t('No payment image attached.', 'لا توجد صورة تحويل مرفقة.')}
+                            </Typography>
                           </Stack>
                         )}
                       </Stack>
@@ -915,18 +1139,14 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <NotesIcon color="action" />
-                        <Typography sx={{ fontWeight: 700 }}>
-                          {t('Notes', 'ملاحظات')}
-                        </Typography>
+                        <Typography sx={{ fontWeight: 700 }}>{t('Notes', 'ملاحظات')}</Typography>
                       </Stack>
-                      {appt?.note && (
-                        <Typography sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                          {appt.note}
-                        </Typography>
-                      )}
+                      {appt?.note && <Typography sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>{appt.note}</Typography>}
                       {appt?.aiBrief && (
                         <Alert severity="info" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
-                          <strong>{t('AI Summary:', 'ملخص الذكاء الاصطناعي:')}</strong>{'\n'}{appt.aiBrief}
+                          <strong>{t('AI Summary:', 'ملخص الذكاء الاصطناعي:')}</strong>
+                          {'\n'}
+                          {appt.aiBrief}
                         </Alert>
                       )}
                     </Paper>
@@ -992,18 +1212,10 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                 )}
               </Box>
 
-              {/* Footer actions */}
+              {/* Footer actions — removed “Actions” button per request */}
               <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 0.5 }}>
                 <Button component={Link} href={backHref} variant="outlined">
                   {t('Back', 'رجوع')}
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<ScheduleIcon />}
-                  disabled
-                  title={t('Future actions (e.g., reschedule) can go here', 'إجراءات لاحقة مثل إعادة الجدولة تُضاف لاحقاً')}
-                >
-                  {t('Actions', 'إجراءات')}
                 </Button>
               </Stack>
             </Stack>
@@ -1011,21 +1223,10 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         </Paper>
 
         {/* Add Report Dialog */}
-        <AddReportDialog
-          open={reportOpen}
-          onClose={() => setReportOpen(false)}
-          isArabic={isAr}
-          appointmentId={id}
-          onSaved={handleReportSaved}
-        />
+        <AddReportDialog open={reportOpen} onClose={() => setReportOpen(false)} isArabic={isAr} appointmentId={id} onSaved={handleReportSaved} />
 
         {/* View Report Dialog (read-only) */}
-        <ReportViewDialog
-          open={Boolean(viewReport)}
-          onClose={() => setViewReport(null)}
-          report={viewReport}
-          isAr={isAr}
-        />
+        <ReportViewDialog open={Boolean(viewReport)} onClose={() => setViewReport(null)} report={viewReport} isAr={isAr} />
 
         {/* Payment proof full-size preview */}
         <Dialog open={proofOpen} onClose={() => setProofOpen(false)} fullWidth maxWidth="md">
@@ -1033,24 +1234,14 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           <DialogContent dividers>
             {paymentProofURL ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={paymentProofURL}
-                alt="payment proof large"
-                style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 8 }}
-              />
+              <img src={paymentProofURL} alt="payment proof large" style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 8 }} />
             ) : (
               <Typography color="text.secondary">{t('No image available.', 'لا توجد صورة.')}</Typography>
             )}
           </DialogContent>
           <DialogActions>
             {paymentProofURL && (
-              <Button
-                startIcon={<OpenInNewIcon />}
-                component="a"
-                href={paymentProofURL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <Button startIcon={<OpenInNewIcon />} component="a" href={paymentProofURL} target="_blank" rel="noopener noreferrer">
                 {t('Open Original', 'فتح الأصل')}
               </Button>
             )}
@@ -1068,9 +1259,20 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           isAr={isAr}
           onSaved={(patch) => {
             setSnack({ open: true, severity: 'success', msg: t('Appointment updated', 'تم تحديث الموعد') });
-            setAppt((prev) => prev ? { ...prev, ...patch } : prev);
-            // If date/time changed, recompute queue later via effect
+            setAppt((prev) => (prev ? { ...prev, ...patch } : prev));
           }}
+        />
+
+        {/* Extra Fee Dialog */}
+        <ExtraFeeDialog
+          open={extraDialogOpen}
+          onClose={() => {
+            setExtraDialogOpen(false);
+            setEditingFee(null);
+          }}
+          onSave={saveFee}
+          initial={editingFee}
+          isAr={isAr}
         />
 
         <Snackbar
