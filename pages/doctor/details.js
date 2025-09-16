@@ -459,7 +459,7 @@ export default function DoctorDetailsPage() {
             }}
           >
             <Typography variant="body2" color="text.secondary">
-              اسحب وأفلت الصور هنا أو اضغط "رفع".
+              اسحب وأفلت الصور هنا أو اضغط &quot;رفع&quot;.
             </Typography>
           </Box>
 

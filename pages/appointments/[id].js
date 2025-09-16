@@ -353,7 +353,6 @@ function UpdateAppointmentDialog({
       onClose?.();
     } catch (e) {
       // surface error inline via alert if needed
-      // eslint-disable-next-line no-alert
       alert(e?.message || t('Failed to update appointment', 'تعذر تحديث الموعد'));
     } finally {
       setSaving(false);
