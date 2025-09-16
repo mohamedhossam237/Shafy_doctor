@@ -5,7 +5,7 @@ import * as React from 'react';
 import { useRouter } from 'next/router';
 import {
   Container, Paper, Stack, Typography, Snackbar, Alert, Box, Button, Grid,
-  TextField, MenuItem, RadioGroup, FormControlLabel, Radio, Divider, Chip, IconButton
+  TextField, MenuItem, RadioGroup, FormControlLabel, Radio, Divider, Chip, IconButton, CircularProgress
 } from '@mui/material';
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto';
 import EditIcon from '@mui/icons-material/Edit';
@@ -14,12 +14,14 @@ import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PersonIcon from '@mui/icons-material/Person';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import Autocomplete from '@mui/material/Autocomplete';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
-import { db } from '@/lib/firebase';
+import { db } from '@/lib/firebase'; // if your app uses "@/firebase", change this import
 import {
-  doc, getDoc, setDoc, updateDoc, serverTimestamp
+  doc, getDoc, setDoc, updateDoc, serverTimestamp,
+  collection, getDocs, query, where
 } from 'firebase/firestore';
 
 /* dialogs already used in your project */
@@ -30,19 +32,14 @@ import EditHoursDialog from '@/components/Profile/EditHoursDialog';
 const isEgMobile = (v) => /^01[0-25]\d{8}$/.test(String(v || '').trim());
 const isInstaPayId = (v) => /@/.test(String(v || ''));
 
-/** Normalize a subspecialty item to a safe label (never return an object). */
-const makeSubLabelFactory = (isArabic) => (s) => {
+/** Normalize a subspecialty item to a safe Arabic label (never return an object). */
+const makeSubArLabel = (s) => {
   if (s == null) return '';
   if (typeof s === 'string' || typeof s === 'number') return String(s);
-  // common shapes: {id, name_en, name_ar}, or {id, label}
-  return (
-    (isArabic ? s.name_ar : s.name_en) ||
-    s.label ||
-    String(s.id ?? '')
-  );
+  return s.name_ar || s.label || String(s.id ?? '');
 };
 
-/** Normalize subspecialty detail for saving. */
+/** Normalize subspecialty detail for saving (ensure both ar & en, en may be filled later). */
 const normalizeSubDetail = (s) => {
   if (s && typeof s === 'object') {
     return {
@@ -58,21 +55,20 @@ const normalizeSubDetail = (s) => {
 export default function DoctorDetailsPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const isArabic = router?.query?.lang === 'ar' || router?.query?.ar === '1';
-  const dir = isArabic ? 'rtl' : 'ltr';
-  const t = (en, ar) => (isArabic ? ar : en);
-  const subLabel = React.useMemo(() => makeSubLabelFactory(isArabic), [isArabic]);
 
-  /* ---------- form state ---------- */
+  // Force Arabic-only UI
+  const isArabic = true;
+  const dir = 'rtl';
+  const t = (_en, ar) => ar; // UI always Arabic
+
+  /* ---------- form state (Arabic inputs only) ---------- */
   const [form, setForm] = React.useState({
-    // overview fields (NO gradYear/experience)
-    bio_en: '', bio_ar: '',
-    qualifications_en: '', qualifications_ar: '',
-    university_en: '', university_ar: '',
-    checkupPrice: '', phone: '',
-
-    // specialty
-    specialtyEn: '', specialtyAr: '',
+    bio_ar: '',
+    qualifications_ar: '',
+    university_ar: '',
+    checkupPrice: '',
+    phone: '',
+    specialtyAr: '', // kept for backward compatibility (now driven by selectedSpecialty)
   });
 
   const [images, setImages] = React.useState([]);                 // profileImages (URL strings)
@@ -92,6 +88,11 @@ export default function DoctorDetailsPage() {
   const [bankName, setBankName] = React.useState('');
   const [paymentNotes, setPaymentNotes] = React.useState('');
 
+  // specialties dropdown
+  const [specialties, setSpecialties] = React.useState([]); // [{id,key,label_en,label_ar,active}]
+  const [specialtiesLoading, setSpecialtiesLoading] = React.useState(false);
+  const [selectedSpecialty, setSelectedSpecialty] = React.useState(null); // one of specialties[] or null
+
   const [loading, setLoading] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, message: '', severity: 'info' });
   const openSnack = (m, s = 'info') => setSnack({ open: true, message: m, severity: s });
@@ -99,27 +100,52 @@ export default function DoctorDetailsPage() {
   const fileInputRef = React.useRef(null);
   const dropRef = React.useRef(null);
 
-  /* ---------- prefill ---------- */
+  /* ---------- load specialties (active only) ---------- */
+  const loadSpecialties = React.useCallback(async () => {
+    try {
+      setSpecialtiesLoading(true);
+      // No orderBy here => no composite index needed
+      const q = query(
+        collection(db, 'specialties'),
+        where('active', '==', true)
+      );
+      const snap = await getDocs(q);
+      // Client-side Arabic sort to replace orderBy('label_ar')
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) =>
+          (a.label_ar || '').localeCompare(b.label_ar || '', 'ar', { sensitivity: 'base' })
+        );
+      setSpecialties(list);
+      return list;
+    } catch (e) {
+      console.error('loadSpecialties error', e);
+      openSnack('تعذر تحميل قائمة التخصصات', 'error');
+      return [];
+    } finally {
+      setSpecialtiesLoading(false);
+    }
+  }, []); // eslint-disable-line
+
+  /* ---------- prefill (load Arabic + images + hours + payment + preselect specialty) ---------- */
   const loadData = React.useCallback(async () => {
     if (!user?.uid) return;
     try {
       setLoading(true);
-      const snap = await getDoc(doc(db, 'doctors', user.uid));
-      if (!snap.exists()) return;
 
-      const d = snap.data() || {};
+      // Load specialties list in parallel
+      const spPromise = (specialties.length ? Promise.resolve(specialties) : loadSpecialties());
+
+      const snap = await getDoc(doc(db, 'doctors', user.uid));
+      const d = snap.exists() ? (snap.data() || {}) : {};
+
       setForm((f) => ({
         ...f,
-        bio_en: d.bio_en || '',
         bio_ar: d.bio_ar || '',
-        qualifications_en: d.qualifications_en || '',
         qualifications_ar: d.qualifications_ar || '',
-        university_en: d.university_en || '',
         university_ar: d.university_ar || '',
         checkupPrice: d.checkupPrice ?? '',
         phone: d.phone || '',
-
-        specialtyEn: d.specialty_en || d.specialtyEn || '',
         specialtyAr: d.specialty_ar || d.specialtyAr || '',
       }));
 
@@ -135,12 +161,26 @@ export default function DoctorDetailsPage() {
       setWalletNumber(p.walletNumber || '');
       setBankName(p.bankName || '');
       setPaymentNotes(p.notes || '');
+
+      // wait specialties then preselect
+      const list = await spPromise;
+      // prefer matching by specialty_key if present
+      const byKey = d.specialty_key
+        ? list.find(s => s.key === d.specialty_key)
+        : null;
+      if (byKey) {
+        setSelectedSpecialty(byKey);
+      } else if (d.specialty_ar) {
+        // fallback: match by Arabic label
+        const byAr = list.find(s => (s.label_ar || '').trim() === (d.specialty_ar || '').trim());
+        if (byAr) setSelectedSpecialty(byAr);
+      }
     } catch (e) {
-      openSnack(e?.message || t('Failed to load data', 'تعذر تحميل البيانات'), 'error');
+      openSnack('تعذر تحميل البيانات', 'error');
     } finally {
       setLoading(false);
     }
-  }, [user?.uid]); // eslint-disable-line
+  }, [user?.uid, specialties.length, loadSpecialties]); // eslint-disable-line
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
@@ -150,7 +190,7 @@ export default function DoctorDetailsPage() {
   const uploadViaImgbb = async (files) => {
     const apiKey = process.env.NEXT_PUBLIC_IMGBB_KEY;
     if (!apiKey) {
-      openSnack(t('Missing imgbb key (NEXT_PUBLIC_IMGBB_KEY)', 'مفتاح imgbb غير موجود'), 'error');
+      openSnack('مفتاح imgbb غير موجود (NEXT_PUBLIC_IMGBB_KEY)', 'error');
       return;
     }
     if (!files || !files.length) return;
@@ -177,14 +217,13 @@ export default function DoctorDetailsPage() {
         await updateDoc(doc(db, 'doctors', user.uid), {
           profileImages: (images?.length ? [...images, ...uploaded] : uploaded),
         }).catch(async () => {
-          // if doc may not exist
           await setDoc(doc(db, 'doctors', user.uid), { profileImages: uploaded }, { merge: true });
         });
         setImages((prev) => [...prev, ...uploaded]);
-        openSnack(t('Image uploaded', 'تم رفع الصورة'), 'success');
+        openSnack('تم رفع الصورة', 'success');
       }
-    } catch (e) {
-      openSnack(t('Image upload failed', 'فشل في رفع الصورة'), 'error');
+    } catch {
+      openSnack('فشل في رفع الصورة', 'error');
     } finally {
       setLoading(false);
     }
@@ -218,10 +257,55 @@ export default function DoctorDetailsPage() {
     };
   }, [dropRef.current, user?.uid]); // eslint-disable-line
 
-  /* ---------- save ---------- */
+  /* ---------- translate Arabic -> English via /api/ask-shafy (mode=translate_ar_to_en) ---------- */
+  const translateToEnglish = async ({ bio_ar, qualifications_ar, university_ar, specialtyAr, subs_ar_list }) => {
+    try {
+      const r = await fetch('/api/ask-shafy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'translate_ar_to_en',
+          items: {
+            bio_ar,
+            qualifications_ar,
+            university_ar,
+            specialty_ar: specialtyAr,
+            subspecialties_ar: subs_ar_list, // array of strings
+          },
+          response_format: 'json',
+          temperature: 0.1,
+          system_extras: [
+            'Prefer formal medical wording.',
+            'Keep translations concise and professional.',
+          ],
+          instructions: [
+            'Return only valid JSON matching the schema.',
+            'Preserve list order for subspecialties.',
+          ],
+          tags: ['translation','profile']
+        }),
+      });
+      const json = await r.json();
+      if (!r.ok || !json?.ok || !json?.translations) {
+        throw new Error(json?.error || 'Translation failed');
+      }
+      return json.translations;
+    } catch (e) {
+      console.error('translateToEnglish error:', e);
+      return null; // caller will fallback
+    }
+  };
+
+  /* ---------- save (Arabic-only inputs; auto-fill English via translation) ---------- */
   const onSave = async () => {
     if (!user?.uid) {
-      openSnack(t('Please sign in', 'الرجاء تسجيل الدخول'), 'error');
+      openSnack('الرجاء تسجيل الدخول', 'error');
+      return;
+    }
+
+    // Specialty must be selected from dropdown
+    if (!selectedSpecialty) {
+      openSnack('برجاء اختيار التخصص من القائمة.', 'warning');
       return;
     }
 
@@ -231,66 +315,101 @@ export default function DoctorDetailsPage() {
       const mobOk = instapayMobile ? isEgMobile(instapayMobile) : false;
       if (!idOk && !mobOk) {
         return openSnack(
-          t(
-            'Add a valid InstaPay ID (name@bank) or an Egyptian mobile number (01xxxxxxxxx).',
-            'أضف مُعرّف إنستا باي صحيح (name@bank) أو رقم موبايل مصري صحيح (01xxxxxxxxx).'
-          ),
+          'أضف مُعرّف إنستا باي صحيح (name@bank) أو رقم موبايل مصري صحيح (01xxxxxxxxx).',
           'warning'
         );
       }
     }
     if (payType === 'wallet' && walletNumber && !isEgMobile(walletNumber)) {
-      return openSnack(
-        t('Enter a valid Egyptian wallet number (01xxxxxxxxx).', 'أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).'),
-        'warning'
-      );
+      return openSnack('أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).', 'warning');
     }
 
-    const payload = {
-      // overview (no graduationYear/experienceYears)
-      bio_en: form.bio_en.trim(),
-      bio_ar: form.bio_ar.trim(),
-      qualifications_en: form.qualifications_en.trim(),
-      qualifications_ar: form.qualifications_ar.trim(),
-      university_en: form.university_en.trim(),
-      university_ar: form.university_ar.trim(),
-      checkupPrice: form.checkupPrice ? Number(form.checkupPrice) : 0,
-      phone: form.phone.trim(),
+    // Build the list of Arabic subspecialty labels
+    const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : [])
+      .filter(Boolean)
+      .map((s) => makeSubArLabel(s));
 
-      // specialty
-      specialty_en: form.specialtyEn.trim(),
-      specialty_ar: form.specialtyAr.trim(),
-
-      // subspecialties (keep ids and normalized detail)
-      subspecialties: subspecialties.map((s) => (typeof s === 'object' ? s.id : s)),
-      subspecialties_detail: subspecialties.map(normalizeSubDetail),
-
-      // hours
-      working_hours: workingHours || {},
-
-      // payment
-      payment: {
-        type: payType,
-        instapayId: payType === 'instapay' ? instapayId.trim() : '',
-        instapayMobile: payType === 'instapay' ? instapayMobile.trim() : '',
-        walletProvider: payType === 'wallet' ? walletProvider : '',
-        walletNumber: payType === 'wallet' ? walletNumber.trim() : '',
-        bankName: bankName.trim(),
-        notes: paymentNotes.trim(),
-        updatedAt: serverTimestamp(),
-      },
-
-      profileCompleted: true,
-      updatedAt: new Date().toISOString(),
-    };
-
+    setLoading(true);
     try {
-      setLoading(true);
+      // 1) Translate all Arabic fields to English
+      const translations = await translateToEnglish({
+        bio_ar: String(form.bio_ar || '').trim(),
+        qualifications_ar: String(form.qualifications_ar || '').trim(),
+        university_ar: String(form.university_ar || '').trim(),
+        // specialtyAr comes from selectedSpecialty Arabic label
+        specialtyAr: String(selectedSpecialty?.label_ar || '').trim(),
+        subs_ar_list,
+      });
+
+      // Safe fallbacks if translation failed
+      const bio_en = translations?.bio_en || String(form.bio_ar || '').trim();
+      const qualifications_en = translations?.qualifications_en || String(form.qualifications_ar || '').trim();
+      const university_en = translations?.university_en || String(form.university_ar || '').trim();
+
+      // For specialty, prefer canonical English from the selected specialty document
+      const specialty_en =
+        (selectedSpecialty?.label_en || '').trim() ||
+        translations?.specialty_en ||
+        String(selectedSpecialty?.label_ar || '').trim();
+
+      const subs_en_list = Array.isArray(translations?.subspecialties_en) ? translations.subspecialties_en : subs_ar_list;
+
+      // 2) Build subspecialties_detail with English filled (preserve existing IDs if any)
+      const subs_detail = (Array.isArray(subspecialties) ? subspecialties : []).map((s, i) => {
+        const base = normalizeSubDetail(s);
+        const enName = subs_en_list?.[i] || base.name_en || base.name_ar;
+        return { ...base, name_en: String(enName || '').trim() };
+      });
+
+      // 3) Save payload with both Arabic and English + specialty_key
+      const payload = {
+        // Arabic sources (inputs)
+        bio_ar: String(form.bio_ar || '').trim(),
+        qualifications_ar: String(form.qualifications_ar || '').trim(),
+        university_ar: String(form.university_ar || '').trim(),
+        specialty_ar: String(selectedSpecialty?.label_ar || '').trim(),
+
+        // Auto / canonical English
+        bio_en,
+        qualifications_en,
+        university_en,
+        specialty_en,
+
+        // Also persist a stable key for joins / filters
+        specialty_key: String(selectedSpecialty?.key || '').trim(),
+
+        // General
+        checkupPrice: form.checkupPrice ? Number(form.checkupPrice) : 0,
+        phone: String(form.phone || '').trim(),
+
+        // subspecialties (ids) + details
+        subspecialties: subspecialties.map((s) => (typeof s === 'object' ? s.id : s)),
+        subspecialties_detail: subs_detail,
+
+        // hours
+        working_hours: workingHours || {},
+
+        // payment
+        payment: {
+          type: payType,
+          instapayId: payType === 'instapay' ? instapayId.trim() : '',
+          instapayMobile: payType === 'instapay' ? instapayMobile.trim() : '',
+          walletProvider: payType === 'wallet' ? walletProvider : '',
+          walletNumber: payType === 'wallet' ? walletNumber.trim() : '',
+          bankName: bankName.trim(),
+          notes: paymentNotes.trim(),
+          updatedAt: serverTimestamp(),
+        },
+
+        profileCompleted: true,
+        updatedAt: new Date().toISOString(),
+      };
+
       await setDoc(doc(db, 'doctors', user.uid), payload, { merge: true });
-      openSnack(t('Saved', 'تم الحفظ'), 'success');
-      router.replace(isArabic ? '/doctor/profile?lang=ar' : '/doctor/profile');
+      openSnack('تم الحفظ', 'success');
+      router.replace('/doctor/profile?lang=ar');
     } catch (e) {
-      openSnack(e?.message || t('Failed to save', 'فشل الحفظ'), 'error');
+      openSnack(e?.message || 'فشل الحفظ', 'error');
     } finally {
       setLoading(false);
     }
@@ -299,20 +418,20 @@ export default function DoctorDetailsPage() {
   return (
     <AppLayout>
       <Container maxWidth="md" sx={{ py: 3 }} dir={dir}>
-        <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} alignItems="center" justifyContent="space-between" sx={{ mb: 1.25 }}>
-          <Typography variant="h5" fontWeight={900}>{t('Doctor Details', 'تفاصيل الطبيب')}</Typography>
-          <IconButton onClick={loadData} aria-label={t('Reload', 'إعادة التحميل')}>
+        <Stack direction="row-reverse" spacing={1} alignItems="center" justifyContent="space-between" sx={{ mb: 1.25 }}>
+          <Typography variant="h5" fontWeight={900}>تفاصيل الطبيب</Typography>
+          <IconButton onClick={loadData} aria-label="إعادة التحميل">
             <RefreshIcon />
           </IconButton>
         </Stack>
 
         {/* Photos (imgbb) */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
-          <Stack direction={isArabic ? 'row-reverse' : 'row'} alignItems="center" justifyContent="space-between">
+          <Stack direction="row-reverse" alignItems="center" justifyContent="space-between">
             <Typography variant="subtitle2" color="text.secondary" fontWeight={800}>
-              {t('Photos', 'الصور')}
+              الصور
             </Typography>
-            <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1}>
+            <Stack direction="row-reverse" spacing={1}>
               <input ref={fileInputRef} type="file" accept="image/*" hidden multiple onChange={onPickImages} />
               <Button
                 startIcon={<AddAPhotoIcon />}
@@ -321,7 +440,7 @@ export default function DoctorDetailsPage() {
                 sx={{ borderRadius: 2 }}
                 disabled={loading || !user?.uid}
               >
-                {t('Upload', 'رفع')}
+                رفع
               </Button>
             </Stack>
           </Stack>
@@ -340,7 +459,7 @@ export default function DoctorDetailsPage() {
             }}
           >
             <Typography variant="body2" color="text.secondary">
-              {t('Drag & drop images here, or click “Upload”.', 'اسحب وأفلت الصور هنا أو اضغط "رفع".')}
+              اسحب وأفلت الصور هنا أو اضغط "رفع".
             </Typography>
           </Box>
 
@@ -373,55 +492,68 @@ export default function DoctorDetailsPage() {
           ) : null}
         </Paper>
 
-        {/* Overview */}
+        {/* Overview (Arabic-only) */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <Chip icon={<PersonIcon />} label={t('Overview', 'النظرة العامة')} color="primary" />
+            <Chip icon={<PersonIcon />} label="النظرة العامة" color="primary" />
           </Stack>
           <Grid container spacing={1.25}>
-            <Grid item xs={12} md={6}>
-              <TextField label={t('Bio (English)', 'نبذة (إنجليزي)')} value={form.bio_en} onChange={onChange('bio_en')} multiline minRows={3} fullWidth />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField label={t('Bio (Arabic)', 'نبذة (عربي)')} value={form.bio_ar} onChange={onChange('bio_ar')} multiline minRows={3} fullWidth />
+            <Grid item xs={12}>
+              <TextField label="نبذة (عربي)" value={form.bio_ar} onChange={onChange('bio_ar')} multiline minRows={3} fullWidth />
             </Grid>
 
             <Grid item xs={12} md={6}>
-              <TextField label={t('Qualifications (English)', 'المؤهل (إنجليزي)')} value={form.qualifications_en} onChange={onChange('qualifications_en')} fullWidth />
+              <TextField label="المؤهل (عربي)" value={form.qualifications_ar} onChange={onChange('qualifications_ar')} fullWidth />
             </Grid>
             <Grid item xs={12} md={6}>
-              <TextField label={t('Qualifications (Arabic)', 'المؤهل (عربي)')} value={form.qualifications_ar} onChange={onChange('qualifications_ar')} fullWidth />
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField label={t('University (English)', 'الجامعة (إنجليزي)')} value={form.university_en} onChange={onChange('university_en')} fullWidth />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField label={t('University (Arabic)', 'الجامعة (عربي)')} value={form.university_ar} onChange={onChange('university_ar')} fullWidth />
+              <TextField label="الجامعة (عربي)" value={form.university_ar} onChange={onChange('university_ar')} fullWidth />
             </Grid>
 
             <Grid item xs={6} md={3}>
-              <TextField type="number" label={t('Checkup Price', 'سعر الكشف')} value={form.checkupPrice} onChange={onChange('checkupPrice')} fullWidth />
+              <TextField type="number" label="سعر الكشف" value={form.checkupPrice} onChange={onChange('checkupPrice')} fullWidth />
             </Grid>
             <Grid item xs={6} md={3}>
-              <TextField label={t('Phone', 'الهاتف')} value={form.phone} onChange={onChange('phone')} fullWidth />
+              <TextField label="الهاتف" value={form.phone} onChange={onChange('phone')} fullWidth />
             </Grid>
           </Grid>
         </Paper>
 
-        {/* Specialty & Subspecialties */}
+        {/* Specialty & Subspecialties (Arabic-only inputs) */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <Chip icon={<LocalHospitalIcon />} label={t('Specialty', 'التخصص')} color="primary" />
+            <Chip icon={<LocalHospitalIcon />} label="التخصص" color="primary" />
           </Stack>
-          <Grid container spacing={1.25} sx={{ mb: 1 }}>
-            <Grid item xs={12} md={6}>
-              <TextField label={t('Specialty (English)', 'التخصص (إنجليزي)')} value={form.specialtyEn} onChange={onChange('specialtyEn')} fullWidth />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField label={t('Specialty (Arabic)', 'التخصص (عربي)')} value={form.specialtyAr} onChange={onChange('specialtyAr')} fullWidth />
-            </Grid>
-          </Grid>
+
+          {/* Dropdown from Firestore specialties (active), client-sorted by Arabic label */}
+          <Autocomplete
+            options={specialties}
+            loading={specialtiesLoading}
+            value={selectedSpecialty}
+            onChange={(_e, val) => {
+              setSelectedSpecialty(val);
+              setForm((f) => ({ ...f, specialtyAr: val?.label_ar || '' }));
+            }}
+            getOptionLabel={(opt) => (opt?.label_ar || '')}
+            isOptionEqualToValue={(opt, val) => opt?.key === val?.key}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="اختر التخصص"
+                fullWidth
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {specialtiesLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+            noOptionsText="لا توجد نتائج"
+            sx={{ mb: 1.5 }}
+          />
 
           <Button
             variant="outlined"
@@ -429,14 +561,14 @@ export default function DoctorDetailsPage() {
             onClick={() => setOpenSubs(true)}
             sx={{ borderRadius: 2 }}
           >
-            {t('Edit Subspecialties', 'تعديل التخصصات الفرعية')}
+            تعديل التخصصات الفرعية
           </Button>
 
           {Array.isArray(subspecialties) && subspecialties.length > 0 && (
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
               {subspecialties.map((s, i) => {
                 const keyVal = typeof s === 'object' ? (s?.id ?? i) : s ?? i;
-                return <Chip key={String(keyVal)} label={subLabel(s)} />;
+                return <Chip key={String(keyVal)} label={makeSubArLabel(s)} />;
               })}
             </Stack>
           )}
@@ -445,7 +577,7 @@ export default function DoctorDetailsPage() {
         {/* Clinic Hours */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <Chip icon={<AccessTimeIcon />} label={t('Working Hours', 'ساعات العمل')} color="primary" />
+            <Chip icon={<AccessTimeIcon />} label="ساعات العمل" color="primary" />
           </Stack>
           <Button
             variant="outlined"
@@ -454,15 +586,15 @@ export default function DoctorDetailsPage() {
             sx={{ borderRadius: 2 }}
             disabled={!user?.uid}
           >
-            {t('Edit Hours', 'تعديل الساعات')}
+            تعديل الساعات
           </Button>
           {workingHours ? (
             <Box sx={{ mt: 1, color: 'text.secondary' }}>
-              <Typography variant="body2">{t('Hours have been configured.', 'تم ضبط الساعات.')}</Typography>
+              <Typography variant="body2">تم ضبط الساعات.</Typography>
             </Box>
           ) : (
             <Box sx={{ mt: 1, color: 'text.secondary' }}>
-              <Typography variant="body2">{t('No hours yet.', 'لا توجد ساعات بعد.')}</Typography>
+              <Typography variant="body2">لا توجد ساعات بعد.</Typography>
             </Box>
           )}
         </Paper>
@@ -470,37 +602,36 @@ export default function DoctorDetailsPage() {
         {/* Payment */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <Chip icon={<MonetizationOnIcon />} label={t('Payment for Bookings', 'بيانات الدفع للحجوزات')} color="primary" />
+            <Chip icon={<MonetizationOnIcon />} label="بيانات الدفع للحجوزات" color="primary" />
           </Stack>
 
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {t('Patients transfer the fee and upload a receipt. You confirm afterwards.',
-               'سيحوّل المريض الرسوم ويحمّل إيصال التحويل، ثم تؤكد الموعد لاحقاً.')}
+            سيحوّل المريض الرسوم ويحمّل إيصال التحويل، ثم تؤكد الموعد لاحقاً.
           </Typography>
 
           <RadioGroup row value={payType} onChange={(e) => setPayType(e.target.value)}>
             <FormControlLabel value="instapay" control={<Radio />} label="InstaPay" />
-            <FormControlLabel value="wallet" control={<Radio />} label={t('Mobile Wallet','محفظة موبايل')} />
+            <FormControlLabel value="wallet" control={<Radio />} label="محفظة موبايل" />
           </RadioGroup>
 
           {payType === 'instapay' && (
             <Stack spacing={1} sx={{ mt: 1 }}>
               <TextField
-                label={t('InstaPay ID (e.g. name@bank)','معرّف إنستا باي (مثل name@bank)')}
+                label="معرّف إنستا باي (مثل name@bank)"
                 placeholder="username@bank"
                 value={instapayId}
                 onChange={(e) => setInstapayId(e.target.value)}
                 fullWidth
               />
               <TextField
-                label={t('InstaPay mobile (01xxxxxxxxx)','موبايل إنستا باي (01xxxxxxxxx)')}
+                label="موبايل إنستا باي (01xxxxxxxxx)"
                 placeholder="01xxxxxxxxx"
                 value={instapayMobile}
                 onChange={(e) => setInstapayMobile(e.target.value)}
                 fullWidth
               />
               <TextField
-                label={t('Bank (optional)','اسم البنك (اختياري)')}
+                label="اسم البنك (اختياري)"
                 value={bankName}
                 onChange={(e) => setBankName(e.target.value)}
                 fullWidth
@@ -512,17 +643,17 @@ export default function DoctorDetailsPage() {
             <Stack spacing={1} sx={{ mt: 1 }}>
               <TextField
                 select
-                label={t('Wallet provider','شركة المحفظة')}
+                label="شركة المحفظة"
                 value={walletProvider}
                 onChange={(e) => setWalletProvider(e.target.value)}
               >
-                <MenuItem value="vodafone">{t('Vodafone Cash','فودافون كاش')}</MenuItem>
-                <MenuItem value="etisalat">{t('Etisalat Cash','اتصالات كاش')}</MenuItem>
-                <MenuItem value="orange">{t('Orange Money','أورنج موني')}</MenuItem>
-                <MenuItem value="we">{t('WE Pay','وي باي')}</MenuItem>
+                <MenuItem value="vodafone">فودافون كاش</MenuItem>
+                <MenuItem value="etisalat">اتصالات كاش</MenuItem>
+                <MenuItem value="orange">أورنج موني</MenuItem>
+                <MenuItem value="we">وي باي</MenuItem>
               </TextField>
               <TextField
-                label={t('Wallet number (01xxxxxxxxx)','رقم المحفظة (01xxxxxxxxx)')}
+                label="رقم المحفظة (01xxxxxxxxx)"
                 placeholder="01xxxxxxxxx"
                 value={walletNumber}
                 onChange={(e) => setWalletNumber(e.target.value)}
@@ -534,19 +665,19 @@ export default function DoctorDetailsPage() {
           <Divider sx={{ my: 1.25 }} />
 
           <TextField
-            label={t('Notes shown to patients (optional)','ملاحظات تُعرض للمريض (اختياري)')}
+            label="ملاحظات تُعرض للمريض (اختياري)"
             value={paymentNotes}
             onChange={(e) => setPaymentNotes(e.target.value)}
-            placeholder={t('Example: Please write your name in the transfer note.','مثال: رجاء كتابة اسمك في ملاحظة التحويل.')}
+            placeholder="مثال: رجاء كتابة اسمك في ملاحظة التحويل."
             multiline minRows={2}
             fullWidth
           />
         </Paper>
 
         {/* Save Bar */}
-        <Box sx={{ display: 'flex', justifyContent: isArabic ? 'flex-start' : 'flex-end' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
           <Button onClick={onSave} variant="contained" disabled={loading || !user?.uid}>
-            {t('Save & Continue', 'حفظ ومتابعة')}
+            حفظ ومتابعة
           </Button>
         </Box>
 
@@ -555,7 +686,7 @@ export default function DoctorDetailsPage() {
           open={openSubs}
           onClose={() => setOpenSubs(false)}
           doctorUID={user?.uid || 'temp'}
-          isArabic={isArabic}
+          isArabic={true}
           initialSelected={subspecialties}
           onSaved={(arr) => { setSubspecialties(arr || []); setOpenSubs(false); }}
         />
@@ -563,7 +694,7 @@ export default function DoctorDetailsPage() {
           open={openHours}
           onClose={() => setOpenHours(false)}
           doctorUID={user?.uid || 'temp'}
-          isArabic={isArabic}
+          isArabic={true}
           initialHours={workingHours}
           onSaved={(obj) => { setWorkingHours(obj || {}); setOpenHours(false); }}
         />

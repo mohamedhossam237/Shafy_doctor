@@ -26,9 +26,15 @@ function pickUsableImages(images) {
     if (typeof u !== "string") return false;
     if (u.startsWith("data:image/")) return true; // base64 data URL
     if (u.startsWith("http://") || u.startsWith("https://")) return true; // public URL
-    // blob: and filesystem: will not be fetchable by DeepSeek servers
-    return false;
+    return false; // blob:/filesystem: won't be fetchable by DeepSeek servers
   });
+}
+
+/** Simple helper: normalize to array of non-empty strings */
+function toStrArray(x) {
+  if (!x) return [];
+  const arr = Array.isArray(x) ? x : [x];
+  return arr.map((s) => String(s || "").trim()).filter(Boolean);
 }
 
 export default async function handler(req, res) {
@@ -42,34 +48,63 @@ export default async function handler(req, res) {
 
     const apiKey = getDeepseekKey();
 
+    // --------- INPUTS ---------
     const {
-      message,               // string - user's message
-      images = [],           // array of image urls (prefer data: URLs)
-      ocrTexts = [],         // array of OCR text extracted on the client
-      doctorContext = "",    // client-built private context from Firestore
-      lang = "ar",           // 'ar' | 'en'
+      // Existing/common fields
+      mode,                         // "translate_ar_to_en" | undefined
+      message,                      // user message
+      images = [],
+      ocrTexts = [],
+      doctorContext = "",
+      lang = "ar",                  // 'ar' | 'en'
+
+      // NEW: per-call steering
+      system,                       // full override for system
+      system_extras,                // string | string[] appended to system
+      instructions,                 // string | string[] injected as developer message
+      messages,                     // OpenAI-style messages[] to inject before the user turn
+      response_format,              // "json" | "text"
+      temperature,                  // number override
+      max_tokens,                   // number override
+      tags,                         // string[] appended in system as routing hints
+
+      // Translation payload (for mode=translate_ar_to_en)
+      items,
     } = req.body || {};
 
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "message is required" });
-    }
+    // --------- PRESETS / DEFAULTS ---------
+    const BASE_SYSTEM_AR =
+      "أنت شافي AI، مساعد متعدد اللغات للأطباء. كن موجزًا ودقيقًا وودودًا. احترم خصوصية المرضى وسرية البيانات. لا تقدم تشخيصًا نهائيًا أو وصفة دوائية؛ اعرض معلومات عامة وخيارات للنقاش بين الطبيب والمريض. تجنب نصائح طبية طارئة: في حالات الطوارئ اطلب الاتصال بالطوارئ.";
+    const BASE_SYSTEM_EN =
+      "You are Shafy AI, a multilingual assistant for doctors. Be concise, accurate, and friendly. Respect patient privacy and confidentiality. Do not provide definitive diagnoses or prescriptions; provide general information and options to discuss between clinician and patient. Avoid emergency advice; in emergencies, advise contacting local emergency services.";
 
-    // Base system prompt
-    const system =
-      lang === "ar"
-        ? "أنت شافي AI، مساعد متعدد اللغات للأطباء. كن موجزًا ودقيقًا وودودًا. احترم خصوصية المرضى وسرية البيانات."
-        : "You are Shafy AI, a multilingual assistant for doctors. Be concise, accurate, and friendly. Respect patient privacy and confidentiality.";
+    // If caller provided a system override, use it; else pick base by language:
+    const baseSystem = String(system || (lang === "ar" ? BASE_SYSTEM_AR : BASE_SYSTEM_EN));
 
-    // Private doctor context (from client Firebase listeners)
-    const ctxHeader =
-      lang === "ar"
-        ? "سياق الطبيب (خاص - للاستخدام في الاستنتاج فقط):"
-        : "Doctor Context (private — for reasoning only):";
-    const ctx = trimTo(String(doctorContext || ""));
+    // Optional add-ons (short, specific guardrails)
+    const sysExtrasArr = toStrArray(system_extras);
+    const tagsArr = toStrArray(tags);
+    const tagLine = tagsArr.length ? `\n\nTags: ${tagsArr.join(", ")}` : "";
+
+    const finalSystem =
+      [baseSystem, ...sysExtrasArr].join("\n\n").trim() + tagLine;
+
+    // Developer instructions (inserted as a message after system, before user)
+    const devInstructionsArr = toStrArray(instructions);
+    const devMessage =
+      devInstructionsArr.length
+        ? [{ role: "system", content: devInstructionsArr.join("\n\n") }]
+        : [];
+
+    // Optional extra messages (e.g., previous turns, summaries)
+    const extraMessages = Array.isArray(messages)
+      ? messages.filter(
+          (m) => m && typeof m === "object" && typeof m.role === "string" && m.content != null
+        )
+      : [];
 
     // OCR bundle (helps even if Vision is not used)
-    const ocrHeader =
-      lang === "ar" ? "نصوص OCR المرفقة:" : "Attached OCR extracts:";
+    const ocrHeader = lang === "ar" ? "نصوص OCR المرفقة:" : "Attached OCR extracts:";
     const ocrCombined = trimTo(
       (Array.isArray(ocrTexts) ? ocrTexts : [])
         .filter(Boolean)
@@ -78,24 +113,103 @@ export default async function handler(req, res) {
       6000
     );
 
-    // Choose model: only use Vision if images are usable (data: or http/https)
+    // -------------- SPECIAL MODE: TRANSLATION --------------
+    if (mode === "translate_ar_to_en") {
+      // items: { bio_ar, qualifications_ar, university_ar, specialty_ar, subspecialties_ar:[] }
+      if (!items || typeof items !== "object") {
+        return res.status(400).json({ error: "items (object) is required for translate_ar_to_en mode" });
+      }
+
+      const prompt = `
+You are a precise professional translator for medical profiles.
+Translate the following Arabic fields into clear, natural English suitable for a doctor's profile UI.
+Return ONLY strict JSON with this exact schema and keys:
+{
+  "bio_en": string,
+  "qualifications_en": string,
+  "university_en": string,
+  "specialty_en": string,
+  "subspecialties_en": string[]
+}
+- Keep it concise and professional.
+- Preserve list order for subspecialties.
+- If an input is empty, return an empty string.
+Arabic input (JSON):
+${JSON.stringify(items ?? {}, null, 2)}
+`.trim();
+
+      const body = {
+        model: TEXT_MODEL,
+        messages: [
+          { role: "system", content: finalSystem },
+          ...devMessage,
+          { role: "system", content: "You must return a single valid JSON object. No extra text." },
+          ...extraMessages,
+          { role: "user", content: prompt },
+        ],
+        temperature: typeof temperature === "number" ? temperature : 0.1,
+        max_tokens: typeof max_tokens === "number" ? max_tokens : 800,
+        ...(response_format === "json" ? { response_format: { type: "json_object" } } : {}),
+      };
+
+      const r = await fetch(`${DS_API}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getDeepseekKey()}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return res.status(r.status).json({
+          error:
+            data?.error?.message || data?.message || r.statusText || "DeepSeek translation request failed",
+          upstream: data,
+        });
+      }
+
+      // Parse JSON result (works whether content is stringified JSON or object)
+      let translations = {};
+      try {
+        const raw = data?.choices?.[0]?.message?.content ?? "{}";
+        translations = typeof raw === "string" ? JSON.parse(raw) : raw;
+      } catch {
+        translations = {};
+      }
+
+      const out = {
+        bio_en: translations?.bio_en ?? "",
+        qualifications_en: translations?.qualifications_en ?? "",
+        university_en: translations?.university_en ?? "",
+        specialty_en: translations?.specialty_en ?? "",
+        subspecialties_en: Array.isArray(translations?.subspecialties_en) ? translations.subspecialties_en : [],
+      };
+
+      return res.status(200).json({ ok: true, model: TEXT_MODEL, translations: out });
+    }
+
+    // -------------- NORMAL CHAT / VISION --------------
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "message is required" });
+    }
+
+    // Private doctor context (from client Firebase listeners)
+    const ctxHeader = lang === "ar"
+      ? "سياق الطبيب (خاص - للاستخدام في الاستنتاج فقط):"
+      : "Doctor Context (private — for reasoning only):";
+    const ctx = trimTo(String(doctorContext || ""));
+
     const usableImages = pickUsableImages(images);
     const wantsVision = usableImages.length > 0;
 
     const baseMessages = [
-      { role: "system", content: system },
-      // Provide the private context as another system message so it's always in scope
-      ...(ctx
-        ? [{ role: "system", content: `${ctxHeader}\n${ctx}` }]
-        : []),
+      { role: "system", content: finalSystem },
+      ...(ctx ? [{ role: "system", content: `${ctxHeader}\n${ctx}` }] : []),
+      ...devMessage,
+      ...extraMessages,
     ];
 
-    // Build user content (text or multimodal)
     const userTextCore = trimTo(String(message || ""), 6000);
-    const userTextWithOcr =
-      ocrCombined
-        ? `${userTextCore}\n\n${ocrHeader}\n${ocrCombined}`
-        : userTextCore;
+    const userTextWithOcr = ocrCombined ? `${userTextCore}\n\n${ocrHeader}\n${ocrCombined}` : userTextCore;
 
     const userContent = wantsVision
       ? [
@@ -104,22 +218,18 @@ export default async function handler(req, res) {
         ]
       : userTextWithOcr;
 
-    // Primary request (Vision if we can)
     let model = wantsVision ? VISION_MODEL : TEXT_MODEL;
     let body = {
       model,
       messages: [...baseMessages, { role: "user", content: userContent }],
-      temperature: wantsVision ? 0.7 : 0.2,
-      max_tokens: 1200,
+      temperature: typeof temperature === "number" ? temperature : (wantsVision ? 0.7 : 0.2),
+      max_tokens: typeof max_tokens === "number" ? max_tokens : 1200,
+      ...(response_format === "json" ? { response_format: { type: "json_object" } } : {}),
     };
 
-    // Send to DeepSeek
     let r = await fetch(`${DS_API}/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
@@ -127,23 +237,17 @@ export default async function handler(req, res) {
     if (!r.ok && wantsVision) {
       try {
         const errPayload = await r.json().catch(() => ({}));
-        // Fallback to text model using the OCR-augmented prompt
         model = TEXT_MODEL;
         body = {
           model,
-          messages: [
-            ...baseMessages,
-            { role: "user", content: userTextWithOcr },
-          ],
-          temperature: 0.2,
-          max_tokens: 1200,
+          messages: [...baseMessages, { role: "user", content: userTextWithOcr }],
+          temperature: typeof temperature === "number" ? temperature : 0.2,
+          max_tokens: typeof max_tokens === "number" ? max_tokens : 1200,
+          ...(response_format === "json" ? { response_format: { type: "json_object" } } : {}),
         };
         r = await fetch(`${DS_API}/chat/completions`, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
 
@@ -158,10 +262,7 @@ export default async function handler(req, res) {
           });
         }
       } catch {
-        // Hard fail if we can't recover
-        return res.status(r.status).json({
-          error: "DeepSeek request failed and fallback errored.",
-        });
+        return res.status(500).json({ error: "DeepSeek request failed and fallback errored." });
       }
     }
 
@@ -169,10 +270,7 @@ export default async function handler(req, res) {
     if (!r.ok) {
       return res.status(r.status).json({
         error:
-          data?.error?.message ||
-          data?.message ||
-          r.statusText ||
-          "DeepSeek request failed",
+          data?.error?.message || data?.message || r.statusText || "DeepSeek request failed",
         upstream: data,
       });
     }
