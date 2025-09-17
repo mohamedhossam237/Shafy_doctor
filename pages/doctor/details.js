@@ -48,6 +48,7 @@ const toSubStrings = (arr) => {
 };
 
 const makeId = () => `svc_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+const makeClinicId = () => `clinic_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
 
 export default function DoctorDetailsPage() {
   const router = useRouter();
@@ -70,10 +71,16 @@ export default function DoctorDetailsPage() {
 
   const [images, setImages] = React.useState([]);                 // profileImages (URL strings)
   const [subspecialties, setSubspecialties] = React.useState([]); // array of Arabic strings only
-  const [workingHours, setWorkingHours] = React.useState(null);   // object from dialog
 
   // dialogs
   const [openHours, setOpenHours] = React.useState(false);
+
+  // == Multi Clinics ==
+  const [clinics, setClinics] = React.useState([]); // [{id,name_ar,address_ar,phone,active,working_hours}]
+  const [newClinic, setNewClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
+  const [editingClinicId, setEditingClinicId] = React.useState(null);
+  const [editClinic, setEditClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
+  const [hoursClinicId, setHoursClinicId] = React.useState(null); // which clinic is editing hours
 
   // payment
   const [payType, setPayType] = React.useState('instapay'); // 'instapay' | 'wallet'
@@ -131,7 +138,7 @@ export default function DoctorDetailsPage() {
     }
   }, []); // eslint-disable-line
 
-  /* ---------- prefill (load Arabic + images + hours + payment + preselect specialty + extraServices) ---------- */
+  /* ---------- prefill (load Arabic + images + payment + preselect specialty + extras + clinics) ---------- */
   const loadData = React.useCallback(async () => {
     if (!user?.uid) return;
     try {
@@ -157,8 +164,34 @@ export default function DoctorDetailsPage() {
       // Normalize subspecialties to Arabic strings
       const subs = toSubStrings(d.subspecialties_detail || d.subspecialties || []);
       setSubspecialties(subs);
-      setWorkingHours(d.working_hours || null);
 
+      // ---- Clinics (with backward compatibility) ----
+      const incomingClinics = Array.isArray(d.clinics) ? d.clinics : [];
+      let normalizedClinics = incomingClinics
+        .filter(Boolean)
+        .map((c) => ({
+          id: c.id || makeClinicId(),
+          name_ar: (c.name_ar || 'العيادة').trim(),
+          address_ar: (c.address_ar || '').trim(),
+          phone: (c.phone || '').trim(),
+          active: c.active !== false,
+          working_hours: c.working_hours || null,
+        }));
+
+      // Back-compat: old single working_hours at root -> create one default clinic
+      if (normalizedClinics.length === 0 && d.working_hours) {
+        normalizedClinics = [{
+          id: makeClinicId(),
+          name_ar: 'العيادة الرئيسية',
+          address_ar: '',
+          phone: d.phone || '',
+          active: true,
+          working_hours: d.working_hours,
+        }];
+      }
+      setClinics(normalizedClinics);
+
+      // payment
       const p = d.payment || {};
       if (p.type) setPayType(p.type);
       setInstapayId(p.instapayId || '');
@@ -196,6 +229,7 @@ export default function DoctorDetailsPage() {
         if (byAr) setSelectedSpecialty(byAr);
       }
     } catch (e) {
+      console.error(e);
       openSnack('تعذر تحميل البيانات', 'error');
     } finally {
       setLoading(false);
@@ -347,6 +381,12 @@ export default function DoctorDetailsPage() {
     // Arabic subspecialty list already strings
     const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : []).map((s) => String(s || '').trim()).filter(Boolean);
 
+    // Clinics: ensure at least one active clinic
+    const hasActiveClinic = clinics.some(c => c.active !== false);
+    if (!hasActiveClinic) {
+      return openSnack('أضف عيادة واحدة على الأقل أو فعّل عيادة قائمة.', 'warning');
+    }
+
     setLoading(true);
     try {
       // 1) Translate all Arabic fields to English
@@ -381,7 +421,17 @@ export default function DoctorDetailsPage() {
         name_en: subs_en_list?.[i] || ar,
       }));
 
-      // 3) Save payload with both Arabic and English + specialty_key
+      // 3) Normalize clinics for persistence
+      const clinicsPayload = clinics.map(c => ({
+        id: c.id,
+        name_ar: String(c.name_ar || '').trim() || 'العيادة',
+        address_ar: String(c.address_ar || '').trim(),
+        phone: String(c.phone || '').trim(),
+        active: c.active !== false,
+        working_hours: c.working_hours || null,
+      }));
+
+      // 4) Save payload with both Arabic and English + specialty_key
       const payload = {
         // Arabic sources (inputs)
         bio_ar: String(form.bio_ar || '').trim(),
@@ -406,10 +456,10 @@ export default function DoctorDetailsPage() {
         subspecialties: subs_ar_list,
         subspecialties_detail: subs_detail,
 
-        // hours
-        working_hours: workingHours || {},
+        // NEW: multi clinics
+        clinics: clinicsPayload,
 
-        // payment
+        // payment (kept global for now)
         payment: {
           type: payType,
           instapayId: payType === 'instapay' ? instapayId.trim() : '',
@@ -517,6 +567,94 @@ export default function DoctorDetailsPage() {
     await persistExtras(next);
   };
 
+  /* ---------- Clinics: CRUD helpers ---------- */
+  const persistClinics = async (next) => {
+    setClinics(next);
+    try {
+      await updateDoc(doc(db, 'doctors', user.uid), {
+        clinics: next.map(c => ({
+          id: c.id,
+          name_ar: c.name_ar || 'العيادة',
+          address_ar: c.address_ar || '',
+          phone: c.phone || '',
+          active: c.active !== false,
+          working_hours: c.working_hours || null,
+        })),
+        updatedAt: serverTimestamp(),
+      });
+      openSnack('تم تحديث بيانات العيادات', 'success');
+    } catch {
+      await setDoc(doc(db, 'doctors', user.uid), {
+        clinics: next.map(c => ({
+          id: c.id,
+          name_ar: c.name_ar || 'العيادة',
+          address_ar: c.address_ar || '',
+          phone: c.phone || '',
+          active: c.active !== false,
+          working_hours: c.working_hours || null,
+        })),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      openSnack('تم حفظ بيانات العيادات', 'success');
+    }
+  };
+
+  const addClinic = async () => {
+    const name = String(newClinic.name_ar || '').trim();
+    const address = String(newClinic.address_ar || '').trim();
+    const phone = String(newClinic.phone || '').trim();
+    if (!name) return openSnack('اكتب اسم العيادة', 'warning');
+
+    const next = [
+      ...clinics,
+      { id: makeClinicId(), name_ar: name, address_ar: address, phone, active: true, working_hours: null }
+    ];
+    setNewClinic({ name_ar: '', address_ar: '', phone: '' });
+    await persistClinics(next);
+  };
+
+  const startEditClinic = (c) => {
+    setEditingClinicId(c.id);
+    setEditClinic({ name_ar: c.name_ar || '', address_ar: c.address_ar || '', phone: c.phone || '' });
+  };
+  const cancelEditClinic = () => { setEditingClinicId(null); setEditClinic({ name_ar: '', address_ar: '', phone: '' }); };
+
+  const saveEditClinic = async (c) => {
+    const name = String(editClinic.name_ar || '').trim();
+    if (!name) return openSnack('اكتب اسم العيادة', 'warning');
+    const next = clinics.map(x => x.id === c.id ? {
+      ...x,
+      name_ar: name,
+      address_ar: String(editClinic.address_ar || '').trim(),
+      phone: String(editClinic.phone || '').trim(),
+    } : x);
+    await persistClinics(next);
+    cancelEditClinic();
+  };
+
+  const toggleClinicActive = async (c) => {
+    const next = clinics.map(x => x.id === c.id ? { ...x, active: !x.active } : x);
+    await persistClinics(next);
+  };
+
+  const deleteClinic = async (c) => {
+    const next = clinics.filter(x => x.id !== c.id);
+    await persistClinics(next);
+  };
+
+  const openHoursForClinic = (c) => {
+    setHoursClinicId(c.id);
+    setOpenHours(true);
+  };
+
+  const handleHoursSaved = (obj) => {
+    setOpenHours(false);
+    if (!hoursClinicId) return;
+    const next = clinics.map(c => c.id === hoursClinicId ? { ...c, working_hours: obj || {} } : c);
+    setHoursClinicId(null);
+    persistClinics(next);
+  };
+
   return (
     <AppLayout>
       <Container maxWidth="md" sx={{ py: 3 }} dir={dir}>
@@ -615,7 +753,7 @@ export default function DoctorDetailsPage() {
               <TextField type="number" label="سعر الكشف" value={form.checkupPrice} onChange={onChange('checkupPrice')} fullWidth />
             </Grid>
             <Grid item xs={6} md={3}>
-              <TextField label="الهاتف" value={form.phone} onChange={onChange('phone')} fullWidth />
+              <TextField label="الهاتف (عام)" value={form.phone} onChange={onChange('phone')} fullWidth />
             </Grid>
           </Grid>
         </Paper>
@@ -657,7 +795,7 @@ export default function DoctorDetailsPage() {
             sx={{ mb: 1.5 }}
           />
 
-          {/* Subspecialties as TextField (comma-separated), replaces dialog/checkboxes */}
+          {/* Subspecialties as TextField (comma-separated) */}
           <TextField
             label="التخصصات الفرعية (اكتبها مفصولة بفواصل)"
             value={subspecialties.join('، ')}
@@ -677,29 +815,143 @@ export default function DoctorDetailsPage() {
           />
         </Paper>
 
-        {/* Clinic Hours */}
+        {/* Clinics (Multi-Clinic) */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <Chip icon={<AccessTimeIcon />} label="ساعات العمل" color="primary" />
+            <Chip icon={<LocalHospitalIcon />} label="العيادات" color="primary" />
           </Stack>
-          <Button
-            variant="outlined"
-            startIcon={<EditIcon />}
-            onClick={() => setOpenHours(true)}
-            sx={{ borderRadius: 2 }}
-            disabled={!user?.uid}
-          >
-            تعديل الساعات
-          </Button>
-          {workingHours ? (
-            <Box sx={{ mt: 1, color: 'text.secondary' }}>
-              <Typography variant="body2">تم ضبط الساعات.</Typography>
-            </Box>
-          ) : (
-            <Box sx={{ mt: 1, color: 'text.secondary' }}>
-              <Typography variant="body2">لا توجد ساعات بعد.</Typography>
-            </Box>
-          )}
+
+          {/* Add new clinic */}
+          <Grid container spacing={1}>
+            <Grid item xs={12} md={4}>
+              <TextField
+                label="اسم العيادة"
+                value={newClinic.name_ar}
+                onChange={(e) => setNewClinic((c) => ({ ...c, name_ar: e.target.value }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={5}>
+              <TextField
+                label="العنوان"
+                value={newClinic.address_ar}
+                onChange={(e) => setNewClinic((c) => ({ ...c, address_ar: e.target.value }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={7} md={2}>
+              <TextField
+                label="هاتف العيادة"
+                value={newClinic.phone}
+                onChange={(e) => setNewClinic((c) => ({ ...c, phone: e.target.value }))}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={5} md={1} sx={{ display: 'flex', alignItems: 'stretch' }}>
+              <Button
+                onClick={addClinic}
+                variant="contained"
+                sx={{ borderRadius: 2, width: '100%' }}
+                disabled={!user?.uid}
+              >
+                إضافة
+              </Button>
+            </Grid>
+          </Grid>
+
+          {/* List clinics */}
+          <Stack spacing={1.25} sx={{ mt: 1 }}>
+            {clinics.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                لا توجد عيادات بعد.
+              </Typography>
+            ) : (
+              clinics.map((c) => {
+                const editing = editingClinicId === c.id;
+                return (
+                  <Paper key={c.id} variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                    {editing ? (
+                      <Grid container spacing={1} alignItems="center">
+                        <Grid item xs={12} md={3}>
+                          <TextField
+                            label="اسم العيادة"
+                            value={editClinic.name_ar}
+                            onChange={(e) => setEditClinic((v) => ({ ...v, name_ar: e.target.value }))}
+                            fullWidth size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            label="العنوان"
+                            value={editClinic.address_ar}
+                            onChange={(e) => setEditClinic((v) => ({ ...v, address_ar: e.target.value }))}
+                            fullWidth size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={7} md={2}>
+                          <TextField
+                            label="هاتف العيادة"
+                            value={editClinic.phone}
+                            onChange={(e) => setEditClinic((v) => ({ ...v, phone: e.target.value }))}
+                            fullWidth size="small"
+                          />
+                        </Grid>
+                        <Grid item xs={5} md={1}>
+                          <Stack direction="row" spacing={1}>
+                            <Button size="small" variant="contained" onClick={() => saveEditClinic(c)}>حفظ</Button>
+                            <Button size="small" onClick={cancelEditClinic}>إلغاء</Button>
+                          </Stack>
+                        </Grid>
+                      </Grid>
+                    ) : (
+                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                        <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                            <Typography fontWeight={800} sx={{ maxWidth: { xs: '100%', md: 400 }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {c.name_ar}
+                            </Typography>
+                            <Chip
+                              label={c.active ? 'مفعل' : 'موقوف'}
+                              size="small"
+                              color={c.active ? 'success' : 'default'}
+                              sx={{ fontWeight: 700 }}
+                            />
+                          </Stack>
+                          <Typography variant="body2" color="text.secondary">
+                            {c.address_ar || '—'}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            هاتف: {c.phone || '—'}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {c.working_hours ? 'تم ضبط ساعات العمل' : 'لا توجد ساعات عمل بعد'}
+                          </Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={0.5}>
+                          <IconButton aria-label="تعديل الساعات" onClick={() => openHoursForClinic(c)} title="تعديل ساعات العمل">
+                            <AccessTimeIcon />
+                          </IconButton>
+                          <IconButton aria-label="تبديل الحالة" onClick={() => toggleClinicActive(c)}>
+                            {c.active ? <ToggleOnIcon color="success" /> : <ToggleOffIcon />}
+                          </IconButton>
+                          <IconButton aria-label="تعديل" onClick={() => startEditClinic(c)}>
+                            <EditIcon />
+                          </IconButton>
+                          <IconButton aria-label="حذف" onClick={() => deleteClinic(c)}>
+                            <DeleteOutlineIcon color="error" />
+                          </IconButton>
+                        </Stack>
+                      </Stack>
+                    )}
+                  </Paper>
+                );
+              })
+            )}
+          </Stack>
+
+          <Alert severity="info" sx={{ mt: 1 }}>
+            يمكن إضافة أكثر من عيادة لكل طبيب، ولكل عيادة ساعات عمل خاصة بها.
+          </Alert>
         </Paper>
 
         {/* Payment */}
@@ -902,14 +1154,14 @@ export default function DoctorDetailsPage() {
           </Button>
         </Box>
 
-        {/* dialogs */}
+        {/* Hours dialog (per clinic) */}
         <EditHoursDialog
           open={openHours}
-          onClose={() => setOpenHours(false)}
+          onClose={() => { setOpenHours(false); setHoursClinicId(null); }}
           doctorUID={user?.uid || 'temp'}
           isArabic={true}
-          initialHours={workingHours}
-          onSaved={(obj) => { setWorkingHours(obj || {}); setOpenHours(false); }}
+          initialHours={clinics.find(c => c.id === hoursClinicId)?.working_hours || null}
+          onSaved={handleHoursSaved}
         />
 
         <Snackbar

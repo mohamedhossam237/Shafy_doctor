@@ -31,7 +31,7 @@ import {
   Radio,
   MenuItem,
 } from '@mui/material';
-
+import EditClinicsDialog from '@/components/doctor/EditClinicsDialog';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
 import AddAPhotoIcon from '@mui/icons-material/AddAPhoto';
@@ -277,7 +277,33 @@ function EmptyPrompt({ text, actionLabel, onAction, rtl }) {
     </Stack>
   );
 }
-
+// Normalize clinics from new array OR legacy single clinic/working_hours
+const useNormalizedClinics = (doctor) => React.useMemo(() => {
+  if (!doctor) return [];
+  const arr = Array.isArray(doctor.clinics) ? doctor.clinics.filter(Boolean) : [];
+  if (arr.length > 0) {
+    return arr.map(c => ({
+      id: c.id || c._id || `c_${Math.random()}`,
+      name_ar: c.name_ar ?? c.name ?? 'العيادة',
+      address_ar: c.address_ar ?? c.address ?? '',
+      phone: c.phone ?? '',
+      active: c.active !== false,
+      working_hours: c.working_hours || null,
+    }));
+  }
+  // legacy fallback
+  if (doctor.clinic || doctor.working_hours || doctor.workingHours) {
+    return [{
+      id: 'legacy',
+      name_ar: doctor?.clinic?.name || 'العيادة الرئيسية',
+      address_ar: doctor?.clinic?.address || '',
+      phone: doctor?.clinic?.phone || doctor?.phone || '',
+      active: true,
+      working_hours: doctor?.clinic?.working_hours || doctor?.working_hours || doctor?.workingHours || null,
+    }];
+  }
+  return [];
+}, [doctor]);
 /* UPDATED: HoursGrid now supports { open, start, end } objects, arrays, or strings */
 function HoursGrid({ hours = {}, rtl }) {
   const days = [
@@ -657,12 +683,13 @@ export default function DoctorProfilePage() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState('');
   const [snack, setSnack] = React.useState({ open: false, msg: '', severity: 'success' });
-
+  const clinicsList = useNormalizedClinics(doctor);
   const [dlg, setDlg] = React.useState({
     overview: false,
     services: false,
     subspecialties: false,
     clinic: false,
+    clinics: false,
     hours: false,
     education: false,
     certs: false,
@@ -825,7 +852,7 @@ export default function DoctorProfilePage() {
     { id: 'payment', label: t('Payment', 'الدفع'), icon: <MonetizationOnIcon /> }, // NEW
     { id: 'services', label: t('Services', 'الخدمات'), icon: <MedicalServicesIcon /> },
     { id: 'subspecialties', label: t('Subspecialties', 'التخصصات الفرعية'), icon: <LocalHospitalIcon /> },
-    { id: 'clinic', label: t('Clinic', 'العيادة'), icon: <PlaceIcon /> },
+    { id: 'clinic', label: t('Clinics', 'العيادات'), icon: <PlaceIcon /> },
     { id: 'hours', label: t('Hours', 'الساعات'), icon: <AccessTimeIcon /> },
     { id: 'education', label: t('Education', 'التعليم'), icon: <SchoolIcon /> },
     { id: 'certs', label: t('Certs', 'الشهادات'), icon: <WorkspacePremiumIcon /> },
@@ -1210,74 +1237,136 @@ export default function DoctorProfilePage() {
                 </Grid>
               </Grid>
 
-              {/* Clinic & Hours */}
-              <Grid container spacing={1.25} sx={{ mt: 0.5 }}>
-                <Grid item xs={12} md={7}>
-                  <SectionCard
-                    id="clinic"
-                    icon={<PlaceIcon />}
-                    title={t('Clinic Location','موقع العيادة')}
-                    rtl={isArabic}
-                    action={
-                      <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('clinic')} sx={{ borderRadius: 2 }}>
-                        {t('Edit','تعديل')}
-                      </Button>
-                    }
+             {/* Clinic & Hours */}
+<Grid container spacing={1.25} sx={{ mt: 0.5 }}>
+  {/* Clinics */}
+  <Grid item xs={12} md={7}>
+    <SectionCard
+      id="clinic"
+      icon={<PlaceIcon />}
+      title={t('Clinics','العيادات')}
+      rtl={isArabic}
+      action={
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<EditIcon />}
+          onClick={() => openDlg('clinics')}
+          sx={{ borderRadius: 2 }}
+        >
+          {t('Manage clinics','إدارة العيادات')}
+        </Button>
+      }
+    >
+      {clinicsList && clinicsList.length ? (
+        <Grid container spacing={1.25}>
+          {clinicsList.map((c) => (
+            <Grid item xs={12} key={c.id}>
+              <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                <Stack spacing={0.5}>
+                  <Stack
+                    direction={isArabic ? 'row-reverse' : 'row'}
+                    spacing={1}
+                    alignItems="center"
+                    useFlexGap
+                    flexWrap="wrap"
                   >
-                    {doctor?.clinic?.address || doctor?.clinic?.name ? (
-                      <Stack spacing={0.75}>
-                        {doctor?.clinic?.name && <Typography fontWeight={800}>{doctor.clinic.name}</Typography>}
-                        <Typography color="text.secondary">{[doctor?.clinic?.address, doctor?.clinic?.city].filter(Boolean).join(', ')}</Typography>
-                        <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} sx={{ mt: 0.5 }}>
-                          {doctor?.clinic?.mapUrl && (
-                            <Button size="small" variant="outlined" component={MLink} href={doctor.clinic.mapUrl} target="_blank" rel="noopener noreferrer" startIcon={<PlaceIcon />} sx={{ borderRadius: 2 }}>
-                              {t('Open in Maps','افتح في الخرائط')}
-                            </Button>
-                          )}
-                          {doctor?.clinic?.whatsapp && (
-                            <Button size="small" variant="outlined" component={MLink} href={`https://wa.me/${doctor.clinic.whatsapp}`} target="_blank" rel="noopener noreferrer" startIcon={<PhoneIcon />} sx={{ borderRadius: 2 }}>
-                              WhatsApp
-                            </Button>
-                          )}
-                          {doctor?.clinic?.phone && (
-                            <Button size="small" variant="outlined" component={MLink} href={`tel:${doctor.clinic.phone}`} startIcon={<PhoneIcon />} sx={{ borderRadius: 2 }}>
-                              {doctor.clinic.phone}
-                            </Button>
-                          )}
-                        </Stack>
-                      </Stack>
-                    ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Add your clinic address and contact details.','أضف عنوان العيادة وبيانات التواصل.')} actionLabel={t('Add location','إضافة الموقع')} onAction={() => openDlg('clinic')} />
-                    )}
-                  </SectionCard>
-                </Grid>
-                <Grid item xs={12} md={5}>
-                  <SectionCard
-                    id="hours"
-                    icon={<AccessTimeIcon />}
-                    title={t('Working Hours','ساعات العمل')}
-                    rtl={isArabic}
-                    action={
+                    <Chip label={c.name_ar || '—'} sx={{ fontWeight: 800 }} />
+                    <Chip
+                      label={c.active ? t('Active','مفعل') : t('Inactive','موقوف')}
+                      color={c.active ? 'success' : 'default'}
+                      sx={{ fontWeight: 700 }}
+                    />
+                    {c.phone ? (
                       <Button
                         size="small"
                         variant="outlined"
-                        startIcon={<EditIcon />}
-                        onClick={() => openDlg('hours')}
+                        component={MLink}
+                        href={`tel:${c.phone}`}
+                        startIcon={<PhoneIcon />}
                         sx={{ borderRadius: 2 }}
-                        disabled={!user?.uid}
                       >
-                        {t('Edit','تعديل')}
+                        {c.phone}
                       </Button>
-                    }
-                  >
-                    {resolvedHours ? (
-                      <HoursGrid hours={resolvedHours} rtl={isArabic} />
-                    ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Let patients know your weekly schedule.','عرّف المرضى على جدول عملك الأسبوعي.')} actionLabel={t('Add hours','إضافة الساعات')} onAction={() => openDlg('hours')} />
-                    )}
-                  </SectionCard>
-                </Grid>
-              </Grid>
+                    ) : null}
+                  </Stack>
+
+                  {c.address_ar ? (
+                    <Typography variant="body2" color="text.secondary">
+                      {c.address_ar}
+                    </Typography>
+                  ) : null}
+
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
+                    {c.working_hours
+                      ? t('Working hours set','تم ضبط ساعات العمل')
+                      : t('No hours yet','لا توجد ساعات بعد')}
+                  </Typography>
+                </Stack>
+              </Paper>
+            </Grid>
+          ))}
+        </Grid>
+      ) : (
+        <EmptyPrompt
+          rtl={isArabic}
+          text={t('Add your clinics (name, address, phone).','أضف عياداتك (الاسم، العنوان، الهاتف).')}
+          actionLabel={t('Add clinic','إضافة عيادة')}
+          onAction={() => openDlg('clinics')}
+        />
+      )}
+    </SectionCard>
+  </Grid>
+
+  {/* Hours (per clinic) */}
+  <Grid item xs={12} md={5}>
+    <SectionCard
+      id="hours"
+      icon={<AccessTimeIcon />}
+      title={t('Working Hours','ساعات العمل')}
+      rtl={isArabic}
+      action={
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<EditIcon />}
+          onClick={() => openDlg('clinics')}
+          sx={{ borderRadius: 2 }}
+          disabled={!user?.uid}
+        >
+          {t('Manage','إدارة')}
+        </Button>
+      }
+    >
+      {clinicsList && clinicsList.length ? (
+        <Stack spacing={1}>
+          {clinicsList.map((c) => (
+            <Paper key={c.id} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
+              <Typography variant="caption" fontWeight={800} sx={{ mb: 0.5 }}>
+                {c.name_ar || '—'}
+              </Typography>
+              {c.working_hours ? (
+                <HoursGrid hours={c.working_hours} rtl={isArabic} />
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t('No hours yet','لا توجد ساعات بعد')}
+                </Typography>
+              )}
+            </Paper>
+          ))}
+        </Stack>
+      ) : (
+        <EmptyPrompt
+          rtl={isArabic}
+          text={t('Let patients know your weekly schedule.','عرّف المرضى على جدول عملك الأسبوعي.')}
+          actionLabel={t('Add hours','إضافة الساعات')}
+          onAction={() => openDlg('clinics')}
+        />
+      )}
+    </SectionCard>
+  </Grid>
+</Grid>
+
 
               {/* Education, Certifications, Memberships, Awards */}
               <Grid container spacing={1.25} sx={{ mt: 0.5 }}>
@@ -1462,13 +1551,15 @@ export default function DoctorProfilePage() {
         subspecialties={doctor?.subspecialties || []}
         onSaved={fetchDoctor}
       />
-      <EditClinicDialog
-        open={dlg.clinic}
-        onClose={() => closeDlg('clinic')}
-        isArabic={isArabic}
-        clinic={doctor?.clinic || {}}
-        onSaved={fetchDoctor}
-      />
+    <EditClinicsDialog
+      open={dlg.clinics}
+      onClose={() => closeDlg('clinics')}
+      isArabic={isArabic}
+      doctorUID={user?.uid}
+      clinics={clinicsList}
+      onSaved={fetchDoctor}
+    />
+
       {/* UPDATED: pass doctorUID + initialHours; remove old `hours` prop */}
       <EditHoursDialog
         open={dlg.hours}
