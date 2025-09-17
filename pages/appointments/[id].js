@@ -47,7 +47,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import PlaceIcon from '@mui/icons-material/Place'; // NEW
+import PlaceIcon from '@mui/icons-material/Place';
 
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
@@ -732,13 +732,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     if (status !== 'confirmed') applyStatus('confirmed');
   };
 
-  const handleReportSaved = React.useCallback(() => {
-    setSnack({ open: true, severity: 'success', msg: t('Report saved', 'تم حفظ التقرير') });
-    setReportOpen(false);
-    fetchReports();
-  }, [fetchReports, t]);
-
-  // Fetch reports linked to this appointment
+  // ---- Fetch reports (moved ABOVE handleReportSaved to avoid TDZ) ----
   const fetchReports = React.useCallback(async () => {
     if (!id) return;
     setReportsLoading(true);
@@ -759,6 +753,12 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   React.useEffect(() => {
     fetchReports();
   }, [fetchReports]);
+
+  const handleReportSaved = React.useCallback(() => {
+    setSnack({ open: true, severity: 'success', msg: t('Report saved', 'تم حفظ التقرير') });
+    setReportOpen(false);
+    fetchReports();
+  }, [fetchReports, t]);
 
   // Payment-related derived values
   const payment = appt?.payment || {};
@@ -976,7 +976,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                   </Paper>
                 </Grid>
 
-                {/* NEW: Clinic row (shown when the appointment is attached to a clinic) */}
+                {/* Clinic row (shown when the appointment is attached to a clinic) */}
                 {!!clinicId && (
                   <Grid item xs={12}>
                     <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
@@ -1074,8 +1074,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                                   size="small"
                                   color="error"
                                   onClick={() => {
-                                    // eslint-disable-next-line no-restricted-globals
-                                    const ok = confirm(t('Delete this fee?', 'حذف هذه التكلفة؟'));
+                                    const ok = window.confirm(t('Delete this fee?', 'حذف هذه التكلفة؟'));
                                     if (ok) deleteFee(fee.id);
                                   }}
                                 >
