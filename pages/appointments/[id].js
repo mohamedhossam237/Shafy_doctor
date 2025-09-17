@@ -47,6 +47,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import PlaceIcon from '@mui/icons-material/Place'; // NEW
 
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
@@ -103,7 +104,7 @@ function apptTimeMinutes(appt) {
   if (appt?.time) {
     const [h, m] = String(appt.time).split(':').map((x) => parseInt(x, 10));
     return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-    }
+  }
   const d = toDate(appt?.appointmentDate);
   if (!d) return 24 * 60;
   return d.getHours() * 60 + d.getMinutes();
@@ -154,6 +155,19 @@ const safeNum = (v) => {
 };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+// sanitize clinics from doctor doc
+const sanitizeClinics = (arr) =>
+  (Array.isArray(arr) ? arr : [])
+    .filter(Boolean)
+    .map((c) => ({
+      id: c.id || c._id || `c_${Math.random().toString(36).slice(2, 8)}`,
+      name_en: String(c.name_en || c.name || '').trim(),
+      name_ar: String(c.name_ar || c.name || '').trim(),
+      address_en: String(c.address_en || c.address || '').trim(),
+      address_ar: String(c.address_ar || c.address || '').trim(),
+      active: c.active !== false,
+    }));
 
 /* ---------------- mini view dialog for a report ---------------- */
 
@@ -472,7 +486,6 @@ function UpdateAppointmentDialog({
       onSaved?.({ date: dateStr, time: timeStr, appointmentDate, status });
       onClose?.();
     } catch (e) {
-      // surface error inline via alert if needed
       alert(e?.message || t('Failed to update appointment', 'تعذر تحديث الموعد'));
     } finally {
       setSaving(false);
@@ -563,6 +576,9 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const [extraDialogOpen, setExtraDialogOpen] = React.useState(false);
   const [editingFee, setEditingFee] = React.useState(null);
 
+  // clinics for label resolution
+  const [clinics, setClinics] = React.useState([]); // NEW
+
   const statusOptions = [
     { v: 'pending', label: t('Pending', 'قيد الانتظار') },
     { v: 'confirmed', label: t('Confirmed', 'مؤكد') },
@@ -597,34 +613,36 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     })();
   }, [id, t]);
 
-  // Fetch reports linked to this appointment
-  const fetchReports = React.useCallback(async () => {
-    if (!id) return;
-    setReportsLoading(true);
-    try {
-      const qRef = query(collection(db, 'reports'), where('appointmentId', '==', String(id)));
-      const snap = await getDocs(qRef);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      rows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
-      setReports(rows);
-    } catch (e) {
-      console.error(e);
-      setSnack({ open: true, severity: 'error', msg: t('Failed to load reports', 'تعذر تحميل التقارير') });
-    } finally {
-      setReportsLoading(false);
-    }
-  }, [id, t]);
-
+  // Load doctor's clinics to resolve clinic label (shared across all clinics)
   React.useEffect(() => {
-    fetchReports();
-  }, [fetchReports]);
+    const run = async () => {
+      const docUID = appt?.doctorUID || appt?.doctorId;
+      if (!docUID) {
+        setClinics([]);
+        return;
+      }
+      try {
+        const snap = await getDoc(doc(db, 'doctors', String(docUID)));
+        if (snap.exists()) {
+          const data = snap.data() || {};
+          setClinics(sanitizeClinics(data.clinics));
+        } else {
+          setClinics([]);
+        }
+      } catch {
+        setClinics([]);
+      }
+    };
+    run();
+  }, [appt?.doctorUID, appt?.doctorId]);
 
-  // Compute queue number
+  // Compute queue number (scoped to same clinic if clinicId present)
   React.useEffect(() => {
     if (!appt) return;
 
     const dateStr = apptLocalDate(appt);
     const docUID = appt?.doctorUID || appt?.doctorId;
+    const clinicId = appt?.clinicId || appt?.clinicID || '';
     if (!dateStr || !docUID) {
       setQueueNo(null);
       return;
@@ -644,9 +662,14 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         }
         const all = Array.from(map.values());
 
-        all.sort((a, b) => apptTimeMinutes(a) - apptTimeMinutes(b));
+        // If this appointment has a clinic, restrict queue to the same clinic
+        const sameClinic = clinicId
+          ? all.filter((x) => (x.clinicId || x.clinicID || '') === clinicId)
+          : all;
 
-        const idx = all.findIndex((x) => x.id === appt.id);
+        sameClinic.sort((a, b) => apptTimeMinutes(a) - apptTimeMinutes(b));
+
+        const idx = sameClinic.findIndex((x) => x.id === appt.id);
         setQueueNo(idx === -1 ? null : idx + 1);
       } catch {
         setQueueNo(null);
@@ -715,6 +738,28 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     fetchReports();
   }, [fetchReports, t]);
 
+  // Fetch reports linked to this appointment
+  const fetchReports = React.useCallback(async () => {
+    if (!id) return;
+    setReportsLoading(true);
+    try {
+      const qRef = query(collection(db, 'reports'), where('appointmentId', '==', String(id)));
+      const snap = await getDocs(qRef);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
+      setReports(rows);
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Failed to load reports', 'تعذر تحميل التقارير') });
+    } finally {
+      setReportsLoading(false);
+    }
+  }, [id, t]);
+
+  React.useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
+
   // Payment-related derived values
   const payment = appt?.payment || {};
   const price = appt?.doctorPrice ?? null;
@@ -776,6 +821,15 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     setExtraDialogOpen(false);
     setEditingFee(null);
   };
+
+  // current clinic metadata
+  const clinicId = appt?.clinicId || appt?.clinicID || '';
+  const clinicLabel = React.useMemo(() => {
+    if (!clinicId) return '';
+    const c = clinics.find((x) => x.id === clinicId);
+    if (!c) return '';
+    return isAr ? (c.name_ar || c.name_en) : (c.name_en || c.name_ar);
+  }, [clinicId, clinics, isAr]);
 
   return (
     <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
@@ -890,7 +944,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
 
               <Divider />
 
-              {/* Time & Doctor */}
+              {/* Time, Doctor, Clinic */}
               <Grid container spacing={1.25}>
                 <Grid item xs={12}>
                   <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
@@ -921,6 +975,21 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     </Stack>
                   </Paper>
                 </Grid>
+
+                {/* NEW: Clinic row (shown when the appointment is attached to a clinic) */}
+                {!!clinicId && (
+                  <Grid item xs={12}>
+                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <PlaceIcon color="action" />
+                        <Typography sx={{ fontWeight: 700 }}>{t('Clinic', 'العيادة')}:</Typography>
+                        <Typography color="text.secondary">
+                          {clinicLabel || clinicId}
+                        </Typography>
+                      </Stack>
+                    </Paper>
+                  </Grid>
+                )}
 
                 {/* Patient */}
                 <Grid item xs={12}>
@@ -1005,7 +1074,6 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                                   size="small"
                                   color="error"
                                   onClick={() => {
-                                    // simple confirm; replace with nicer dialog if you prefer
                                     // eslint-disable-next-line no-restricted-globals
                                     const ok = confirm(t('Delete this fee?', 'حذف هذه التكلفة؟'));
                                     if (ok) deleteFee(fee.id);
@@ -1212,7 +1280,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                 )}
               </Box>
 
-              {/* Footer actions — removed “Actions” button per request */}
+              {/* Footer actions */}
               <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 0.5 }}>
                 <Button component={Link} href={backHref} variant="outlined">
                   {t('Back', 'رجوع')}

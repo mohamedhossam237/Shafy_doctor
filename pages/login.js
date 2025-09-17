@@ -20,7 +20,15 @@ import LockOutlined from '@mui/icons-material/LockOutlined';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  collection,
+  getDocs,
+  query,
+  where,
+  limit,
+} from 'firebase/firestore';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,6 +43,56 @@ export default function LoginPage() {
   const [snack, setSnack] = React.useState({ open: false, message: '', severity: 'info' });
   const openSnack = (message, severity = 'info') => setSnack({ open: true, message, severity });
 
+  // ---- role gate helpers ----
+  const existsByUid = async (coll, uid) => {
+    if (!uid) return { exists: false, data: null };
+    const s = await getDoc(doc(db, coll, uid));
+    return { exists: s.exists(), data: s.exists() ? s.data() : null };
+  };
+  const existsByEmail = async (coll, em) => {
+    if (!em) return { exists: false, data: null };
+    const qy = query(collection(db, coll), where('email', '==', em), limit(1));
+    const s = await getDocs(qy);
+    if (s.empty) return { exists: false, data: null };
+    const d = s.docs[0];
+    return { exists: true, data: d.data() };
+  };
+
+  /** Doctor-only gate:
+   *  allow only if in doctors (uid OR email) AND NOT in patients/assistants (uid/email).
+   *  If you prefer to allow doctors even if they also exist as patient/assistant,
+   *  set REQUIRE_EXCLUSIVE_ROLE to false.
+   */
+  const REQUIRE_EXCLUSIVE_ROLE = true;
+
+  const isDoctorOnly = async (uid, emRaw) => {
+    const em = (emRaw || '').toLowerCase();
+
+    const [
+      dUid, dEmail,
+      pUid, pEmail,
+      aUid, aEmail,
+    ] = await Promise.all([
+      existsByUid('doctors', uid), existsByEmail('doctors', em),
+      existsByUid('patients', uid), existsByEmail('patients', em),
+      existsByUid('assistants', uid), existsByEmail('assistants', em),
+    ]);
+
+    const doctorPresent = dUid.exists || dEmail.exists;
+    const doctorData = dUid.data || dEmail.data || null;
+
+    const patientPresent = pUid.exists || pEmail.exists;
+    const assistantPresent = aUid.exists || aEmail.exists;
+
+    if (!doctorPresent) {
+      return { ok: false, reason: patientPresent ? 'patient' : assistantPresent ? 'assistant' : 'unknown', doctorData: null };
+    }
+    if (REQUIRE_EXCLUSIVE_ROLE && (patientPresent || assistantPresent)) {
+      return { ok: false, reason: patientPresent ? 'patient' : 'assistant', doctorData };
+    }
+    return { ok: true, reason: null, doctorData };
+  };
+
   const signIn = async (e) => {
     e.preventDefault();
     if (!email || !password) {
@@ -43,25 +101,33 @@ export default function LoginPage() {
     }
     setLoading(true);
     try {
-      const cred = await emailLogin(email.trim(), password.trim());
+      const cred = await emailLogin(email.trim().toLowerCase(), password.trim());
       const uid = cred?.user?.uid;
+      const em = cred?.user?.email || email.trim().toLowerCase();
 
-      const dSnap = await getDoc(doc(db, 'doctors', uid));
-      if (!dSnap.exists()) {
-        await signOut();
-        openSnack(isArabic ? 'المستخدم ليس طبيبًا' : 'User is not a doctor', 'error');
+      // role gate
+      const gate = await isDoctorOnly(uid, em);
+      if (!gate.ok) {
+        await signOut().catch(() => {});
+        const msg =
+          gate.reason === 'patient'
+            ? (isArabic ? 'هذا الحساب مخصص للمريض، غير مسموح بالدخول هنا.' : 'This account is a patient account; access is not allowed here.')
+            : gate.reason === 'assistant'
+              ? (isArabic ? 'هذا الحساب مخصص للمساعد، غير مسموح بالدخول هنا.' : 'This account is an assistant account; access is not allowed here.')
+              : (isArabic ? 'لا يوجد حساب طبيب مرتبط بهذه المعلومات.' : 'No doctor account found for these credentials.');
+        openSnack(msg, 'error');
         return;
       }
 
-      const isProfileCompleted = dSnap.data()?.profileCompleted === true;
+      const isProfileCompleted = gate.doctorData?.profileCompleted === true;
       router.replace(isProfileCompleted ? '/' : '/doctor/details');
-    } catch (e) {
-      const code = e?.code;
+    } catch (e2) {
+      const code = e2?.code;
       let msg = isArabic ? 'فشل تسجيل الدخول' : 'Login failed';
       if (code === 'auth/invalid-email') msg = isArabic ? 'البريد الإلكتروني غير صالح' : 'Invalid email address';
       else if (code === 'auth/user-not-found') msg = isArabic ? 'المستخدم غير موجود' : 'User not found';
       else if (code === 'auth/wrong-password') msg = isArabic ? 'كلمة المرور غير صحيحة' : 'Incorrect password';
-      else if (e?.message) msg = `${isArabic ? 'فشل تسجيل الدخول' : 'Login failed'}: ${e.message}`;
+      else if (e2?.message) msg = `${isArabic ? 'فشل تسجيل الدخول' : 'Login failed'}: ${e2.message}`;
       openSnack(msg, 'error');
     } finally {
       setLoading(false);

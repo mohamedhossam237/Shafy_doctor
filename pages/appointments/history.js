@@ -26,12 +26,13 @@ import PersonIcon from '@mui/icons-material/Person';
 import LocalPhoneIcon from '@mui/icons-material/LocalPhone';
 import TagIcon from '@mui/icons-material/Tag';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
+import PlaceIcon from '@mui/icons-material/Place';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
 
 /* ---------------- utils (unify date/time across shapes) ---------------- */
 
@@ -101,9 +102,19 @@ function matchesSearch(appt, term) {
   return name.includes(q) || phone.includes(q.replace(/[^\d+]/g, ''));
 }
 
+const sanitizeClinics = (arr) =>
+  (Array.isArray(arr) ? arr : [])
+    .filter(Boolean)
+    .map((c) => ({
+      id: c.id || c._id || `c_${Math.random().toString(36).slice(2, 8)}`,
+      name_en: String(c.name_en || c.name || '').trim(),
+      name_ar: String(c.name_ar || c.name || '').trim(),
+      active: c.active !== false,
+    }));
+
 /* ---------------- row card ---------------- */
 
-function RowCard({ appt, isArabic, locale }) {
+function RowCard({ appt, isArabic, locale, clinicLabel }) {
   const d = appt._dt;
   const href = `/appointments/${appt.id}${isArabic ? '?lang=ar' : ''}`;
 
@@ -133,11 +144,20 @@ function RowCard({ appt, isArabic, locale }) {
         </Box>
       </Stack>
 
-      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
         <EventIcon color="action" />
         <Typography variant="body2" color="text.secondary" noWrap title={fmtDateTime(d, locale)}>
           {fmtDateTime(d, locale)}
         </Typography>
+        {clinicLabel ? (
+          <Chip
+            size="small"
+            icon={<PlaceIcon />}
+            label={clinicLabel}
+            variant="outlined"
+            sx={{ borderRadius: 2, ml: 0.5, maxWidth: '60%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
+          />
+        ) : null}
       </Stack>
 
       <Chip
@@ -185,25 +205,58 @@ export default function AppointmentsHistoryPage() {
   const [fromStr, setFromStr] = React.useState(''); // YYYY-MM-DD
   const [toStr, setToStr] = React.useState('');     // YYYY-MM-DD
 
+  // clinics for filter
+  const [clinics, setClinics] = React.useState([]);
+  const [selectedClinicId, setSelectedClinicId] = React.useState('all');
+  const [baseCount, setBaseCount] = React.useState(0);
+  const [countsByClinic, setCountsByClinic] = React.useState({}); // { clinicId: n }
+
   const backHref = `/appointments${isArabic ? '?lang=ar' : ''}`;
+
+  // map clinic id -> display name
+  const clinicNameById = React.useMemo(() => {
+    const map = new Map();
+    clinics.forEach((c) => {
+      const label = isArabic ? (c.name_ar || c.name_en) : (c.name_en || c.name_ar);
+      map.set(c.id, label || (isArabic ? 'عيادة' : 'Clinic'));
+    });
+    return map;
+  }, [clinics, isArabic]);
 
   const applyFilters = React.useCallback(() => {
     const from = fromStr ? new Date(fromStr + 'T00:00:00') : null;
     const to = toStr ? new Date(toStr + 'T23:59:59') : null;
 
-    const out = rows
+    // 1) Apply search + date to create base
+    const base = rows
       .filter((r) => {
         if (!matchesSearch(r, search)) return false;
         const d = r._dt;
-        if (!d) return false;
+        if (!(d instanceof Date)) return false;
         if (from && d < from) return false;
         if (to && d > to) return false;
         return true;
-      })
-      .sort((a, b) => (b._dt?.getTime() || 0) - (a._dt?.getTime() || 0));
+      });
 
-    setFiltered(out);
-  }, [rows, search, fromStr, toStr]);
+    // 2) Build counts per clinic based on base
+    const cnt = {};
+    base.forEach((r) => {
+      const cid = r.clinicId || r.clinicID || '';
+      cnt[cid] = (cnt[cid] || 0) + 1;
+    });
+    setCountsByClinic(cnt);
+    setBaseCount(base.length);
+
+    // 3) Apply clinic filter
+    const byClinic = selectedClinicId === 'all'
+      ? base
+      : base.filter((r) => (r.clinicId || r.clinicID || '') === selectedClinicId);
+
+    // 4) Sort desc by time
+    byClinic.sort((a, b) => (b._dt?.getTime() || 0) - (a._dt?.getTime() || 0));
+
+    setFiltered(byClinic);
+  }, [rows, search, fromStr, toStr, selectedClinicId]);
 
   React.useEffect(() => { applyFilters(); }, [applyFilters]);
 
@@ -212,8 +265,20 @@ export default function AppointmentsHistoryPage() {
     setLoading(true);
     setError('');
     try {
+      // Load clinics for this doctor (to render chips)
+      try {
+        const docSnap = await getDoc(doc(db, 'doctors', user.uid));
+        if (docSnap.exists()) {
+          setClinics(sanitizeClinics(docSnap.data()?.clinics));
+        } else {
+          setClinics([]);
+        }
+      } catch {
+        setClinics([]);
+      }
+
+      // Load all appointments for this doctor (both shapes)
       const col = collection(db, 'appointments');
-      // Support both shapes: patient-created uses doctorId, legacy/manual uses doctorUID
       const [snapA, snapB] = await Promise.all([
         getDocs(query(col, where('doctorId', '==', user.uid))),
         getDocs(query(col, where('doctorUID', '==', user.uid))),
@@ -232,18 +297,20 @@ export default function AppointmentsHistoryPage() {
         r._dt = apptDate(r);
       });
 
-      // Default filter: show all with valid date
+      // Keep items that have a valid datetime
       const withDates = all.filter((r) => r._dt instanceof Date && !Number.isNaN(r._dt.getTime()));
-      // Initial sort desc
+
+      // Initial sort (desc); clinic chips are based on filtered base, not here
       withDates.sort((a, b) => (b._dt?.getTime() || 0) - (a._dt?.getTime() || 0));
 
       setRows(withDates);
-      // If from/to empty, filtered mirrors rows (use applyFilters effect)
     } catch (e) {
       console.error(e);
       setError(isArabic ? 'تعذر تحميل السجل' : 'Failed to load history');
       setRows([]);
       setFiltered([]);
+      setBaseCount(0);
+      setCountsByClinic({});
     } finally {
       setLoading(false);
     }
@@ -256,6 +323,10 @@ export default function AppointmentsHistoryPage() {
     setFromStr('');
     setToStr('');
   };
+
+  const allLabel = React.useMemo(() => {
+    return (isArabic ? 'الكل' : 'All') + ` (${baseCount})`;
+  }, [baseCount, isArabic]);
 
   return (
     <Protected>
@@ -276,7 +347,7 @@ export default function AppointmentsHistoryPage() {
                 {t('Appointments History', 'سجل المواعيد')}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button component={Link} href={backHref} variant="text">
+                <Button component={Link} href={`/appointments${isArabic ? '?lang=ar' : ''}`} variant="text">
                   {t('Today', 'مواعيد اليوم')}
                 </Button>
                 <IconButton onClick={fetchData} title={t('Refresh', 'تحديث')}>
@@ -332,6 +403,45 @@ export default function AppointmentsHistoryPage() {
               </Grid>
             </Paper>
 
+            {/* Clinic filter (toggle chips) */}
+            {clinics.length > 0 && (
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 0.75,
+                  overflowX: 'auto',
+                  pb: 0.5,
+                  px: 0.5,
+                  '&::-webkit-scrollbar': { height: 6 },
+                  '&::-webkit-scrollbar-thumb': { bgcolor: 'divider', borderRadius: 3 },
+                }}
+              >
+                <Chip
+                  clickable
+                  onClick={() => setSelectedClinicId('all')}
+                  color={selectedClinicId === 'all' ? 'primary' : 'default'}
+                  variant={selectedClinicId === 'all' ? 'filled' : 'outlined'}
+                  label={allLabel}
+                  sx={{ borderRadius: 2, fontWeight: 700, flexShrink: 0 }}
+                />
+                {clinics.map((c) => {
+                  const baseName = isArabic ? (c.name_ar || c.name_en || 'عيادة') : (c.name_en || c.name_ar || 'Clinic');
+                  const n = countsByClinic[c.id] || 0;
+                  return (
+                    <Chip
+                      key={c.id}
+                      clickable
+                      onClick={() => setSelectedClinicId(c.id)}
+                      color={selectedClinicId === c.id ? 'primary' : 'default'}
+                      variant={selectedClinicId === c.id ? 'filled' : 'outlined'}
+                      label={`${baseName} (${n})`}
+                      sx={{ borderRadius: 2, fontWeight: 700, flexShrink: 0, maxWidth: '100%' }}
+                    />
+                  );
+                })}
+              </Box>
+            )}
+
             {/* Results */}
             {loading ? (
               <Grid container spacing={1.25}>
@@ -353,9 +463,19 @@ export default function AppointmentsHistoryPage() {
                   {t('Total', 'المجموع')}: <strong>{filtered.length}</strong>
                 </Typography>
                 <Stack spacing={1.25}>
-                  {filtered.map((row) => (
-                    <RowCard key={row.id} appt={row} isArabic={isArabic} locale={locale} />
-                  ))}
+                  {filtered.map((row) => {
+                    const cid = row.clinicId || row.clinicID || '';
+                    const clinicLabel = cid ? clinicNameById.get(cid) : '';
+                    return (
+                      <RowCard
+                        key={row.id}
+                        appt={row}
+                        isArabic={isArabic}
+                        locale={locale}
+                        clinicLabel={clinicLabel}
+                      />
+                    );
+                  })}
                 </Stack>
               </>
             )}

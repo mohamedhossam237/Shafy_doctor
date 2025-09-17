@@ -25,6 +25,8 @@ import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
   collection, query, where, onSnapshot, limit as qLimit, collectionGroup,
+  // ⬇️ add these for the role gate
+  doc, getDoc, getDocs,
 } from 'firebase/firestore';
 
 const MOBILE_NAV_H = 64;
@@ -58,9 +60,7 @@ const NAV_EN = [
 const NAV_AR = [
   { label: 'لوحة التحكم', href: '/',             icon: <SpaceDashboardIcon /> },
   { label: 'المواعيد',    href: '/appointments', icon: <CalendarMonthIcon /> },
-  {
-    label: 'اسأل شافي',
-    href: '/ask-shafy',
+  { label: 'اسأل شافي',   href: '/ask-shafy',
     icon: (
       <Box component="img" src="/Ai_logo.png" alt="اسأل شافي"
            sx={{ width: 40, height: 40, objectFit: 'contain', transition: 'transform 0.3s ease-in-out',
@@ -139,8 +139,48 @@ export default function AppLayout({
   };
   const doLogout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch {}
-    router.replace('/login');
+    const q = { ...router.query, lang: isArabic ? 'ar' : 'en' };
+    await router.replace({ pathname: '/login', query: q });
   };
+
+  /* ========= ROLE GATE: doctor-only =========
+     If the current session is not a doctor, logout and push to /login.
+     Checks doctors by uid, then falls back to email. */
+  React.useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      // If there is no session yet, nothing to gate.
+      if (!user?.uid) return;
+
+      const uid = user.uid;
+      const email = (user.email || '').toLowerCase();
+
+      try {
+        // Check doctors/{uid}
+        const byUid = await getDoc(doc(db, 'doctors', uid));
+        let isDoctor = byUid.exists();
+
+        // Fallback: doctors where email == user.email
+        if (!isDoctor && email) {
+          const snap = await getDocs(
+            query(collection(db, 'doctors'), where('email', '==', email), qLimit(1))
+          );
+          isDoctor = !snap.empty;
+        }
+
+        if (!isDoctor && !cancelled) {
+          await doLogout(); // logs out + redirects to /login with lang
+        }
+      } catch {
+        if (!cancelled) {
+          await doLogout();
+        }
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+    // Re-check when uid or email changes
+  }, [user?.uid, user?.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ======== LIVE UNREAD COUNTS ========
   const [liveUnread, setLiveUnread] = React.useState({ notifications: 0, messages: 0 });
