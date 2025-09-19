@@ -1,101 +1,200 @@
 // /pages/api/rg/reindex_from_firebase.js
-import { authAdmin, dbAdmin } from '@/lib/firebaseAdmin';
-import { upsertPoints } from '@/lib/qdrant';         // يعتمد على QDRANT_COLLECTION من env
-import { embedPassages } from '@/lib/embeddings';    // يعيد مصفوفات أبعادها 384 (BGE-small)
-
+// Node runtime but NO firebase-admin: uses Firestore REST + Qdrant HTTP
+// Expects Authorization: Bearer <Firebase ID token>
 export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
 
-/** استخراج Bearer token من الهيدر */
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { embedPassages } from '@/lib/embeddings'; // keep your existing lean embeddings lib
+
+/* ---------------- Env ---------------- */
+const FIREBASE_PROJECT_ID =
+  (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || '').trim();
+const QDRANT_URL = (process.env.QDRANT_URL || '').replace(/\/+$/, '');
+const QDRANT_COLLECTION = (process.env.QDRANT_COLLECTION || '').trim();
+const QDRANT_API_KEY = (process.env.QDRANT_API_KEY || '').trim();
+
+if (!FIREBASE_PROJECT_ID) console.warn('[reindex] FIREBASE_PROJECT_ID missing');
+if (!QDRANT_URL) console.warn('[reindex] QDRANT_URL missing');
+if (!QDRANT_COLLECTION) console.warn('[reindex] QDRANT_COLLECTION missing');
+
+/* ---------------- JWT verify (Firebase ID token) ---------------- */
+const FIREBASE_JWKS_URL = new URL(
+  'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'
+);
+const JWKS = createRemoteJWKSet(FIREBASE_JWKS_URL);
+
+async function verifyIdToken(idToken) {
+  const { payload } = await jwtVerify(idToken, JWKS, {
+    issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
+    audience: FIREBASE_PROJECT_ID,
+  });
+  const uid = payload.user_id || payload.sub;
+  if (!uid) throw Object.assign(new Error('Invalid token (no uid)'), { status: 401 });
+  return { uid, email: payload.email || '', name: payload.name || '' };
+}
 function bearer(req) {
   const h = req.headers.authorization || '';
   const m = /^Bearer\s+(.+)$/.exec(h);
   return m?.[1] || null;
 }
 
-/** تقسيم نص كبير لكتل ثابتة الطول مع تنظيف المسافات */
-function chunk(text, size = 800) {
+/* ---------------- Firestore REST helpers ---------------- */
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)`;
+
+async function runQuery(idToken, structuredQuery) {
+  const r = await fetch(`${FS_BASE}/documents:runQuery`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${idToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Firestore runQuery failed (${r.status}): ${t}`);
+  }
+  return r.json();
+}
+function fieldFilter(fieldPath, op, stringValue) {
+  return { fieldFilter: { field: { fieldPath }, op, value: { stringValue } } };
+}
+function unwrapRows(rows) {
+  return rows
+    .map((x) => x.document?.fields || null)
+    .filter(Boolean)
+    .map((f) => {
+      const o = {};
+      for (const [k, v] of Object.entries(f)) {
+        if ('stringValue' in v) o[k] = v.stringValue;
+        else if ('integerValue' in v) o[k] = Number(v.integerValue);
+        else if ('doubleValue' in v) o[k] = Number(v.doubleValue);
+        else if ('booleanValue' in v) o[k] = Boolean(v.booleanValue);
+        else if ('timestampValue' in v) o[k] = v.timestampValue;
+        else if ('arrayValue' in v) o[k] = v.arrayValue?.values || [];
+        else o[k] = v;
+      }
+      return o;
+    });
+}
+function maybeTS(v) {
+  const d = v ? new Date(v) : null;
+  return d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : '';
+}
+
+/* ---------------- Qdrant HTTP helpers ---------------- */
+async function qdrantUpsert(points) {
+  const r = await fetch(`${QDRANT_URL}/collections/${QDRANT_COLLECTION}/points?wait=true`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(QDRANT_API_KEY ? { 'api-key': QDRANT_API_KEY } : {}),
+    },
+    body: JSON.stringify({ points }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Qdrant upsert failed (${r.status}): ${t}`);
+  }
+}
+
+/* ---------------- utilities ---------------- */
+function chunkText(text, size = 800) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim();
   const out = [];
   for (let i = 0; i < clean.length; i += size) out.push(clean.slice(i, i + size));
   return out;
 }
 
-/** تحويل أي قيمة تاريخ (Firestore Timestamp/Date/String) إلى YYYY-MM-DD */
-function toISODate(v) {
-  try {
-    if (!v) return '';
-    if (typeof v?.toDate === 'function') return v.toDate().toISOString().slice(0, 10);
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
-    const s = String(v);
-    return s.length >= 10 ? s.slice(0, 10) : s;
-  } catch {
-    return '';
-  }
-}
-
-/** مولد ID آمن داخل اللوب يمنع التصادمات بين الأنواع */
-function makeLocalId(base, kind, idx) {
-  // مثال نهائي: <docId>::r::000123
-  return `${base}::${kind}::${String(idx).padStart(6, '0')}`;
-}
-
+/* ---------------- handler ---------------- */
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    // التوثيق بـ Firebase ID Token
-    const token = bearer(req);
-    if (!token) return res.status(401).json({ error: 'Missing Firebase ID token' });
-    const decoded = await authAdmin.verifyIdToken(token).catch(() => null);
-    if (!decoded?.uid) return res.status(401).json({ error: 'Invalid Firebase ID token' });
-    const doctorUID = decoded.uid;
+    const idToken = bearer(req);
+    if (!idToken) return res.status(401).json({ error: 'Missing Firebase ID token' });
 
-    // سحب الداتا المقيّدة بالدكتور
-    const [patientsSnap, reportsSnap, labsSnap] = await Promise.all([
-      dbAdmin.collection('patients').where('registeredBy', '==', doctorUID).get(),
-      dbAdmin.collection('reports').where('doctorUID', '==', doctorUID).get(),
-      dbAdmin
-        .collection('labReports')
-        .where('doctorUID', '==', doctorUID)
-        .get()
-        .catch(() => ({ empty: true, docs: [] })),
+    if (!QDRANT_URL || !QDRANT_COLLECTION) {
+      return res.status(500).json({ error: 'Qdrant env not configured' });
+    }
+
+    const { uid } = await verifyIdToken(idToken);
+
+    // Pull scoped data via Firestore REST
+    const [patientsRows, reportsRows, labsRows] = await Promise.all([
+      runQuery(idToken, {
+        from: [{ collectionId: 'patients' }],
+        where: fieldFilter('registeredBy', 'EQUAL', uid),
+        limit: 500,
+      }),
+      // try ordered; if index missing, fallback to unordered
+      (async () => {
+        try {
+          return await runQuery(idToken, {
+            from: [{ collectionId: 'reports' }],
+            where: fieldFilter('doctorUID', 'EQUAL', uid),
+            orderBy: [{ field: { fieldPath: 'date' }, direction: 'DESCENDING' }],
+            limit: 200,
+          });
+        } catch {
+          return await runQuery(idToken, {
+            from: [{ collectionId: 'reports' }],
+            where: fieldFilter('doctorUID', 'EQUAL', uid),
+            limit: 200,
+          });
+        }
+      })(),
+      (async () => {
+        try {
+          return await runQuery(idToken, {
+            from: [{ collectionId: 'labReports' }],
+            where: fieldFilter('doctorUID', 'EQUAL', uid),
+            limit: 200,
+          });
+        } catch {
+          return []; // collection may not exist
+        }
+      })(),
     ]);
 
-    const docs = [];
-    let seq = 0; // عدّاد داخلي للـ IDs المقطّعة
+    const patients = unwrapRows(patientsRows);
+    let reports = unwrapRows(reportsRows).sort(
+      (a, b) => (new Date(b.date || 0).getTime()) - (new Date(a.date || 0).getTime())
+    );
+    const labs = unwrapRows(labsRows);
 
-    // === المرضى ===
-    for (const d of patientsSnap.docs) {
-      const p = { id: d.id, ...d.data() };
+    const docs = [];
+
+    // Patients -> text chunks
+    for (const p of patients) {
       const text = [
-        `Patient: ${p.name || p.id}`,
+        `Patient: ${p.name || p.id || ''}`,
         p.gender ? `Gender: ${p.gender}` : '',
-        (p.age || p.ageYears) ? `Age: ${p.age || p.ageYears}` : '',
+        p.age ? `Age: ${p.age}` : '',
         p.allergies
-          ? `Allergies: ${Array.isArray(p.allergies) ? p.allergies.join(', ') : p.allergies}`
+          ? `Allergies: ${
+              Array.isArray(p.allergies) ? p.allergies.join(', ') : String(p.allergies)
+            }`
           : '',
         p.conditions
-          ? `Conditions: ${Array.isArray(p.conditions) ? p.conditions.join(', ') : p.conditions}`
+          ? `Conditions: ${
+              Array.isArray(p.conditions) ? p.conditions.join(', ') : String(p.conditions)
+            }`
           : '',
         p.notes ? `Notes: ${p.notes}` : '',
       ]
         .filter(Boolean)
         .join('\n');
 
-      for (const c of chunk(text)) {
+      for (const c of chunkText(text))
         docs.push({
-          id: makeLocalId(d.id, 'p', seq++),
+          id: `${p.id || Math.random().toString(36).slice(2)}::p::${docs.length}`,
           content: c,
-          payload: { doctorUID, type: 'patient', patientId: d.id },
+          payload: { doctorUID: uid, type: 'patient', patientId: p.id || null },
         });
-      }
     }
 
-    // === التقارير ===
-    for (const d of reportsSnap.docs) {
-      const r = { id: d.id, ...d.data() };
+    // Reports -> text chunks
+    for (const r of reports) {
       const text = [
-        `Report: ${r.title || r.type || 'Report'} on ${toISODate(r.date)}`,
+        `Report: ${r.title || r.type || 'Report'} on ${maybeTS(r.date)}`,
         r.patientName ? `Patient: ${r.patientName}` : '',
         r.diagnosis ? `Diagnosis: ${r.diagnosis}` : '',
         r.text || r.summary || r.content || '',
@@ -103,68 +202,64 @@ export default async function handler(req, res) {
         .filter(Boolean)
         .join('\n');
 
-      for (const c of chunk(text)) {
+      for (const c of chunkText(text))
         docs.push({
-          id: makeLocalId(d.id, 'r', seq++),
+          id: `${r.id || Math.random().toString(36).slice(2)}::r::${docs.length}`,
           content: c,
           payload: {
-            doctorUID,
+            doctorUID: uid,
             type: 'report',
-            reportId: d.id,
+            reportId: r.id || null,
             patientName: r.patientName || null,
-            date: toISODate(r.date) || null,
           },
         });
-      }
     }
 
-    // === تحاليل/لاب ===
-    for (const d of labsSnap.docs) {
-      const L = { id: d.id, ...d.data() };
-      const testsLine = Array.isArray(L.tests)
-        ? L.tests
-            .map((t) => `${t.name}: ${t.value} ${t.unit || ''}${t.normal ? ` (normal: ${t.normal})` : ''}`)
-            .join('; ')
-        : (L.tests || '');
-
+    // Lab reports -> text chunks
+    for (const L of labs) {
       const text = [
-        `Lab Report on ${toISODate(L.date)}`,
+        `Lab Report on ${maybeTS(L.date)}`,
         L.patientName ? `Patient: ${L.patientName}` : '',
-        testsLine ? `Tests: ${testsLine}` : '',
+        L.tests
+          ? `Tests: ${
+              Array.isArray(L.tests)
+                ? L.tests
+                    .map((t) => {
+                      const name = t?.mapValue?.fields?.name?.stringValue || t?.name || '';
+                      const value = t?.mapValue?.fields?.value?.stringValue || t?.value || '';
+                      const unit = t?.mapValue?.fields?.unit?.stringValue || t?.unit || '';
+                      const normal = t?.mapValue?.fields?.normal?.stringValue || t?.normal || '';
+                      return `${name}: ${value} ${unit} (${normal})`;
+                    })
+                    .join('; ')
+                : String(L.tests)
+            }`
+          : '',
         L.notes || '',
       ]
         .filter(Boolean)
         .join('\n');
 
-      for (const c of chunk(text)) {
+      for (const c of chunkText(text))
         docs.push({
-          id: makeLocalId(d.id, 'l', seq++),
+          id: `${L.id || Math.random().toString(36).slice(2)}::l::${docs.length}`,
           content: c,
           payload: {
-            doctorUID,
+            doctorUID: uid,
             type: 'lab',
-            labId: d.id,
+            labId: L.id || null,
             patientName: L.patientName || null,
-            date: toISODate(L.date) || null,
           },
         });
-      }
     }
 
-    if (docs.length === 0) {
-      return res.status(200).json({ ok: true, indexed: 0 });
-    }
-
-    // === تضمين + رفع لـ Qdrant على دفعات ===
-    const BATCH = 100;
-    for (let i = 0; i < docs.length; i += BATCH) {
-      const slice = docs.slice(i, i + BATCH);
-
-      // Prefixed for better passage embedding behaviour
-      const texts = slice.map((s) =>
-        s.content.startsWith('passage:') ? s.content : `passage: ${s.content}`
+    // Embed + upsert in batches
+    const B = 100;
+    for (let i = 0; i < docs.length; i += B) {
+      const slice = docs.slice(i, i + B);
+      const vectors = await embedPassages(
+        slice.map((s) => (s.content.startsWith('passage:') ? s.content : `passage: ${s.content}`))
       );
-      const vectors = await embedPassages(texts);
 
       const points = slice.map((s, k) => ({
         id: s.id,
@@ -172,12 +267,13 @@ export default async function handler(req, res) {
         payload: { ...s.payload, text: s.content },
       }));
 
-      await upsertPoints(points); // يستخدم QDRANT_COLLECTION من env داخل lib/qdrant
+      await qdrantUpsert(points);
     }
 
     return res.status(200).json({ ok: true, indexed: docs.length });
   } catch (e) {
+    const status = e?.status || 500;
     console.error('reindex_from_firebase error', e);
-    return res.status(500).json({ error: e?.message || 'Server error' });
+    return res.status(status).json({ error: e?.message || 'Server error' });
   }
 }
