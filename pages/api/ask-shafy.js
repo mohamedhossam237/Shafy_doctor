@@ -53,28 +53,31 @@ async function fanarChat(messages, { max_tokens = 900, temperature = 0.2, respon
 
 /** ---------- Firebase Admin init (robust) ---------- */
 let _adminBundle = undefined;
+
+function parseServiceAccount(raw) {
+  if (!raw) return null;
+  const tryParse = (s) => {
+    try {
+      const obj = JSON.parse(s);
+      if (obj?.private_key?.includes("\\n")) obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+      return obj;
+    } catch {
+      return null;
+    }
+  };
+  return tryParse(raw) || tryParse(Buffer.from(raw, "base64").toString("utf8"));
+}
+
 function getAdminBundle() {
   if (_adminBundle !== undefined) return _adminBundle;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const admin = require("firebase-admin");
 
-    // Try to build a credential
+    // Build a credential (several strategies)
     let credential = null;
 
     // Strategy A: full JSON (raw or base64) in FIREBASE_SERVICE_ACCOUNT
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-    const tryParse = (s) => {
-      try {
-        const obj = JSON.parse(s);
-        if (obj?.private_key?.includes("\\n")) obj.private_key = obj.private_key.replace(/\\n/g, "\n");
-        return obj;
-      } catch { return null; }
-    };
-    let svcJson = tryParse(raw);
-    if (!svcJson && raw) {
-      try { svcJson = tryParse(Buffer.from(raw, "base64").toString("utf8")); } catch {}
-    }
+    const svcJson = parseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT || "");
     if (svcJson) {
       credential = admin.credential.cert(svcJson);
     } else if (
@@ -91,12 +94,16 @@ function getAdminBundle() {
       });
     } else {
       // Strategy C: ADC
-      try { credential = admin.credential.applicationDefault(); } catch { /* ignore */ }
+      try {
+        credential = admin.credential.applicationDefault();
+      } catch {
+        // ignore; may still initialize without explicit credential (local dev)
+      }
     }
 
     if (!admin.apps.length) {
       if (credential) admin.initializeApp({ credential });
-      else admin.initializeApp(); // ADC or will fail later if used without creds
+      else admin.initializeApp(); // ADC or will fail when used if truly unavailable
     }
 
     _adminBundle = {
@@ -154,10 +161,15 @@ async function verifyIdToken(req) {
 function fmtDT(d) {
   try {
     return new Intl.DateTimeFormat(undefined, {
-      year: "numeric", month: "short", day: "2-digit",
-      hour: "2-digit", minute: "2-digit",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
     }).format(d);
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 function asDate(v) {
   if (!v) return null;
@@ -304,10 +316,14 @@ ${appts.join("\n") || "—"}
 /** ---------- JSON parsing helper for LLM outputs ---------- */
 function extractJson(text) {
   if (!text) return null;
-  try { return JSON.parse(text); } catch {}
+  try {
+    return JSON.parse(text);
+  } catch {}
   const m = text.match(/\{[\s\S]*\}/);
   if (m) {
-    try { return JSON.parse(m[0]); } catch {}
+    try {
+      return JSON.parse(m[0]);
+    } catch {}
   }
   return null;
 }
@@ -332,7 +348,8 @@ export default async function handler(req, res) {
     const {
       mode,                 // "translate_ar_to_en" | undefined
       message,
-      images = [],
+      // eslint-disable-next-line no-unused-vars
+      images = [],          // reserved for future use
       ocrTexts = [],
       doctorContext = "",
       lang = "ar",
@@ -472,7 +489,7 @@ export default async function handler(req, res) {
     const output = resp.data?.choices?.[0]?.message?.content ?? "";
     const text = output || (isArabic ? "لم أستطع توليد رد." : "Could not generate a response.");
 
-    console.log(`[REQ] total ${(Date.now() - TREQ)} ms`);
+    console.log(`[REQ] total ${Date.now() - TREQ} ms`);
     return res.status(200).json({
       ok: true,
       model: MODEL_CHAT,
