@@ -27,7 +27,6 @@ import {
   collection, getDocs, query, where
 } from 'firebase/firestore';
 
-/* dialog used for hours only (we remove the subspecialties dialog) */
 import EditHoursDialog from '@/components/Profile/EditHoursDialog';
 
 /* ---------- helpers ---------- */
@@ -41,7 +40,6 @@ const toSubStrings = (arr) => {
     .map((s) => {
       if (!s) return '';
       if (typeof s === 'string' || typeof s === 'number') return String(s).trim();
-      // object shape from older version
       return (s.name_ar || s.label || String(s.id ?? '')).trim();
     })
     .filter(Boolean);
@@ -57,7 +55,7 @@ export default function DoctorDetailsPage() {
   // Force Arabic-only UI
   const isArabic = true;
   const dir = 'rtl';
-  const t = (_en, ar) => ar; // UI always Arabic
+  const t = (_en, ar) => ar;
 
   /* ---------- form state (Arabic inputs only) ---------- */
   const [form, setForm] = React.useState({
@@ -65,25 +63,25 @@ export default function DoctorDetailsPage() {
     qualifications_ar: '',
     university_ar: '',
     checkupPrice: '',
+    followUpPrice: '',           // NEW: follow-up session price
     phone: '',
-    specialtyAr: '', // kept for backward compatibility (now driven by selectedSpecialty)
+    specialtyAr: '',
   });
 
-  const [images, setImages] = React.useState([]);                 // profileImages (URL strings)
-  const [subspecialties, setSubspecialties] = React.useState([]); // array of Arabic strings only
+  const [images, setImages] = React.useState([]);
+  const [subspecialties, setSubspecialties] = React.useState([]);
 
-  // dialogs
   const [openHours, setOpenHours] = React.useState(false);
 
-  // == Multi Clinics ==
-  const [clinics, setClinics] = React.useState([]); // [{id,name_ar,address_ar,phone,active,working_hours}]
+  // Multi Clinics
+  const [clinics, setClinics] = React.useState([]);
   const [newClinic, setNewClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
   const [editingClinicId, setEditingClinicId] = React.useState(null);
   const [editClinic, setEditClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
-  const [hoursClinicId, setHoursClinicId] = React.useState(null); // which clinic is editing hours
+  const [hoursClinicId, setHoursClinicId] = React.useState(null);
 
   // payment
-  const [payType, setPayType] = React.useState('instapay'); // 'instapay' | 'wallet'
+  const [payType, setPayType] = React.useState('instapay');
   const [instapayId, setInstapayId] = React.useState('');
   const [instapayMobile, setInstapayMobile] = React.useState('');
   const [walletProvider, setWalletProvider] = React.useState('vodafone');
@@ -92,12 +90,12 @@ export default function DoctorDetailsPage() {
   const [paymentNotes, setPaymentNotes] = React.useState('');
 
   // specialties dropdown
-  const [specialties, setSpecialties] = React.useState([]); // [{id,key,label_en,label_ar,active}]
+  const [specialties, setSpecialties] = React.useState([]);
   const [specialtiesLoading, setSpecialtiesLoading] = React.useState(false);
-  const [selectedSpecialty, setSelectedSpecialty] = React.useState(null); // one of specialties[] or null
+  const [selectedSpecialty, setSelectedSpecialty] = React.useState(null);
 
-  // NEW: Extra services (saved on doctor doc -> extraServices[])
-  const [extraServices, setExtraServices] = React.useState([]); // [{id,name_ar,name_en?,price,active}]
+  // Extra services
+  const [extraServices, setExtraServices] = React.useState([]);
   const [newSvcName, setNewSvcName] = React.useState('');
   const [newSvcPrice, setNewSvcPrice] = React.useState('');
   const [editingId, setEditingId] = React.useState(null);
@@ -115,13 +113,8 @@ export default function DoctorDetailsPage() {
   const loadSpecialties = React.useCallback(async () => {
     try {
       setSpecialtiesLoading(true);
-      // No orderBy here => no composite index needed
-      const qy = query(
-        collection(db, 'specialties'),
-        where('active', '==', true)
-      );
+      const qy = query(collection(db, 'specialties'), where('active', '==', true));
       const snap = await getDocs(qy);
-      // Client-side Arabic sort to replace orderBy('label_ar')
       const list = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) =>
@@ -138,13 +131,11 @@ export default function DoctorDetailsPage() {
     }
   }, []); // eslint-disable-line
 
-  /* ---------- prefill (load Arabic + images + payment + preselect specialty + extras + clinics) ---------- */
+  /* ---------- prefill (Arabic + images + payment + specialty + extras + clinics) ---------- */
   const loadData = React.useCallback(async () => {
     if (!user?.uid) return;
     try {
       setLoading(true);
-
-      // Load specialties list in parallel
       const spPromise = (specialties.length ? Promise.resolve(specialties) : loadSpecialties());
 
       const snap = await getDoc(doc(db, 'doctors', user.uid));
@@ -156,16 +147,16 @@ export default function DoctorDetailsPage() {
         qualifications_ar: d.qualifications_ar || '',
         university_ar: d.university_ar || '',
         checkupPrice: d.checkupPrice ?? '',
+        followUpPrice: d.followUpPrice ?? d.followupPrice ?? '', // back-compat (if camel-case differs)
         phone: d.phone || '',
         specialtyAr: d.specialty_ar || d.specialtyAr || '',
       }));
 
       setImages(Array.isArray(d.profileImages) ? d.profileImages.filter(Boolean) : []);
-      // Normalize subspecialties to Arabic strings
       const subs = toSubStrings(d.subspecialties_detail || d.subspecialties || []);
       setSubspecialties(subs);
 
-      // ---- Clinics (with backward compatibility) ----
+      // Clinics
       const incomingClinics = Array.isArray(d.clinics) ? d.clinics : [];
       let normalizedClinics = incomingClinics
         .filter(Boolean)
@@ -177,8 +168,6 @@ export default function DoctorDetailsPage() {
           active: c.active !== false,
           working_hours: c.working_hours || null,
         }));
-
-      // Back-compat: old single working_hours at root -> create one default clinic
       if (normalizedClinics.length === 0 && d.working_hours) {
         normalizedClinics = [{
           id: makeClinicId(),
@@ -201,7 +190,7 @@ export default function DoctorDetailsPage() {
       setBankName(p.bankName || '');
       setPaymentNotes(p.notes || '');
 
-      // NEW: load extra services (sanitize)
+      // extra services
       const extras = Array.isArray(d.extraServices) ? d.extraServices : [];
       setExtraServices(
         extras
@@ -215,16 +204,12 @@ export default function DoctorDetailsPage() {
           }))
       );
 
-      // wait specialties then preselect
+      // preselect specialty
       const list = await spPromise;
-      // prefer matching by specialty_key if present
-      const byKey = d.specialty_key
-        ? list.find(s => s.key === d.specialty_key)
-        : null;
+      const byKey = d.specialty_key ? list.find(s => s.key === d.specialty_key) : null;
       if (byKey) {
         setSelectedSpecialty(byKey);
       } else if (d.specialty_ar) {
-        // fallback: match by Arabic label
         const byAr = list.find(s => (s.label_ar || '').trim() === (d.specialty_ar || '').trim());
         if (byAr) setSelectedSpecialty(byAr);
       }
@@ -311,7 +296,7 @@ export default function DoctorDetailsPage() {
     };
   }, [dropRef.current, user?.uid]); // eslint-disable-line
 
-  /* ---------- translate Arabic -> English via /api/ask-shafy (mode=translate_ar_to_en) ---------- */
+  /* ---------- translate Arabic -> English via /api/ask-shafy ---------- */
   const translateToEnglish = async ({ bio_ar, qualifications_ar, university_ar, specialtyAr, subs_ar_list }) => {
     try {
       const r = await fetch('/api/ask-shafy', {
@@ -324,7 +309,7 @@ export default function DoctorDetailsPage() {
             qualifications_ar,
             university_ar,
             specialty_ar: specialtyAr,
-            subspecialties_ar: subs_ar_list, // array of strings
+            subspecialties_ar: subs_ar_list,
           },
           response_format: 'json',
           temperature: 0.1,
@@ -346,18 +331,17 @@ export default function DoctorDetailsPage() {
       return json.translations;
     } catch (e) {
       console.error('translateToEnglish error:', e);
-      return null; // caller will fallback
+      return null;
     }
   };
 
-  /* ---------- save (Arabic-only inputs; auto-fill English via translation) ---------- */
+  /* ---------- save ---------- */
   const onSave = async () => {
     if (!user?.uid) {
       openSnack('الرجاء تسجيل الدخول', 'error');
       return;
     }
 
-    // Specialty must be selected from dropdown
     if (!selectedSpecialty) {
       openSnack('برجاء اختيار التخصص من القائمة.', 'warning');
       return;
@@ -378,10 +362,16 @@ export default function DoctorDetailsPage() {
       return openSnack('أدخل رقم محفظة مصري صحيح (01xxxxxxxxx).', 'warning');
     }
 
-    // Arabic subspecialty list already strings
-    const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : []).map((s) => String(s || '').trim()).filter(Boolean);
+    // Positive numeric checks for prices
+    const checkup = form.checkupPrice ? Number(form.checkupPrice) : 0;
+    const followup = form.followUpPrice ? Number(form.followUpPrice) : 0;
+    if (checkup < 0 || followup < 0) {
+      return openSnack('الأسعار لا يمكن أن تكون سالبة.', 'warning');
+    }
 
-    // Clinics: ensure at least one active clinic
+    const subs_ar_list = (Array.isArray(subspecialties) ? subspecialties : [])
+      .map((s) => String(s || '').trim()).filter(Boolean);
+
     const hasActiveClinic = clinics.some(c => c.active !== false);
     if (!hasActiveClinic) {
       return openSnack('أضف عيادة واحدة على الأقل أو فعّل عيادة قائمة.', 'warning');
@@ -389,22 +379,18 @@ export default function DoctorDetailsPage() {
 
     setLoading(true);
     try {
-      // 1) Translate all Arabic fields to English
       const translations = await translateToEnglish({
         bio_ar: String(form.bio_ar || '').trim(),
         qualifications_ar: String(form.qualifications_ar || '').trim(),
         university_ar: String(form.university_ar || '').trim(),
-        // specialtyAr comes from selectedSpecialty Arabic label
         specialtyAr: String(selectedSpecialty?.label_ar || '').trim(),
         subs_ar_list,
       });
 
-      // Safe fallbacks if translation failed
       const bio_en = translations?.bio_en || String(form.bio_ar || '').trim();
       const qualifications_en = translations?.qualifications_en || String(form.qualifications_ar || '').trim();
       const university_en = translations?.university_en || String(form.university_ar || '').trim();
 
-      // For specialty, prefer canonical English from the selected specialty document
       const specialty_en =
         (selectedSpecialty?.label_en || '').trim() ||
         translations?.specialty_en ||
@@ -414,14 +400,12 @@ export default function DoctorDetailsPage() {
         ? translations.subspecialties_en.map((s) => String(s || '').trim())
         : subs_ar_list;
 
-      // 2) Build subspecialties_detail from strings
       const subs_detail = subs_ar_list.map((ar, i) => ({
-        id: ar,                    // use Arabic label as id (stable enough for now)
+        id: ar,
         name_ar: ar,
         name_en: subs_en_list?.[i] || ar,
       }));
 
-      // 3) Normalize clinics for persistence
       const clinicsPayload = clinics.map(c => ({
         id: c.id,
         name_ar: String(c.name_ar || '').trim() || 'العيادة',
@@ -431,35 +415,32 @@ export default function DoctorDetailsPage() {
         working_hours: c.working_hours || null,
       }));
 
-      // 4) Save payload with both Arabic and English + specialty_key
       const payload = {
-        // Arabic sources (inputs)
+        // Arabic sources
         bio_ar: String(form.bio_ar || '').trim(),
         qualifications_ar: String(form.qualifications_ar || '').trim(),
         university_ar: String(form.university_ar || '').trim(),
         specialty_ar: String(selectedSpecialty?.label_ar || '').trim(),
 
-        // Auto / canonical English
+        // English auto
         bio_en,
         qualifications_en,
         university_en,
         specialty_en,
 
-        // Also persist a stable key for joins / filters
         specialty_key: String(selectedSpecialty?.key || '').trim(),
 
-        // General
-        checkupPrice: form.checkupPrice ? Number(form.checkupPrice) : 0,
+        // Prices
+        checkupPrice: Number.isFinite(checkup) ? checkup : 0,
+        followUpPrice: Number.isFinite(followup) ? followup : 0, // NEW: persist follow-up price
+
         phone: String(form.phone || '').trim(),
 
-        // subspecialties (Arabic strings) + details
         subspecialties: subs_ar_list,
         subspecialties_detail: subs_detail,
 
-        // NEW: multi clinics
         clinics: clinicsPayload,
 
-        // payment (kept global for now)
         payment: {
           type: payType,
           instapayId: payType === 'instapay' ? instapayId.trim() : '',
@@ -471,7 +452,6 @@ export default function DoctorDetailsPage() {
           updatedAt: serverTimestamp(),
         },
 
-        // NEW: include extraServices as-is from state
         extraServices: extraServices.map(e => ({
           id: e.id,
           name_ar: e.name_ar || '',
@@ -510,7 +490,6 @@ export default function DoctorDetailsPage() {
       });
       openSnack('تم تحديث الخدمات الإضافية', 'success');
     } catch {
-      // fallback create
       await setDoc(doc(db, 'doctors', user.uid), {
         extraServices: next.map(e => ({
           id: e.id,
@@ -665,7 +644,7 @@ export default function DoctorDetailsPage() {
           </IconButton>
         </Stack>
 
-        {/* Photos (imgbb) */}
+        {/* Photos */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row-reverse" alignItems="center" justifyContent="space-between">
             <Typography variant="subtitle2" color="text.secondary" fontWeight={800}>
@@ -753,18 +732,28 @@ export default function DoctorDetailsPage() {
               <TextField type="number" label="سعر الكشف" value={form.checkupPrice} onChange={onChange('checkupPrice')} fullWidth />
             </Grid>
             <Grid item xs={6} md={3}>
+              {/* NEW: follow-up price */}
+              <TextField
+                type="number"
+                label="سعر المتابعة"
+                value={form.followUpPrice}
+                onChange={onChange('followUpPrice')}
+                helperText="سعر جلسة المتابعة (مختلف عن سعر الكشف)"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
               <TextField label="الهاتف (عام)" value={form.phone} onChange={onChange('phone')} fullWidth />
             </Grid>
           </Grid>
         </Paper>
 
-        {/* Specialty & Subspecialties (Arabic-only inputs) */}
+        {/* Specialty & Subspecialties */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
             <Chip icon={<LocalHospitalIcon />} label="التخصص" color="primary" />
           </Stack>
 
-          {/* Dropdown from Firestore specialties (active), client-sorted by Arabic label */}
           <Autocomplete
             options={specialties}
             loading={specialtiesLoading}
@@ -795,17 +784,12 @@ export default function DoctorDetailsPage() {
             sx={{ mb: 1.5 }}
           />
 
-          {/* Subspecialties as TextField (comma-separated) */}
           <TextField
             label="التخصصات الفرعية (اكتبها مفصولة بفواصل)"
             value={subspecialties.join('، ')}
             onChange={(e) => {
-              // accept both Arabic '،' and English ',' separators
               const raw = e.target.value;
-              const arr = raw
-                .split(/,|،/g)
-                .map((s) => s.trim())
-                .filter(Boolean);
+              const arr = raw.split(/,|،/g).map((s) => s.trim()).filter(Boolean);
               setSubspecialties(arr);
             }}
             fullWidth
@@ -815,13 +799,12 @@ export default function DoctorDetailsPage() {
           />
         </Paper>
 
-        {/* Clinics (Multi-Clinic) */}
+        {/* Clinics */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
             <Chip icon={<LocalHospitalIcon />} label="العيادات" color="primary" />
           </Stack>
 
-          {/* Add new clinic */}
           <Grid container spacing={1}>
             <Grid item xs={12} md={4}>
               <TextField
@@ -859,7 +842,6 @@ export default function DoctorDetailsPage() {
             </Grid>
           </Grid>
 
-          {/* List clinics */}
           <Stack spacing={1.25} sx={{ mt: 1 }}>
             {clinics.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -1029,13 +1011,12 @@ export default function DoctorDetailsPage() {
           />
         </Paper>
 
-        {/* NEW: Extra Services (Arabic name + price) */}
+        {/* Extra Services */}
         <Paper sx={{ p: 2, borderRadius: 3, mb: 2 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
             <Chip icon={<MonetizationOnIcon />} label="خدمات إضافية" color="primary" />
           </Stack>
 
-          {/* Add new service */}
           <Grid container spacing={1}>
             <Grid item xs={12} md={7}>
               <TextField
@@ -1066,7 +1047,6 @@ export default function DoctorDetailsPage() {
             </Grid>
           </Grid>
 
-          {/* List services */}
           <Stack spacing={1} sx={{ mt: 1 }}>
             {extraServices.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
