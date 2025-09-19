@@ -1,13 +1,14 @@
 // /pages/api/ask-shafy.js
-// Shafy API — Chat only (Fanar). STT & TTS are disabled.
+// Shafy API — Chat + Translation (Fanar). STT & TTS are disabled.
 // Secure: verifies Firebase ID token and fetches doctor-owned context from Firestore.
 // Robust admin init with multiple credential strategies and dev fallback.
+// Includes Firestore composite-index fallback (for reports: where(doctorUID)==uid + orderBy(date, desc)).
 //
 // ENV (required for prod):
 //   FANAR_API_KEY=...               Fanar API key
 // Optional:
 //   FANAR_ORG=...
-//   FIREBASE_SERVICE_ACCOUNT=...    // JSON string of service account
+//   FIREBASE_SERVICE_ACCOUNT=...    // JSON string of service account (can be base64-encoded)
 //   FIREBASE_PROJECT_ID=...
 //   FIREBASE_CLIENT_EMAIL=...
 //   FIREBASE_PRIVATE_KEY=...        // with \n escaped
@@ -44,13 +45,10 @@ async function postJson(url, body, headers = {}) {
   const data = await r.json().catch(() => ({}));
   return { ok: r.ok, status: r.status, data };
 }
-async function fanarChat(messages, { max_tokens = 900, temperature = 0.2 } = {}) {
-  return await postJson(`${FANAR_BASE}/chat/completions`, {
-    model: MODEL_CHAT,
-    messages,
-    max_tokens,
-    temperature,
-  });
+async function fanarChat(messages, { max_tokens = 900, temperature = 0.2, response_format } = {}) {
+  const body = { model: MODEL_CHAT, messages, max_tokens, temperature };
+  if (response_format) body.response_format = response_format;
+  return await postJson(`${FANAR_BASE}/chat/completions`, body);
 }
 
 /** ---------- Firebase Admin init (robust) ---------- */
@@ -58,40 +56,52 @@ let _adminBundle = undefined;
 function getAdminBundle() {
   if (_adminBundle !== undefined) return _adminBundle;
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const admin = require("firebase-admin");
+
+    // Try to build a credential
+    let credential = null;
+
+    // Strategy A: full JSON (raw or base64) in FIREBASE_SERVICE_ACCOUNT
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    const tryParse = (s) => {
+      try {
+        const obj = JSON.parse(s);
+        if (obj?.private_key?.includes("\\n")) obj.private_key = obj.private_key.replace(/\\n/g, "\n");
+        return obj;
+      } catch { return null; }
+    };
+    let svcJson = tryParse(raw);
+    if (!svcJson && raw) {
+      try { svcJson = tryParse(Buffer.from(raw, "base64").toString("utf8")); } catch {}
+    }
+    if (svcJson) {
+      credential = admin.credential.cert(svcJson);
+    } else if (
+      process.env.FIREBASE_PROJECT_ID &&
+      process.env.FIREBASE_CLIENT_EMAIL &&
+      process.env.FIREBASE_PRIVATE_KEY
+    ) {
+      // Strategy B: split vars
+      const pk = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
+      credential = admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: pk,
+      });
+    } else {
+      // Strategy C: ADC
+      try { credential = admin.credential.applicationDefault(); } catch { /* ignore */ }
+    }
+
     if (!admin.apps.length) {
-      let credential = null;
-
-      if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-        // Prefer full JSON string
-        const json = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        if (json.private_key?.includes("\\n")) {
-          json.private_key = json.private_key.replace(/\\n/g, "\n");
-        }
-        credential = admin.credential.cert(json);
-      } else if (
-        process.env.FIREBASE_PROJECT_ID &&
-        process.env.FIREBASE_CLIENT_EMAIL &&
-        process.env.FIREBASE_PRIVATE_KEY
-      ) {
-        // Or 3 separate env vars
-        const pk = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
-        credential = admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: pk,
-        });
-      } else {
-        // Fall back to ADC (gcloud / Cloud Run / local ADC)
-        credential = admin.credential.applicationDefault();
-      }
-
-      admin.initializeApp({ credential });
+      if (credential) admin.initializeApp({ credential });
+      else admin.initializeApp(); // ADC or will fail later if used without creds
     }
 
     _adminBundle = {
-      admin: require("firebase-admin"),
-      firestore: require("firebase-admin").firestore(),
+      admin,
+      firestore: admin.firestore(),
     };
   } catch (e) {
     console.warn("[Shafy] firebase-admin init failed:", e?.message || e);
@@ -122,7 +132,7 @@ async function verifyIdToken(req) {
         name: decoded.name || "",
         email: decoded.email || "",
       };
-    } catch (err) {
+    } catch {
       const e = new Error("Invalid or expired token");
       e.status = 401;
       throw e;
@@ -157,6 +167,7 @@ function asDate(v) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/** Build a compact, private doctor context from Firestore (with index fallback) */
 async function buildDoctorContextFromFirestore({ uid, lang = "ar" }) {
   if (!firestore) return ""; // no admin available (dev without DB access)
 
@@ -168,15 +179,42 @@ async function buildDoctorContextFromFirestore({ uid, lang = "ar" }) {
     doctorDoc?.name ||
     (isAr ? "الطبيب" : "Doctor");
 
-  const [patientsSnap, reportsSnap, appt1Snap, appt2Snap] = await Promise.all([
+  // Patients + Appointments can fetch in parallel
+  const [patientsSnap, appt1Snap, appt2Snap] = await Promise.all([
     firestore.collection("patients").where("registeredBy", "==", uid).limit(500).get(),
-    firestore.collection("reports").where("doctorUID", "==", uid).orderBy("date", "desc").limit(40).get(),
     firestore.collection("appointments").where("doctorUID", "==", uid).limit(200).get(),
     firestore.collection("appointments").where("doctorId", "==", uid).limit(200).get(),
   ]);
 
+  // Reports: try indexed query first; fallback if composite index is missing
+  let reportsDocs;
+  try {
+    const snap = await firestore
+      .collection("reports")
+      .where("doctorUID", "==", uid)
+      .orderBy("date", "desc")
+      .limit(40)
+      .get();
+    reportsDocs = snap.docs;
+  } catch (err) {
+    const msg = String(err?.message || "");
+    if (err?.code === 9 || /requires an index/i.test(msg)) {
+      // Fallback: fetch more, sort locally, slice
+      const snap = await firestore
+        .collection("reports")
+        .where("doctorUID", "==", uid)
+        .limit(200)
+        .get();
+      reportsDocs = snap.docs
+        .sort((a, b) => (asDate(b.data().date)?.getTime() || 0) - (asDate(a.data().date)?.getTime() || 0))
+        .slice(0, 40);
+    } else {
+      throw err;
+    }
+  }
+
   const patients = patientsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const reports = reportsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const reports = reportsDocs.map((d) => ({ id: d.id, ...d.data() }));
   const apptsRaw = [
     ...appt1Snap.docs.map((d) => ({ id: d.id, ...d.data() })),
     ...appt2Snap.docs.map((d) => ({ id: d.id, ...d.data() })),
@@ -263,6 +301,17 @@ ${appts.join("\n") || "—"}
   return `${header}\n\n${isAr ? bodyAr : bodyEn}`;
 }
 
+/** ---------- JSON parsing helper for LLM outputs ---------- */
+function extractJson(text) {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch {}
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch {}
+  }
+  return null;
+}
+
 /** ---------- API handler ---------- */
 export default async function handler(req, res) {
   const TREQ = Date.now();
@@ -281,13 +330,92 @@ export default async function handler(req, res) {
     getFanarKey();
 
     const {
+      mode,                 // "translate_ar_to_en" | undefined
       message,
       images = [],
       ocrTexts = [],
       doctorContext = "",
       lang = "ar",
+
+      // For translation mode:
+      items,
+      response_format,      // optional passthrough if upstream supports structured output
+      temperature,
+      system_extras = [],
+      instructions = [],
     } = req.body || {};
 
+    /** ===== Branch: Translation (Arabic -> English) ===== */
+    if (mode === "translate_ar_to_en") {
+      // Expect: items = { bio_ar, qualifications_ar, university_ar, specialty_ar, subspecialties_ar: string[] }
+      const bio_ar = String(items?.bio_ar || "");
+      const qualifications_ar = String(items?.qualifications_ar || "");
+      const university_ar = String(items?.university_ar || "");
+      const specialty_ar = String(items?.specialty_ar || "");
+      const subs_ar = Array.isArray(items?.subspecialties_ar) ? items.subspecialties_ar.filter(Boolean).map(String) : [];
+
+      const sys = [
+        "You are a professional bilingual (Arabic→English) medical translator.",
+        "Translate the following Arabic profile fields into concise, professional English suitable for a physician profile in Egypt.",
+        "Output ONLY valid JSON with this exact schema and keys:",
+        `{"bio_en": string, "qualifications_en": string, "university_en": string, "specialty_en": string, "subspecialties_en": string[]}`,
+        "Preserve the original order of subspecialties. Avoid transliteration unless medically standard (e.g., 'GERD', 'ECG'). Do not add commentary or code fences.",
+        ...system_extras,
+        ...(Array.isArray(instructions) ? instructions : []),
+      ].join("\n");
+
+      const usr = [
+        "FIELDS (Arabic):",
+        `bio_ar: ${bio_ar || "-"}`,
+        `qualifications_ar: ${qualifications_ar || "-"}`,
+        `university_ar: ${university_ar || "-"}`,
+        `specialty_ar: ${specialty_ar || "-"}`,
+        "subspecialties_ar:",
+        ...(subs_ar.length ? subs_ar.map((s, i) => `- ${i + 1}. ${s}`) : ["- (none)"]),
+      ].join("\n");
+
+      const messages = [
+        { role: "system", content: sys },
+        { role: "user", content: usr },
+      ];
+
+      const resp = await fanarChat(messages, {
+        max_tokens: 500,
+        temperature: typeof temperature === "number" ? temperature : 0.1,
+        response_format,
+      });
+
+      if (!resp.ok) {
+        return res.status(resp.status || 502).json({
+          error: resp.data?.error?.message || resp.data?.message || "Fanar request failed",
+          upstream: resp.data,
+        });
+      }
+
+      const raw = resp.data?.choices?.[0]?.message?.content ?? "";
+      const parsed = extractJson(raw);
+
+      if (!parsed || typeof parsed !== "object") {
+        return res.status(502).json({
+          error: "Translator returned non-JSON or invalid JSON.",
+          output: raw,
+        });
+      }
+
+      const translations = {
+        bio_en: String(parsed.bio_en || "").trim(),
+        qualifications_en: String(parsed.qualifications_en || "").trim(),
+        university_en: String(parsed.university_en || "").trim(),
+        specialty_en: String(parsed.specialty_en || "").trim(),
+        subspecialties_en: Array.isArray(parsed.subspecialties_en)
+          ? parsed.subspecialties_en.map((s) => String(s || "").trim())
+          : [],
+      };
+
+      return res.status(200).json({ ok: true, translations });
+    }
+
+    /** ===== Default branch: Chat ===== */
     if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "message is required" });
     }
@@ -326,7 +454,6 @@ export default async function handler(req, res) {
       ...(doctorContext ? [`${clientCtxLabel}\n${trimTo(String(doctorContext || ""))}`] : []),
     ].join("\n\n");
 
-    // Single-pass chat
     const baseMessages = [
       { role: "system", content: system },
       { role: "user", content: userTextWithOcr },
@@ -355,7 +482,7 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     const status = e?.status || 500;
-    console.error("ask-shafy (chat-only) error:", e);
+    console.error("ask-shafy (chat/translate) error:", e);
     return res.status(status).json({ error: e?.message || "Server error" });
   }
 }
