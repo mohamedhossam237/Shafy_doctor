@@ -147,7 +147,7 @@ export default function DoctorDetailsPage() {
         qualifications_ar: d.qualifications_ar || '',
         university_ar: d.university_ar || '',
         checkupPrice: d.checkupPrice ?? '',
-        followUpPrice: d.followUpPrice ?? d.followupPrice ?? '', // back-compat (if camel-case differs)
+        followUpPrice: d.followUpPrice ?? d.followupPrice ?? '', // back-compat
         phone: d.phone || '',
         specialtyAr: d.specialty_ar || d.specialtyAr || '',
       }));
@@ -296,12 +296,16 @@ export default function DoctorDetailsPage() {
     };
   }, [dropRef.current, user?.uid]); // eslint-disable-line
 
-  /* ---------- translate Arabic -> English via /api/ask-shafy ---------- */
+  /* ---------- translate Arabic -> English via /api/ask-shafy (with Firebase auth) ---------- */
   const translateToEnglish = async ({ bio_ar, qualifications_ar, university_ar, specialtyAr, subs_ar_list }) => {
     try {
+      const idToken = await user?.getIdToken?.();
       const r = await fetch('/api/ask-shafy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({
           mode: 'translate_ar_to_en',
           items: {
