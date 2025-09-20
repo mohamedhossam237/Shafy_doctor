@@ -2,7 +2,8 @@
 // Edge Runtime: Chat + Translation (Fanar) — no firebase-admin.
 // - Verifies Firebase ID tokens via JOSE against Google SecureToken JWKS
 // - (Optional) pulls doctor-owned context from Firestore via REST using the user ID token
-// - Keeps previous "translate_ar_to_en" mode and default chat mode
+// - Keeps "translate_ar_to_en" mode and default chat mode
+// - NEW: Optional RAG (citations) via /api/rg/search to bring trusted sources into answers
 
 export const config = { runtime: 'edge' };
 
@@ -44,12 +45,6 @@ function json(data, status = 200, headers = {}) {
     headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
   });
 }
-function text(data, status = 200, headers = {}) {
-  return new Response(data, {
-    status,
-    headers: { 'content-type': 'text/plain; charset=utf-8', ...headers },
-  });
-}
 function fmtDT(d) {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -71,9 +66,20 @@ function extractJson(text) {
   if (m) { try { return JSON.parse(m[0]); } catch {} }
   return null;
 }
+function timeout(promise, ms, errorMessage = 'Timed out') {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(Object.assign(new Error(errorMessage), { status: 504 })), ms);
+    promise.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+// Build absolute base URL for calling sibling APIs in Edge
+function getBaseUrl(req) {
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
+  return `${proto}://${host}`;
+}
 
 // ====== Firebase ID token verification (Edge-safe) ======
-// Uses Google's JWKS for SecureToken and verifies iss/aud/sub.
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 const FIREBASE_PROJECT_ID =
@@ -144,8 +150,6 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
     });
 
     // Reports where doctorUID == uid, order by date desc (limit 40)
-    // If project lacks composite index for (doctorUID + orderBy date), REST may still error.
-    // In that case, we fallback to un-ordered + local sort.
     let reportsRows;
     try {
       reportsRows = await runQuery(idToken, {
@@ -160,8 +164,7 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
         where: fieldFilter('doctorUID', 'EQUAL', uid),
         limit: 200,
       });
-      reportsRows = unOrdered;
-      // local sort later
+      reportsRows = unOrdered; // local sort later
     }
 
     // Appointments by either doctorUID or doctorId (limit 200 each)
@@ -202,7 +205,6 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
         .map((f) => {
           const o = {};
           for (const [k, v] of Object.entries(f)) {
-            // handle basic scalar types
             if (v.stringValue != null) o[k] = v.stringValue;
             else if (v.integerValue != null) o[k] = Number(v.integerValue);
             else if (v.doubleValue != null) o[k] = Number(v.doubleValue);
@@ -302,6 +304,38 @@ ${appts.join('\n') || '—'}`.trim();
   }
 }
 
+// ====== Lightweight RAG via your /api/rg/search (optional) ======
+async function fetchCitations(req, query, { limit = 6, timeoutMs = 4000 } = {}) {
+  try {
+    if (!query) return [];
+    const base = getBaseUrl(req);
+    const url = `${base}/api/rg/search?q=${encodeURIComponent(query)}`;
+    const r = await timeout(fetch(url, { method: 'GET' }), timeoutMs, 'RAG search timeout');
+    if (!r.ok) return [];
+    const j = await r.json().catch(() => ({}));
+    // Normalize Qdrant search response shape { matches: { result: [ { payload } ] } } or similar
+    const raw = j?.matches?.result || j?.matches || [];
+    const items = (Array.isArray(raw) ? raw : []).map(it => it?.payload || it);
+    const dedup = [];
+    const seen = new Set();
+    for (const x of items) {
+      const key = x?.url || x?.title || JSON.stringify(x).slice(0,128);
+      if (!seen.has(key)) { seen.add(key); dedup.push(x); }
+      if (dedup.length >= limit) break;
+    }
+    // Return normalized citations we can both show and pass to the model
+    return dedup.map(x => ({
+      title: String(x?.title || '').trim(),
+      url: String(x?.url || '').trim(),
+      source: String(x?.source || '').trim(),
+      date: String(x?.date || '').trim(),
+      tags: Array.isArray(x?.tags) ? x.tags : [],
+    })).filter(c => c.url || c.title);
+  } catch {
+    return [];
+  }
+}
+
 // ====== Handler (Edge) ======
 export default async function handler(req) {
   try {
@@ -334,6 +368,13 @@ export default async function handler(req) {
       items,
       response_format,
       temperature,
+
+      // NEW: RAG controls
+      enable_rag = true,            // turn on/off citation fetch
+      rag_query,                    // optional override for search query
+      rag_limit = 6,                // how many citations to include
+      rag_timeout_ms = 4000,        // timeout for search
+
       system_extras = [],
       instructions = [],
     } = body || {};
@@ -385,7 +426,7 @@ export default async function handler(req) {
       const parsed = extractJson(raw);
       if (!parsed || typeof parsed !== 'object') {
         return json({ error: 'Translator returned non-JSON or invalid JSON.', output: raw }, 502);
-      }
+        }
 
       const translations = {
         bio_en: String(parsed.bio_en || '').trim(),
@@ -422,6 +463,13 @@ export default async function handler(req) {
     const userTextCore = trimTo(String(message || ''), 6000);
     const userTextWithOcr = ocrCombined ? `${userTextCore}\n\n${ocrHeader}\n${ocrCombined}` : userTextCore;
 
+    // ===== Optional RAG (citations) =====
+    let citations = [];
+    if (enable_rag) {
+      const q = String(rag_query || userTextCore).slice(0, 500);
+      citations = await fetchCitations(req, q, { limit: Math.max(1, Math.min(10, rag_limit)), timeoutMs: rag_timeout_ms });
+    }
+
     // Final system/context
     const baseSystem =
       serverCtx ||
@@ -430,14 +478,25 @@ export default async function handler(req) {
         : 'You are Shafy AI, a clinical assistant for physicians. Maintain confidentiality, do not fabricate facts, and provide brief evidence when stating medical facts.');
 
     const clientCtxLabel = isArabic ? 'سياق إضافي من الواجهة (خاص):' : 'Additional client context (private):';
-    const system = [baseSystem, ...(doctorContext ? [`${clientCtxLabel}\n${trimTo(String(doctorContext || ''))}`] : [])].join('\n\n');
+    const citationsLabel = isArabic ? 'مصادر موثوقة (للاستدلال وإظهار الروابط):' : 'Trusted sources (for grounding & links):';
+
+    const citationsBlock = citations.length
+      ? `${citationsLabel}\n` + citations.map((c, i) =>
+          `- [${i + 1}] ${c.title || c.source || 'Source'} — ${c.url}${c.date ? ` (${c.date})` : ''}`
+        ).join('\n')
+      : '';
+
+    const systemParts = [baseSystem];
+    if (doctorContext) systemParts.push(`${clientCtxLabel}\n${trimTo(String(doctorContext || ''))}`);
+    if (citationsBlock) systemParts.push(citationsBlock);
+    const system = systemParts.join('\n\n');
 
     const resp = await fanarChat(
       [
         { role: 'system', content: system },
         { role: 'user', content: userTextWithOcr },
       ],
-      { max_tokens: 900, temperature: 0.2 }
+      { max_tokens: 900, temperature: typeof temperature === 'number' ? temperature : 0.2 }
     );
 
     if (!resp.ok) {
@@ -450,7 +509,14 @@ export default async function handler(req) {
     const output = resp.data?.choices?.[0]?.message?.content ?? '';
     const textOut = output || (isArabic ? 'لم أستطع توليد رد.' : 'Could not generate a response.');
 
-    return json({ ok: true, model: MODEL_CHAT, text: textOut, tts_status: 'disabled', stt_status: 'disabled' });
+    return json({
+      ok: true,
+      model: MODEL_CHAT,
+      text: textOut,
+      tts_status: 'disabled',
+      stt_status: 'disabled',
+      citations, // array of {title,url,source,date,tags}
+    });
   } catch (e) {
     const status = e?.status || 500;
     return json({ error: e?.message || 'Server error' }, status);
