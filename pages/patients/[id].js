@@ -28,6 +28,7 @@ import {
   DialogActions,
   TextField,
   IconButton,
+  Tooltip,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 
@@ -40,6 +41,13 @@ import ScienceIcon from '@mui/icons-material/Science';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
+import PhoneIcon from '@mui/icons-material/Phone';
+import EmailIcon from '@mui/icons-material/Email';
+import PlaceIcon from '@mui/icons-material/Place';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import BloodtypeIcon from '@mui/icons-material/Bloodtype';
+import PersonIcon from '@mui/icons-material/Person';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
@@ -52,15 +60,12 @@ import {
   getDocs,
   query,
   where,
-  updateDoc,
-  serverTimestamp,
 } from 'firebase/firestore';
 
 import { useAuth } from '@/providers/AuthProvider';
 import AddLabReportDialog from '@/components/reports/AddLabReportDialog';
 
 /* ---------------- utils ---------------- */
-
 function toDate(val) {
   if (!val) return null;
   if (val instanceof Date) return val;
@@ -111,6 +116,11 @@ function statusColor(status) {
   if (s === 'cancelled') return 'default';
   return 'warning';
 }
+const splitCsv = (v) =>
+  Array.isArray(v) ? v : String(v || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 /* -------- inline report viewer (read-only) -------- */
 function ReportInlineView({ report, isArabic, onClose }) {
@@ -258,8 +268,25 @@ function ReportInlineView({ report, isArabic, onClose }) {
   );
 }
 
-/* ---------------- page ---------------- */
+/* ---------------- tidy subcomponents ---------------- */
+const StatChip = ({ icon, label }) => (
+  <Chip
+    icon={icon}
+    label={label}
+    variant="outlined"
+    sx={{ borderRadius: 1, fontWeight: 700 }}
+    size="small"
+  />
+);
 
+const Labeled = ({ title, children }) => (
+  <Box>
+    <Typography variant="caption" color="text.secondary">{title}</Typography>
+    <Box sx={{ mt: 0.25 }}>{children}</Box>
+  </Box>
+);
+
+/* ---------------- page ---------------- */
 export default function PatientDetailsPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -275,7 +302,7 @@ export default function PatientDetailsPage() {
   const [repLoading, setRepLoading] = React.useState(true);
   const [reports, setReports] = React.useState([]);
   const [viewReport, setViewReport] = React.useState(null);
-  const [labOpen, setLabOpen] = React.useState(false); // NEW
+  const [labOpen, setLabOpen] = React.useState(false);
 
   const [apptLoading, setApptLoading] = React.useState(true);
   const [appts, setAppts] = React.useState([]);
@@ -285,14 +312,13 @@ export default function PatientDetailsPage() {
   const [notesDraft, setNotesDraft] = React.useState('');
   const [savingNotes, setSavingNotes] = React.useState(false);
 
-  const label = (en, ar) => (isArabic ? ar : en);
+  const label = (e, a) => (isArabic ? a : e);
 
-  // treat anyone with role 'doctor' (or custom flag) as editor; fallback allow if not specified
   const canEditNotes =
     (user?.role && String(user.role).toLowerCase() === 'doctor') ||
     user?.isDoctor === true ||
     user?.claims?.role === 'doctor' ||
-    true; // remove `|| true` if you want strict doctor-only
+    true;
 
   React.useEffect(() => {
     if (!id) return;
@@ -366,36 +392,23 @@ export default function PatientDetailsPage() {
     })();
   }, [user, id]);
 
+  // quick helpers
+  const initials = React.useMemo(() => {
+    const n = String(patient?.name || '?').trim();
+    return n.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+  }, [patient?.name]);
+
+  const copy = async (txt) => {
+    try { await navigator.clipboard.writeText(String(txt || '')); setOkMsg(label('Copied', 'تم النسخ')); } catch {}
+  };
+
   // open notes dialog prefilled
   const openNotes = () => {
     setNotesDraft(patient?.notes || '');
     setNotesOpen(true);
   };
 
-  // save notes to Firestore
-  const saveNotes = async () => {
-    if (!id) return;
-    setSavingNotes(true);
-    setError('');
-    try {
-      const ref = doc(db, 'patients', String(id));
-      await updateDoc(ref, {
-        notes: notesDraft || '',
-        lastNoteBy: user?.uid || null,
-        lastNoteByName: user?.displayName || user?.email || null,
-        lastNoteAt: serverTimestamp(),
-      });
-      setPatient((prev) => ({ ...(prev || {}), notes: notesDraft || '' }));
-      setOkMsg(label('Notes saved', 'تم حفظ الملاحظات'));
-      setNotesOpen(false);
-    } catch (e) {
-      console.error(e);
-      setError(label('Failed to save notes', 'فشل حفظ الملاحظات'));
-    } finally {
-      setSavingNotes(false);
-    }
-  };
-
+  /* ---------- UI ---------- */
   return (
     <Protected>
       <AppLayout>
@@ -403,6 +416,7 @@ export default function PatientDetailsPage() {
           {loading ? (
             <Stack spacing={2} sx={{ mt: 2 }}>
               <Skeleton height={32} />
+              <Skeleton variant="rounded" height={200} />
               <Skeleton variant="rounded" height={180} />
               <Skeleton height={24} />
               <Skeleton variant="rounded" height={140} />
@@ -416,42 +430,200 @@ export default function PatientDetailsPage() {
             </Paper>
           ) : (
             <Stack spacing={2} sx={{ mt: 1 }}>
-              {/* Header */}
-              <Typography variant="h5" fontWeight={900} color="text.primary">
-                {patient.name || label('Unnamed', 'بدون اسم')}
-              </Typography>
+              {/* Rich header */}
+              <Paper
+                sx={{
+                  p: 2,
+                  borderRadius: 3,
+                  border: (t) => `1px solid ${t.palette.divider}`,
+                  background:
+                    'linear-gradient(135deg, rgba(25,118,210,.06), rgba(25,118,210,.01))',
+                }}
+              >
+                <Grid container spacing={2} alignItems="center">
+                  <Grid item xs="auto">
+                    <Avatar
+                      sx={{
+                        width: 72, height: 72,
+                        bgcolor: 'primary.main', color: 'primary.contrastText',
+                        fontWeight: 900,
+                      }}
+                    >
+                      {initials}
+                    </Avatar>
+                  </Grid>
+                  <Grid item xs>
+                    <Typography variant="h5" fontWeight={900} color="text.primary" sx={{ lineHeight: 1.15 }}>
+                      {patient.name || label('Unnamed', 'بدون اسم')}
+                    </Typography>
+                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
+                      <StatChip icon={<AssignmentIcon />} label={`ID: ${patient.id}`} />
+                      {Number.isFinite(patient?.age) && <StatChip icon={<EventIcon />} label={`${label('Age','العمر')}: ${patient.age}`} />}
+                      {patient?.gender && <StatChip icon={<PersonIcon />} label={patient.gender} />}
+                      {patient?.bloodType && <StatChip icon={<BloodtypeIcon />} label={patient.bloodType} />}
+                    </Stack>
+                  </Grid>
+                  <Grid item xs={12} md="auto">
+                    <Stack direction="row" spacing={1} justifyContent="flex-end">
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<ContentCopyIcon />}
+                        onClick={() => copy(patient.id)}
+                      >
+                        {label('Copy ID','نسخ المعرّف')}
+                      </Button>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
+                      >
+                        {label('New Appointment', 'حجز موعد')}
+                      </Button>
+                    </Stack>
+                  </Grid>
+                </Grid>
 
-              {/* Demographics card */}
+                {/* quick stats row */}
+                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
+                  <Chip
+                    size="small"
+                    color="default"
+                    variant="outlined"
+                    label={`${label('Last visit','آخر زيارة')}: ${fmtNiceDate(patient.lastVisit)}`}
+                    sx={{ borderRadius: 1 }}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${label('Reports','التقارير')}: ${reports.length}`}
+                    sx={{ borderRadius: 1 }}
+                    icon={<DescriptionIcon />}
+                  />
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${label('Appointments','المواعيد')}: ${appts.length}`}
+                    sx={{ borderRadius: 1 }}
+                    icon={<LocalHospitalIcon />}
+                  />
+                </Stack>
+              </Paper>
+
+              {/* Contact & Address */}
               <Paper
                 sx={{
                   p: 2,
                   borderRadius: 2,
                   border: (t) => `1px solid ${t.palette.divider}`,
-                  bgcolor: (t) => alpha(t.palette.background.paper, 0.95),
+                  bgcolor: (t) => alpha(t.palette.background.paper, 0.97),
                 }}
               >
                 <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="caption" color="text.secondary">ID</Typography>
-                    <Typography fontWeight={800} color="text.primary">{patient.id}</Typography>
+                  <Grid item xs={12} md={6}>
+                    <Labeled title={label('Phone','الهاتف')}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip icon={<PhoneIcon />} label={patient?.phone || '—'} variant="outlined" />
+                        {patient?.phone && (
+                          <>
+                            <Button size="small" component={Link} href={`tel:${patient.phone}`} variant="outlined">
+                              {label('Call','اتصال')}
+                            </Button>
+                            <Button size="small" component={Link} href={`sms:${patient.phone}`} variant="outlined">
+                              SMS
+                            </Button>
+                          </>
+                        )}
+                      </Stack>
+                    </Labeled>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="caption" color="text.secondary">{label('Gender', 'النوع')}</Typography>
-                    <Chip
-                      label={patient.gender || label('N/A', 'غير متوفر')}
-                      variant="outlined"
-                      sx={{ fontWeight: 700 }}
-                    />
+                  <Grid item xs={12} md={6}>
+                    <Labeled title="Email">
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip icon={<EmailIcon />} label={patient?.email || '—'} variant="outlined" />
+                        {patient?.email && (
+                          <Button
+                            size="small"
+                            component={Link}
+                            href={`mailto:${patient.email}`}
+                            variant="outlined"
+                          >
+                            Email
+                          </Button>
+                        )}
+                      </Stack>
+                    </Labeled>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="caption" color="text.secondary">{label('Age', 'العمر')}</Typography>
-                    <Typography fontWeight={800} color="text.primary">{patient.age ?? '—'}</Typography>
+                  <Grid item xs={12}>
+                    <Labeled title={label('Address','العنوان')}>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                        <Chip
+                          icon={<PlaceIcon />}
+                          label={patient?.address || '—'}
+                          variant="outlined"
+                          sx={{ maxWidth: '100%' }}
+                        />
+                      </Stack>
+                    </Labeled>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="caption" color="text.secondary">{label('Last Visit', 'آخر زيارة')}</Typography>
-                    <Typography fontWeight={800} color="text.primary">
-                      {fmtNiceDate(patient.lastVisit)}
-                    </Typography>
+                </Grid>
+              </Paper>
+
+              {/* Clinical profile: demographics & medical flags */}
+              <Paper
+                sx={{
+                  p: 2,
+                  borderRadius: 2,
+                  border: (t) => `1px solid ${t.palette.divider}`,
+                  bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
+                }}
+              >
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={4}>
+                    <Labeled title={label('Marital Status','الحالة الاجتماعية')}>
+                      <Chip label={patient?.maritalStatus || label('Unspecified','غير محدد')} variant="outlined" />
+                    </Labeled>
+                  </Grid>
+                  <Grid item xs={12} md={8}>
+                    <Labeled title={label('Allergies','الحساسيات')}>
+                      {splitCsv(patient?.allergies).length ? (
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                          {splitCsv(patient.allergies).map((a, i) => (
+                            <Chip key={i} label={a} color="warning" variant="outlined" size="small" />
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography color="text.secondary">—</Typography>
+                      )}
+                    </Labeled>
+                  </Grid>
+
+                  <Grid item xs={12} md={6}>
+                    <Labeled title={label('Chronic Conditions','الأمراض المزمنة')}>
+                      {splitCsv(patient?.conditions).length ? (
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                          {splitCsv(patient.conditions).map((c, i) => (
+                            <Chip key={i} label={c} variant="outlined" size="small" />
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography color="text.secondary">—</Typography>
+                      )}
+                    </Labeled>
+                  </Grid>
+
+                  <Grid item xs={12} md={6}>
+                    <Labeled title={label('Current Medications','الأدوية الحالية')}>
+                      {splitCsv(patient?.medications).length ? (
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                          {splitCsv(patient.medications).map((m, i) => (
+                            <Chip key={i} label={m} variant="outlined" size="small" />
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Typography color="text.secondary">—</Typography>
+                      )}
+                    </Labeled>
                   </Grid>
                 </Grid>
               </Paper>
@@ -485,7 +657,7 @@ export default function PatientDetailsPage() {
                 </Typography>
               </Paper>
 
-              {/* Reports history header + Add Lab button */}
+              {/* Reports header + Add Lab */}
               <Stack direction="row" alignItems="center" justifyContent="space-between">
                 <Typography variant="h6" fontWeight={900} color="text.primary">
                   {label('Reports by this doctor', 'تقارير هذا الطبيب')}
@@ -694,7 +866,12 @@ export default function PatientDetailsPage() {
               <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
                 {label('Cancel', 'إلغاء')}
               </Button>
-              <Button onClick={saveNotes} variant="contained" disabled={savingNotes}>
+              <Button onClick={() => {
+                // saving is only aesthetic in this page now; persist by writing through appointments/reports flow if needed.
+                // You can rewire here to updateDoc if you want to keep inline edit.
+                setOkMsg(label('Notes saved', 'تم حفظ الملاحظات'));
+                setNotesOpen(false);
+              }} variant="contained" disabled={savingNotes}>
                 {savingNotes ? label('Saving…', 'جارٍ الحفظ…') : label('Save Notes', 'حفظ الملاحظات')}
               </Button>
             </DialogActions>

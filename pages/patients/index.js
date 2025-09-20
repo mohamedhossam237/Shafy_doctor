@@ -13,7 +13,8 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, getDocs, query, where, addDoc, serverTimestamp
+  collection, getDocs, getDoc, doc, query, where,
+  addDoc, updateDoc, serverTimestamp, arrayUnion
 } from 'firebase/firestore';
 
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
@@ -30,6 +31,19 @@ const normalizePhone = (raw) => {
   const plus = s[0] === '+';
   const digits = s.replace(/\D/g, '');
   return plus ? `+${digits}` : digits;
+};
+
+// extract best available patient info from an appointment doc data
+const pickPatientFromAppt = (a) => {
+  const phone = normalizePhone(a.patientPhone || a.phone || a.patient_phone);
+  const pid =
+    String(a.patientId || a.patientID || a.patientUid || a.patientUID || '')
+      .trim() || undefined;
+  const name =
+    a.patientName || a.patient_name || a.name ||
+    (a.patient && (a.patient.name || a.patient.fullName)) || undefined;
+
+  return { pid, phone, name };
 };
 
 export default function PatientsIndexPage() {
@@ -58,6 +72,56 @@ export default function PatientsIndexPage() {
   const [msgBody, setMsgBody] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
+  /* ---------- ensureDB: create/link patients from appointments ---------- */
+  const ensurePatientInDB = React.useCallback(async (uid, info, langIsAr) => {
+    // info: { pid?, phone?, name? }
+    const patientsCol = collection(db, 'patients');
+
+    // 1) Try patient doc by appointment's patientId
+    if (info.pid) {
+      const ref = doc(db, 'patients', info.pid);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        // idempotent: add this doctor to associatedDoctors
+        await updateDoc(ref, {
+          associatedDoctors: arrayUnion(uid),
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+        return { id: ref.id, ...snap.data() };
+      }
+    }
+
+    // 2) Try to find by phone
+    if (info.phone) {
+      const qs = await getDocs(query(patientsCol, where('phone', '==', info.phone)));
+      if (!qs.empty) {
+        const d = qs.docs[0];
+        await updateDoc(doc(db, 'patients', d.id), {
+          associatedDoctors: arrayUnion(uid),
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+        return { id: d.id, ...d.data() };
+      }
+    }
+
+    // 3) Create new minimal patient doc
+    const payload = {
+      name: info.name || (langIsAr ? 'بدون اسم' : 'Unnamed'),
+      phone: info.phone || null,
+      age: null,
+      gender: '',
+      maritalStatus: '',
+      address: '',
+      // tie to this doctor so it appears in their list forever
+      registeredBy: uid,
+      associatedDoctors: [uid],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    const created = await addDoc(patientsCol, payload);
+    return { id: created.id, ...payload };
+  }, []);
+
   /* ---------- load: include all booked (phones + patientIds) ---------- */
   React.useEffect(() => {
     if (!user?.uid) return;
@@ -78,85 +142,70 @@ export default function PatientsIndexPage() {
         const rawDocs = new Map();
         const push = (d) => {
           const data = { id: d.id, ...d.data() };
-          // ignore records that have been merged into a canonical doc
           if (data.mergedInto) return;
           rawDocs.set(d.id, data);
         };
         snapRegistered.docs.forEach(push);
         snapAssoc.docs.forEach(push);
 
-        // (B) collect all booked patients (phones + patientIds)
+        // (B) collect all booked patients (phones + ids) from this doctor's appointments
         const apptCol = collection(db, 'appointments');
         const [snapA, snapB] = await Promise.all([
           getDocs(query(apptCol, where('doctorId', '==', uid))),
           getDocs(query(apptCol, where('doctorUID', '==', uid))),
         ]);
 
-        const bookedPhones = new Set();
-        const bookedIds = new Set();
-
-        const collectFromAppt = (a) => {
-          // phones from explicit phone fields only
-          const phone = normalizePhone(a.patientPhone || a.phone || a.patient_phone);
-          if (phone) bookedPhones.add(phone);
-
-          // ids from id/uid variants
-          const pid = String(a.patientId || a.patientID || a.patientUid || a.patientUID || '').trim();
-          if (pid) bookedIds.add(pid);
+        // Build a unique set of "appointment patients" with as much info as we can
+        const apptInfosMap = new Map(); // key by (pid || phone)
+        const addApptInfo = (a) => {
+          const info = pickPatientFromAppt(a);
+          const key = info.pid || info.phone;
+          if (!key) return;
+          const prev = apptInfosMap.get(key) || {};
+          // prefer keeping a name/phone if available
+          apptInfosMap.set(key, {
+            pid: info.pid || prev.pid,
+            phone: info.phone || prev.phone,
+            name: info.name || prev.name,
+          });
         };
-        [...snapA.docs, ...snapB.docs].forEach(s => collectFromAppt(s.data()));
+        [...snapA.docs, ...snapB.docs].forEach((s) => addApptInfo(s.data()));
 
-        // (C) build maps by id and by phone; choose best record per key
+        // (C) existing maps (by id & phone) to decide if DB creation is needed
         const byId = new Map();
         const byPhone = new Map();
-        const ts = (x) => (x?.updatedAt?.seconds || x?.createdAt?.seconds || 0);
-        const score = (x) => (x?.name ? 1 : 0) + (x?.phone || x?.mobile ? 1 : 0);
-        const choose = (prev, cur) => {
-          if (!prev) return cur;
-          const sPrev = score(prev), sCur = score(cur);
-          if (sCur !== sPrev) return sCur > sPrev ? cur : prev;
-          return ts(cur) >= ts(prev) ? cur : prev; // newer wins
-        };
-
-        // seed with existing patient docs
         for (const row of rawDocs.values()) {
           const phone = normalizePhone(row.phone || row.mobile);
-          byId.set(row.id, choose(byId.get(row.id), row));
-          if (phone) byPhone.set(phone, choose(byPhone.get(phone), row));
+          byId.set(row.id, row);
+          if (phone) byPhone.set(phone, row);
         }
 
-        // ensure EVERY booked phone exists
-        for (const phone of bookedPhones) {
-          if (!byPhone.has(phone)) {
-            const placeholder = {
-              id: phone, // use phone as id for routing when no doc exists
-              name: isArabic ? 'بدون اسم' : 'Unnamed',
-              phone,
-              mobile: phone,
-            };
-            byPhone.set(phone, placeholder);
-          }
-        }
+        // (D) persist any missing appointment patients into Firestore and
+        //     ensure the doctor is associated with existing ones.
+        const ensuredResults = [];
+        for (const info of apptInfosMap.values()) {
+          const already =
+            (info.pid && byId.has(info.pid)) ||
+            (info.phone && byPhone.has(info.phone));
 
-        // ensure EVERY booked patientId exists
-        for (const pid of bookedIds) {
-          if (!byId.has(pid)) {
-            const placeholder = {
-              id: pid,
-              name: isArabic ? 'بدون اسم' : 'Unnamed',
-            };
-            byId.set(pid, placeholder);
-          }
+          // Even if "already", we still make an idempotent association update using arrayUnion.
+          // This keeps the write count modest while ensuring link is present.
+          ensuredResults.push(ensurePatientInDB(uid, info, isArabic));
         }
+        await Promise.allSettled(ensuredResults);
 
-        // (D) merge (prefer richer records), then sort
-        const merged = new Map();
-        for (const v of [...byId.values(), ...byPhone.values()]) {
-          const key = v.id || v.phone || v.mobile;
-          merged.set(key, choose(merged.get(key), v));
-        }
+        // (E) Re-fetch the doctor’s patient docs after ensures (cheap and consistent)
+        const [snapRegistered2, snapAssoc2] = await Promise.all([
+          getDocs(query(patientsCol, where('registeredBy', '==', uid))),
+          getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid))),
+        ]);
+        const finalRows = new Map();
+        const keep = (d) => finalRows.set(d.id, { id: d.id, ...d.data() });
+        snapRegistered2.docs.forEach(keep);
+        snapAssoc2.docs.forEach(keep);
 
-        const rows = Array.from(merged.values()).sort((a, b) =>
+        // Sort by name
+        const rows = Array.from(finalRows.values()).sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
 
@@ -168,7 +217,7 @@ export default function PatientsIndexPage() {
         setLoading(false);
       }
     })();
-  }, [user, isArabic]);
+  }, [user, isArabic, ensurePatientInDB]);
 
   const filtered = React.useMemo(() => {
     const q = queryText.trim().toLowerCase();
@@ -276,7 +325,7 @@ export default function PatientsIndexPage() {
               />
               {msgPatient?.id && (
                 <Box sx={{ fontSize: 13, color: 'text.secondary' }}>
-                  {isArabic ? 'سيتم إرسال الرسالة إلى: ' : 'Will send to: '}
+                  {isArabic ? 'سيتم إرسال الرسالة إلى: ' : 'Will send to: ' }
                   <strong>{msgPatient.name}</strong> (ID: {msgPatient.id})
                 </Box>
               )}

@@ -100,6 +100,16 @@ function apptDate(appt) {
   return null;
 }
 
+// Mirror PatientCard.jsx "hasBasics" rule for counting visible cards
+function passesPatientCardBasics(p) {
+  const hasName = Boolean(p?.name && String(p.name).trim());
+  const hasAge = p?.age !== undefined && p?.age !== null && String(p.age).trim() !== '';
+  const hasPhone = Boolean(p?.phone && String(p.phone).trim());
+  const hasGender = Boolean(p?.gender && String(p.gender).trim());
+  const hasAddress = Boolean(p?.address && String(p.address).trim());
+  return hasName && hasAge && hasPhone && hasGender && hasAddress;
+}
+
 /* --------------------------- UI primitives --------------------------- */
 
 function SectionCard({ children, isArabic, tint = 'transparent', pad = true, sx = {}, ...props }) {
@@ -359,8 +369,11 @@ export default function DashboardIndexPage() {
           .slice(0, 4);
         setAppointments(upcoming);
 
-        // ----- patients count (registeredBy = doctor) -----
+        // ----- patients count (registeredBy = doctor), BUT count only those that would render a PatientCard -----
         const patSnap = await getDocs(query(collection(db, 'patients'), where('registeredBy', '==', doctorUID)));
+        const patientRows = patSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const visiblePatients = patientRows.filter(passesPatientCardBasics);
+        const visiblePatientsCount = visiblePatients.length;
 
         // ----- reports TOTAL (merge doctorUID/doctorId) -----
         const colRep = collection(db, 'reports');
@@ -375,7 +388,7 @@ export default function DashboardIndexPage() {
         const repRows = Array.from(repMap.values());
         const totalReportsCount = repRows.length; // ← show ALL, not only today's
 
-        setCounts({ appointments: todayAll.length, patients: patSnap.size, reports: totalReportsCount });
+        setCounts({ appointments: todayAll.length, patients: visiblePatientsCount, reports: totalReportsCount });
       } catch (e) {
         console.error(e);
         setErr(e?.message || 'Failed to load dashboard');

@@ -48,6 +48,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PlaceIcon from '@mui/icons-material/Place';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
@@ -168,6 +169,40 @@ const sanitizeClinics = (arr) =>
       address_ar: String(c.address_ar || c.address || '').trim(),
       active: c.active !== false,
     }));
+
+/* ---------------- WhatsApp helpers (free, 1-tap) ---------------- */
+
+// digits only for wa.me (no +, no spaces). If you store local numbers, consider
+// saving with country code in your booking flow.
+const toWaDigits = (raw) => String(raw || '').replace(/\D/g, '');
+
+// Build prefilled message (AR/EN) based on new status
+function buildStatusMessage({ isAr, appt, newStatus, clinicLabel }) {
+  const when = fmtFullDateTime(appt);
+  const doctor =
+    field(appt, 'doctorName_ar', 'doctorName_en') ||
+    field(appt, 'doctorName_en', 'doctorName_ar') ||
+    '';
+  const clinic = clinicLabel || appt?.clinicName_ar || appt?.clinicName_en || '';
+
+  if (isAr) {
+    const map = {
+      confirmed: `مرحبًا ${appt?.patientName || ''}، تم تأكيد موعدك مع ${doctor} ${clinic ? `في ${clinic} ` : ''}بتاريخ ${when}. نراك قريبًا.`,
+      completed: `شكرًا ${appt?.patientName || ''}! تم إنهاء موعدك مع ${doctor}. نتمنى لك الصحة.`,
+      cancelled: `مرحبًا ${appt?.patientName || ''}، تم إلغاء موعدك مع ${doctor}. راسلنا لتحديد موعد جديد.`,
+      pending: `مرحبًا ${appt?.patientName || ''}، طلب موعدك قيد المراجعة لزيارة ${doctor} ${clinic ? `في ${clinic} ` : ''}بتاريخ ${when}. سنوافيك بالتأكيد قريبًا.`,
+    };
+    return map[newStatus] || map.pending;
+  }
+
+  const mapEn = {
+    confirmed: `Hi ${appt?.patientName || ''}, your appointment with ${doctor}${clinic ? ` at ${clinic}` : ''} on ${when} is confirmed. See you soon!`,
+    completed: `Thank you ${appt?.patientName || ''}! Your appointment with ${doctor} has been completed. Wishing you good health.`,
+    cancelled: `Hi ${appt?.patientName || ''}, your appointment with ${doctor} has been canceled. Message us to reschedule anytime.`,
+    pending: `Hi ${appt?.patientName || ''}, your appointment request with ${doctor}${clinic ? ` at ${clinic}` : ''} on ${when} is pending review. We’ll confirm shortly.`,
+  };
+  return mapEn[newStatus] || mapEn.pending;
+}
 
 /* ---------------- mini view dialog for a report ---------------- */
 
@@ -378,11 +413,16 @@ function ExtraFeeDialog({ open, onClose, onSave, initial, isAr }) {
     setNote(initial?.note || '');
   }, [open, initial]);
 
+  const safeNumLocal = (v) => {
+    const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
   const handleSave = () => {
     const payload = {
       id: initial?.id || uid(),
       title: title.trim(),
-      amount: safeNum(amount),
+      amount: safeNumLocal(amount),
       note: note.trim(),
       updatedAt: new Date().toISOString(),
       createdAt: initial?.createdAt || new Date().toISOString(),
@@ -390,7 +430,7 @@ function ExtraFeeDialog({ open, onClose, onSave, initial, isAr }) {
     onSave?.(payload);
   };
 
-  const disabled = !title.trim() || !Number.isFinite(safeNum(amount)) || safeNum(amount) <= 0;
+  const disabled = !title.trim() || !Number.isFinite(safeNumLocal(amount)) || safeNumLocal(amount) <= 0;
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
@@ -538,6 +578,59 @@ function UpdateAppointmentDialog({
   );
 }
 
+/* ---------------- WhatsApp Notify Dialog (1-tap send) ---------------- */
+
+function WhatsAppNotifyDialog({ open, onClose, isAr, message, phoneDigits }) {
+  const t = (en, ar) => (isAr ? ar : en);
+  const href = phoneDigits
+    ? `https://wa.me/${phoneDigits}?text=${encodeURIComponent(message || '')}`
+    : '';
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ fontWeight: 900, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <WhatsAppIcon color="success" /> {t('Send WhatsApp Message', 'إرسال رسالة واتساب')}
+      </DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={1}>
+          <Alert severity="info">
+            {t(
+              'This opens WhatsApp with a pre-filled message. You just press “Send”.',
+              'سيتم فتح واتساب مع رسالة جاهزة للإرسال. كل ما عليك الضغط على "إرسال".'
+            )}
+          </Alert>
+          <Typography variant="subtitle2">{t('Preview', 'المعاينة')}:</Typography>
+          <Paper variant="outlined" sx={{ p: 1, borderRadius: 2, whiteSpace: 'pre-wrap' }}>
+            {message || '—'}
+          </Paper>
+          {!phoneDigits ? (
+            <Alert severity="warning">
+              {t(
+                'No patient phone number on this appointment, so WhatsApp cannot be opened.',
+                'لا يوجد رقم هاتف للمريض على هذا الموعد، لذا لا يمكن فتح واتساب.'
+              )}
+            </Alert>
+          ) : null}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>{t('Close', 'إغلاق')}</Button>
+        <Button
+          variant="contained"
+          startIcon={<WhatsAppIcon />}
+          disabled={!phoneDigits}
+          component="a"
+          href={href || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {t('Open WhatsApp', 'فتح واتساب')}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /* ---------------- page ---------------- */
 
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
@@ -578,6 +671,11 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
 
   // clinics for label resolution
   const [clinics, setClinics] = React.useState([]); // NEW
+
+  // WhatsApp dialog state
+  const [waOpen, setWaOpen] = React.useState(false);
+  const [waMsg, setWaMsg] = React.useState('');
+  const [waDigits, setWaDigits] = React.useState('');
 
   const statusOptions = [
     { v: 'pending', label: t('Pending', 'قيد الانتظار') },
@@ -717,6 +815,19 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
       setStatus(newStatus);
       setAppt((prev) => (prev ? { ...prev, status: newStatus } : prev));
       setSnack({ open: true, severity: 'success', msg: t('Status updated', 'تم تحديث الحالة') });
+
+      // ---- NEW: trigger WhatsApp dialog (free, 1-tap) ----
+      const clinicId = appt?.clinicId || appt?.clinicID || '';
+      const clinic = clinicId
+        ? clinics.find((c) => c.id === clinicId)
+        : null;
+      const clinicLabel = clinic ? (isAr ? (clinic.name_ar || clinic.name_en) : (clinic.name_en || clinic.name_ar)) : '';
+
+      const msg = buildStatusMessage({ isAr, appt, newStatus, clinicLabel });
+      const digits = toWaDigits(appt?.patientPhone || '');
+      setWaMsg(msg);
+      setWaDigits(digits);
+      setWaOpen(true);
     } catch (e) {
       setSnack({
         open: true,
@@ -732,7 +843,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     if (status !== 'confirmed') applyStatus('confirmed');
   };
 
-  // ---- Fetch reports (moved ABOVE handleReportSaved to avoid TDZ) ----
+  // ---- Fetch reports ----
   const fetchReports = React.useCallback(async () => {
     if (!id) return;
     setReportsLoading(true);
@@ -838,7 +949,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         <Box sx={{ mb: 1, display: 'flex', justifyContent: isAr ? 'flex-end' : 'flex-start' }}>
           <Button
             component={Link}
-            href={backHref}
+            href={`/appointments${isAr ? '?lang=ar' : ''}`}
             startIcon={isAr ? null : <ArrowBackIcon />}
             endIcon={isAr ? <ArrowBackIcon /> : null}
           >
@@ -1281,7 +1392,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
 
               {/* Footer actions */}
               <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 0.5 }}>
-                <Button component={Link} href={backHref} variant="outlined">
+                <Button component={Link} href={`/appointments${isAr ? '?lang=ar' : ''}`} variant="outlined">
                   {t('Back', 'رجوع')}
                 </Button>
               </Stack>
@@ -1340,6 +1451,15 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           onSave={saveFee}
           initial={editingFee}
           isAr={isAr}
+        />
+
+        {/* WhatsApp dialog (free, 1-tap send) */}
+        <WhatsAppNotifyDialog
+          open={waOpen}
+          onClose={() => setWaOpen(false)}
+          isAr={isAr}
+          message={waMsg}
+          phoneDigits={waDigits}
         />
 
         <Snackbar
