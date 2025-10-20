@@ -3,7 +3,8 @@
 // - Verifies Firebase ID tokens via JOSE against Google SecureToken JWKS
 // - (Optional) pulls doctor-owned context from Firestore via REST using the user ID token
 // - Keeps "translate_ar_to_en" mode and default chat mode
-// - NEW: Optional RAG (citations) via /api/rg/search to bring trusted sources into answers
+// - Optional RAG (citations) via /api/rg/search to bring trusted sources into answers
+// - NEW: `use_server_context` flag to *disable* any global/doctor context (use only caller-provided data)
 
 export const config = { runtime: 'edge' };
 
@@ -219,7 +220,7 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
     let reports = unwrap(reportsRows);
     // local sort fallback by 'date' if exists
     reports = reports.sort(
-      (a, b) => (asDate(a.date)?.getTime() || 0) * -1 - ((asDate(b.date)?.getTime() || 0) * -1)
+      (a, b) => (asDate(b.date)?.getTime() || 0) - (asDate(a.date)?.getTime() || 0)
     );
 
     const apptsRaw = [...unwrap(apptUID), ...unwrap(apptId)];
@@ -369,7 +370,7 @@ export default async function handler(req) {
       response_format,
       temperature,
 
-      // NEW: RAG controls
+      // RAG controls
       enable_rag = true,            // turn on/off citation fetch
       rag_query,                    // optional override for search query
       rag_limit = 6,                // how many citations to include
@@ -377,6 +378,9 @@ export default async function handler(req) {
 
       system_extras = [],
       instructions = [],
+
+      // NEW: if false, we won't include any server/doctor-wide context
+      use_server_context = true,
     } = body || {};
 
     // ===== Translation branch =====
@@ -385,7 +389,9 @@ export default async function handler(req) {
       const qualifications_ar = String(items?.qualifications_ar || '');
       const university_ar = String(items?.university_ar || '');
       const specialty_ar = String(items?.specialty_ar || '');
-      const subs_ar = Array.isArray(items?.subspecialties_ar) ? items.subspecialties_ar.filter(Boolean).map(String) : [];
+      const subs_ar = Array.isArray(items?.subspecialties_ar)
+        ? items.subspecialties_ar.filter(Boolean).map(String)
+        : [];
 
       const sys = [
         'You are a professional bilingual (Arabic→English) medical translator.',
@@ -426,7 +432,7 @@ export default async function handler(req) {
       const parsed = extractJson(raw);
       if (!parsed || typeof parsed !== 'object') {
         return json({ error: 'Translator returned non-JSON or invalid JSON.', output: raw }, 502);
-        }
+      }
 
       const translations = {
         bio_en: String(parsed.bio_en || '').trim(),
@@ -447,7 +453,10 @@ export default async function handler(req) {
     }
 
     // Build PRIVATE context via Firestore REST (optional; fail-soft)
-    const serverCtx = await buildDoctorContextFromFirestore({ uid: user.uid, idToken, lang });
+    const serverCtx = use_server_context
+      ? await buildDoctorContextFromFirestore({ uid: user.uid, idToken, lang })
+      : '';
+
     const isArabic = lang === 'ar';
 
     // OCR hints (optional)
@@ -474,8 +483,8 @@ export default async function handler(req) {
     const baseSystem =
       serverCtx ||
       (isArabic
-        ? 'أنت شافي AI، مساعد سريري للأطباء. التزم بالسرية، لا تتخيل معلومات، واذكر الدليل بإيجاز عند ذكر حقائق طبية.'
-        : 'You are Shafy AI, a clinical assistant for physicians. Maintain confidentiality, do not fabricate facts, and provide brief evidence when stating medical facts.');
+        ? 'أنت شافي AI، مساعد سريري للأطباء. التزم بالسرية، لا تُنشئ معلومات، وقدّم إجابات عملية موجزة.'
+        : 'You are Shafy AI, a clinical assistant for physicians. Maintain confidentiality, do not fabricate facts, and provide concise, practical answers.');
 
     const clientCtxLabel = isArabic ? 'سياق إضافي من الواجهة (خاص):' : 'Additional client context (private):';
     const citationsLabel = isArabic ? 'مصادر موثوقة (للاستدلال وإظهار الروابط):' : 'Trusted sources (for grounding & links):';
@@ -489,6 +498,9 @@ export default async function handler(req) {
     const systemParts = [baseSystem];
     if (doctorContext) systemParts.push(`${clientCtxLabel}\n${trimTo(String(doctorContext || ''))}`);
     if (citationsBlock) systemParts.push(citationsBlock);
+    if (Array.isArray(system_extras) && system_extras.length) {
+      systemParts.push(system_extras.join('\n'));
+    }
     const system = systemParts.join('\n\n');
 
     const resp = await fanarChat(

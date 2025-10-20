@@ -1,36 +1,67 @@
 // /components/patients/AddPatientDialog.jsx
 'use client';
+
 import * as React from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Button, Stack, Grid, MenuItem, Alert, Snackbar,
-  CircularProgress, Box, Divider, useMediaQuery, Chip,
-  FormControl, InputLabel, Select, FormHelperText,
+  TextField, Button, Stack, Grid, Alert, Snackbar,
+  CircularProgress, Box, useMediaQuery, Chip, Collapse,
+  FormControl, InputLabel, Select, MenuItem, FormHelperText, Divider, IconButton
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { useRouter } from 'next/router';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import {
+  doc, getDoc, setDoc, serverTimestamp
+} from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 
-// ---- utils ----
-const PHONE_RE = /^[\d\s+()-]{8,}$/; // بسيطة وعالميّة
+/* -------------------------------------------------------------------------- */
+/*                                   Utils                                    */
+/* -------------------------------------------------------------------------- */
 
-function SectionTitle({ children, isArabic }) {
-  return (
-    <Stack direction="row" alignItems="center" spacing={1}
-      sx={{ mt: 1, mb: 0.5, ...(isArabic ? { flexDirection: 'row-reverse' } : {}) }}>
-      <Chip size="small" color="primary" variant="filled" label=" " sx={{ width: 8, height: 8 }} />
-      <Box component="span" sx={{ fontWeight: 800, fontSize: 13, color: 'text.secondary' }}>
-        {children}
-      </Box>
-    </Stack>
-  );
+const PHONE_RE = /^[\d\s+()-]{8,}$/; // simple global-ish check (UI validation)
+const DIGITS = /[^0-9]/g;
+
+/**
+ * Normalize a phone string to a stable ID.
+ * - Keeps leading '+' if present.
+ * - If local format, upgrades based on countryCode heuristic.
+ * - Converts leading '00' to '+'.
+ * - Fallback returns digits-only (still unique enough for your use-case).
+ *
+ * Set `countryCode` per deployment (default +974 for Qatar).
+ */
+function normalizePhoneForId(raw = '', { countryCode = '+974' } = {}) {
+  const s = String(raw).trim();
+  if (!s) return '';
+
+  // If it already starts with '+', keep only + and digits
+  if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
+
+  // Remove non-digits
+  const d = s.replace(DIGITS, '');
+
+  // Qatar heuristic: local 8 digits -> +974########
+  if (countryCode === '+974' && d.length === 8) return `${countryCode}${d}`;
+
+  // Egypt heuristic: 11 digits starting with 01 -> +20##########
+  if (countryCode === '+20' && d.length === 11 && d.startsWith('01')) {
+    return `${countryCode}${d.slice(1)}`; // drop leading 0
+  }
+
+  // Convert 00CC... to +CC...
+  if (d.startsWith('00')) return `+${d.slice(2)}`;
+
+  // Fallback: just digits
+  return d;
 }
 
-const SELECT_MENU_PROPS = (rtl) => ({
-  PaperProps: { sx: { maxHeight: 320, minWidth: 240, transformOrigin: rtl ? 'right top' : 'left top' } },
-});
+/* -------------------------------------------------------------------------- */
+/*                                 Component                                  */
+/* -------------------------------------------------------------------------- */
 
 export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isArProp }) {
   const router = useRouter();
@@ -38,6 +69,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuth();
 
+  // Language / direction
   const isArabic = React.useMemo(() => {
     if (typeof isArProp === 'boolean') return isArProp;
     const q = router?.query || {};
@@ -45,22 +77,21 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
     if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
     return true;
   }, [router?.query, isArProp]);
-
   const t = (en, ar) => (isArabic ? ar : en);
   const dirProps = { dir: isArabic ? 'rtl' : 'ltr', sx: { textAlign: isArabic ? 'right' : 'left' } };
 
+  // UI state
   const [submitting, setSubmitting] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, msg: '', severity: 'success' });
+  const [moreOpen, setMoreOpen] = React.useState(false);
 
+  // Form: minimal required (name, phone). Others optional behind "More details"
   const [form, setForm] = React.useState({
-    // إلزامي
     name: '',
-    age: '',
     phone: '',
+    age: '',
     gender: '',
     address: '',
-    // اختياري
-    maritalStatus: '',
     email: '',
     bloodType: '',
     allergies: '',
@@ -74,12 +105,21 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
   React.useEffect(() => {
     if (!open) {
       setForm({
-        name: '', age: '', phone: '', gender: '', address: '',
-        maritalStatus: '', email: '', bloodType: '', allergies: '',
-        conditions: '', medications: '', notes: '',
+        name: '',
+        phone: '',
+        age: '',
+        gender: '',
+        address: '',
+        email: '',
+        bloodType: '',
+        allergies: '',
+        conditions: '',
+        medications: '',
+        notes: '',
       });
       setErrors({});
       setSubmitting(false);
+      setMoreOpen(false);
     }
   }, [open]);
 
@@ -93,19 +133,17 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
     const next = {};
 
     if (!form.name?.trim()) next.name = t('Required', 'مطلوب');
-    if (form.age === '') next.age = t('Required', 'مطلوب');
-    else if (!/^\d{1,3}$/.test(String(form.age)) || Number(form.age) > 120)
-      next.age = t('Enter a valid age (0–120)', 'أدخل عمرًا صحيحًا (0–120)');
 
     if (!form.phone?.trim()) next.phone = t('Phone is required', 'رقم الهاتف مطلوب');
     else if (!PHONE_RE.test(form.phone)) next.phone = t('Invalid phone', 'رقم هاتف غير صالح');
 
-    if (!form.gender) next.gender = t('Required', 'مطلوب');
-
-    if (!form.address?.trim()) next.address = t('Required', 'مطلوب');
-
-    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
+    // Optional fields: validate only if provided
+    if (form.age && (!/^\d{1,3}$/.test(String(form.age)) || Number(form.age) > 120)) {
+      next.age = t('Enter a valid age (0–120)', 'أدخل عمرًا صحيحًا (0–120)');
+    }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
       next.email = t('Invalid email', 'بريد إلكتروني غير صالح');
+    }
 
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -120,28 +158,56 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
     try {
       setSubmitting(true);
+
+      // Enforce phone as primary key (document ID)
+      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+974' }); // change to '+20' if needed
+      if (!phoneId || !/^[+0-9]{8,}$/.test(phoneId)) {
+        setSnack({ open: true, msg: t('Invalid phone format.', 'صيغة الهاتف غير صالحة.'), severity: 'error' });
+        setSubmitting(false);
+        return;
+      }
+
+      const patientRef = doc(db, 'patients', phoneId);
+
+      // Prevent duplicates
+      const existing = await getDoc(patientRef);
+      if (existing.exists()) {
+        setSnack({
+          open: true,
+          msg: t('A patient with this phone already exists.', 'يوجد مريض بهذا الرقم بالفعل.'),
+          severity: 'warning',
+        });
+        onSaved?.(patientRef.id);
+        onClose?.();
+        return;
+      }
+
       const payload = {
+        // Required
         name: form.name.trim(),
-        age: Number(form.age),
-        phone: form.phone.trim(),
-        gender: form.gender,
-        address: form.address.trim(),
-        // اختياري
-        maritalStatus: form.maritalStatus || null,
+        phone: form.phone.trim(),     // as entered for display
+        phoneId,                      // normalized mirror (primary key)
+        // Optional
+        age: form.age ? Number(form.age) : null,
+        gender: form.gender || null,
+        address: form.address?.trim() || null,
         email: form.email?.trim() || null,
         bloodType: form.bloodType || null,
         allergies: form.allergies?.trim() || '',
         conditions: form.conditions?.trim() || '',
         medications: form.medications?.trim() || '',
         notes: form.notes?.trim() || '',
+        // Metadata
         lastVisit: null,
         registeredBy: user.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-      const ref = await addDoc(collection(db, 'patients'), payload);
+
+      await setDoc(patientRef, payload);
+
       setSnack({ open: true, msg: t('Patient added successfully.', 'تم إضافة المريض بنجاح.'), severity: 'success' });
-      onSaved?.(ref.id);
+      onSaved?.(patientRef.id);
       onClose?.();
     } catch (e) {
       console.error(e);
@@ -157,19 +223,18 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
       onClose={submitting ? undefined : onClose}
       fullWidth
       maxWidth="sm"
-      fullScreen={useMediaQuery(theme.breakpoints.down('sm'))}
-      PaperProps={{ sx: { borderRadius: useMediaQuery(theme.breakpoints.down('sm')) ? 0 : 3 } }}
+      fullScreen={fullScreen}
+      PaperProps={{ sx: { borderRadius: fullScreen ? 0 : 3 } }}
     >
       <DialogTitle {...dirProps} sx={{ pb: 1 }}>
         {t('Add Patient', 'إضافة مريض')}
       </DialogTitle>
 
       <DialogContent {...dirProps} sx={{ pt: 0.5, pb: 1, '& .MuiFormControl-root': { width: '100%' } }}>
-        <Stack spacing={1.5}>
-          {/* أساسيات */}
-          <SectionTitle isArabic={isArabic}>{t('Basics', 'البيانات الأساسية')}</SectionTitle>
+        <Stack spacing={1.25}>
+          {/* Minimal required fields */}
           <Grid container spacing={1.25}>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12}>
               <TextField
                 label={t('Full Name *', 'الاسم الكامل *')}
                 value={form.name}
@@ -177,28 +242,12 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 error={Boolean(errors.name)}
                 helperText={errors.name || ' '}
                 autoComplete="name"
-                fullWidth
                 autoFocus
-              />
-            </Grid>
-
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label={t('Age *', 'العمر *')}
-                value={form.age}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/[^\d]/g, '').slice(0, 3);
-                  setForm((f) => ({ ...f, age: v }));
-                  setErrors((prev) => ({ ...prev, age: undefined }));
-                }}
-                error={Boolean(errors.age)}
-                helperText={errors.age || ' '}
-                inputMode="numeric"
                 fullWidth
               />
             </Grid>
 
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12}>
               <TextField
                 label={t('Phone *', 'الهاتف *')}
                 value={form.phone}
@@ -210,140 +259,180 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 fullWidth
               />
             </Grid>
-
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth error={Boolean(errors.gender)}>
-                <InputLabel>{t('Gender *', 'النوع *')}</InputLabel>
-                <Select
-                  label={t('Gender *', 'النوع *')}
-                  value={form.gender}
-                  onChange={handleChange('gender')}
-                  MenuProps={SELECT_MENU_PROPS(isArabic)}
-                  displayEmpty
-                >
-                  <MenuItem value="">{t('Select…', 'اختر…')}</MenuItem>
-                  <MenuItem value="male">{t('Male', 'ذكر')}</MenuItem>
-                  <MenuItem value="female">{t('Female', 'أنثى')}</MenuItem>
-                  <MenuItem value="other">{t('Other', 'أخرى')}</MenuItem>
-                </Select>
-                {errors.gender && <FormHelperText>{errors.gender}</FormHelperText>}
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
-              <TextField
-                label={t('Address *', 'العنوان *')}
-                value={form.address}
-                onChange={handleChange('address')}
-                error={Boolean(errors.address)}
-                helperText={errors.address || ' '}
-                autoComplete="street-address"
-                fullWidth
-              />
-            </Grid>
-
-            {/* اختياريّات سريعة */}
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="Email"
-                value={form.email}
-                onChange={handleChange('email')}
-                error={Boolean(errors.email)}
-                helperText={errors.email || ' '}
-                autoComplete="email"
-                fullWidth
-              />
-            </Grid>
-
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>{t('Marital Status', 'الحالة الاجتماعية')}</InputLabel>
-                <Select
-                  label={t('Marital Status', 'الحالة الاجتماعية')}
-                  value={form.maritalStatus}
-                  onChange={handleChange('maritalStatus')}
-                  MenuProps={SELECT_MENU_PROPS(isArabic)}
-                  displayEmpty
-                >
-                  <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
-                  <MenuItem value="single">{t('Single', 'أعزب')}</MenuItem>
-                  <MenuItem value="married">{t('Married', 'متزوج')}</MenuItem>
-                  <MenuItem value="divorced">{t('Divorced', 'مطلق')}</MenuItem>
-                  <MenuItem value="widowed">{t('Widowed', 'أرمل')}</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
           </Grid>
 
-          <Divider sx={{ my: 0.5 }} />
+          {/* More details (optional) */}
+          <Box
+            sx={{
+              mt: 0.5,
+              px: 1,
+              py: 0.75,
+              border: (t) => `1px dashed ${t.palette.divider}`,
+              borderRadius: 1.5,
+              bgcolor: 'background.paper',
+            }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={1}
+                sx={{ ...(isArabic ? { flexDirection: 'row-reverse' } : {}) }}
+              >
+                <Chip size="small" color="primary" variant="filled" label=" " sx={{ width: 8, height: 8 }} />
+                <Box component="span" sx={{ fontWeight: 700, fontSize: 13, color: 'text.secondary' }}>
+                  {t('More details (optional)', 'تفاصيل إضافية (اختياري)')}
+                </Box>
+              </Stack>
+              <IconButton
+                size="small"
+                onClick={() => setMoreOpen((v) => !v)}
+                aria-label={t('Toggle more details', 'إظهار/إخفاء التفاصيل')}
+              >
+                {moreOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
+            </Stack>
 
-          {/* طبية (اختياري) */}
-          <SectionTitle isArabic={isArabic}>{t('Medical (optional)', 'بيانات طبية (اختياري)')}</SectionTitle>
-          <Grid container spacing={1.25}>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>{t('Blood Type', 'فصيلة الدم')}</InputLabel>
-                <Select
-                  label={t('Blood Type', 'فصيلة الدم')}
-                  value={form.bloodType}
-                  onChange={handleChange('bloodType')}
-                  MenuProps={SELECT_MENU_PROPS(isArabic)}
-                  displayEmpty
-                >
-                  <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
-                  {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map((bt) => (
-                    <MenuItem key={bt} value={bt}>{bt}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+            <Collapse in={moreOpen} unmountOnExit>
+              <Divider sx={{ my: 1 }} />
+              <Grid container spacing={1.25}>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label={t('Age', 'العمر')}
+                    value={form.age}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d]/g, '').slice(0, 3);
+                      setForm((f) => ({ ...f, age: v }));
+                      setErrors((prev) => ({ ...prev, age: undefined }));
+                    }}
+                    error={Boolean(errors.age)}
+                    helperText={errors.age || ' '}
+                    inputMode="numeric"
+                    fullWidth
+                  />
+                </Grid>
 
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label={t('Allergies', 'الحساسيّات')}
-                value={form.allergies}
-                onChange={handleChange('allergies')}
-                placeholder={t('e.g., Penicillin', 'مثال: بنسلين')}
-                fullWidth
-              />
-            </Grid>
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth error={Boolean(errors.gender)}>
+                    <InputLabel>{t('Gender', 'النوع')}</InputLabel>
+                    <Select
+                      label={t('Gender', 'النوع')}
+                      value={form.gender}
+                      onChange={handleChange('gender')}
+                      displayEmpty
+                      MenuProps={{
+                        PaperProps: {
+                          sx: {
+                            maxHeight: 320,
+                            minWidth: 240,
+                            transformOrigin: isArabic ? 'right top' : 'left top',
+                          },
+                        },
+                      }}
+                    >
+                      <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
+                      <MenuItem value="male">{t('Male', 'ذكر')}</MenuItem>
+                      <MenuItem value="female">{t('Female', 'أنثى')}</MenuItem>
+                      <MenuItem value="other">{t('Other', 'أخرى')}</MenuItem>
+                    </Select>
+                    {errors.gender && <FormHelperText>{errors.gender}</FormHelperText>}
+                  </FormControl>
+                </Grid>
 
-            <Grid item xs={12}>
-              <TextField
-                label={t('Chronic Conditions', 'الأمراض المزمنة')}
-                value={form.conditions}
-                onChange={handleChange('conditions')}
-                placeholder={t('e.g., Diabetes, Hypertension', 'مثال: سكري، ضغط')}
-                fullWidth
-                multiline
-                minRows={2}
-              />
-            </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    label={t('Address', 'العنوان')}
+                    value={form.address}
+                    onChange={handleChange('address')}
+                    fullWidth
+                  />
+                </Grid>
 
-            <Grid item xs={12}>
-              <TextField
-                label={t('Current Medications', 'الأدوية الحالية')}
-                value={form.medications}
-                onChange={handleChange('medications')}
-                placeholder={t('e.g., Metformin', 'مثال: ميتفورمين')}
-                fullWidth
-                multiline
-                minRows={2}
-              />
-            </Grid>
-          </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="Email"
+                    value={form.email}
+                    onChange={handleChange('email')}
+                    error={Boolean(errors.email)}
+                    helperText={errors.email || ' '}
+                    autoComplete="email"
+                    fullWidth
+                  />
+                </Grid>
 
-          <Divider sx={{ my: 0.5 }} />
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>{t('Blood Type', 'فصيلة الدم')}</InputLabel>
+                    <Select
+                      label={t('Blood Type', 'فصيلة الدم')}
+                      value={form.bloodType}
+                      onChange={handleChange('bloodType')}
+                      displayEmpty
+                      MenuProps={{
+                        PaperProps: {
+                          sx: {
+                            maxHeight: 320,
+                            minWidth: 240,
+                            transformOrigin: isArabic ? 'right top' : 'left top',
+                          },
+                        },
+                      }}
+                    >
+                      <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
+                      {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map((bt) => (
+                        <MenuItem key={bt} value={bt}>{bt}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
 
-          <SectionTitle isArabic={isArabic}>{t('Notes (optional)', 'ملاحظات (اختياري)')}</SectionTitle>
-          <TextField
-            label={t('Medical Notes', 'ملاحظات طبية')}
-            value={form.notes}
-            onChange={handleChange('notes')}
-            fullWidth
-            multiline
-            minRows={3}
-          />
+                <Grid item xs={12}>
+                  <TextField
+                    label={t('Allergies', 'الحساسيّات')}
+                    value={form.allergies}
+                    onChange={handleChange('allergies')}
+                    placeholder={t('e.g., Penicillin', 'مثال: بنسلين')}
+                    fullWidth
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <TextField
+                    label={t('Chronic Conditions', 'الأمراض المزمنة')}
+                    value={form.conditions}
+                    onChange={handleChange('conditions')}
+                    placeholder={t('e.g., Diabetes, Hypertension', 'مثال: سكري، ضغط')}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <TextField
+                    label={t('Current Medications', 'الأدوية الحالية')}
+                    value={form.medications}
+                    onChange={handleChange('medications')}
+                    placeholder={t('e.g., Metformin', 'مثال: ميتفورمين')}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                  />
+                </Grid>
+
+                <Grid item xs={12}>
+                  <TextField
+                    label={t('Medical Notes', 'ملاحظات طبية')}
+                    value={form.notes}
+                    onChange={handleChange('notes')}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                  />
+                </Grid>
+              </Grid>
+            </Collapse>
+          </Box>
 
           {submitting && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>

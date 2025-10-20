@@ -1,5 +1,6 @@
 // /pages/patients/index.jsx
 'use client';
+
 import * as React from 'react';
 import { useRouter } from 'next/router';
 import {
@@ -13,16 +14,20 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, getDocs, getDoc, doc, query, where,
-  addDoc, updateDoc, serverTimestamp, arrayUnion
+  collection, getDocs, query, where,
+  addDoc, serverTimestamp
 } from 'firebase/firestore';
 
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
 import PatientCard from '@/components/patients/PatientCard';
 import PatientListEmpty from '@/components/patients/PatientListEmpty';
 
-// NEW: Add Patient Dialog
 import AddPatientDialog from '@/components/patients/AddPatientDialog';
+
+// --- styling helpers from MUI theme
+import { useTheme, alpha, darken } from '@mui/material/styles';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
+import MailOutlineIcon from '@mui/icons-material/MailOutline';
 
 /* ---------- helpers ---------- */
 const normalizePhone = (raw) => {
@@ -33,22 +38,42 @@ const normalizePhone = (raw) => {
   return plus ? `+${digits}` : digits;
 };
 
-// extract best available patient info from an appointment doc data
-const pickPatientFromAppt = (a) => {
-  const phone = normalizePhone(a.patientPhone || a.phone || a.patient_phone);
-  const pid =
-    String(a.patientId || a.patientID || a.patientUid || a.patientUID || '')
-      .trim() || undefined;
-  const name =
-    a.patientName || a.patient_name || a.name ||
-    (a.patient && (a.patient.name || a.patient.fullName)) || undefined;
-
-  return { pid, phone, name };
-};
-
 export default function PatientsIndexPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const theme = useTheme();
+
+  // Reusable button styles
+  const primaryContainedSx = React.useMemo(() => ({
+    bgcolor: theme.palette.primary.main,
+    color: theme.palette.getContrastText(theme.palette.primary.main),
+    boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+    '&:hover': {
+      bgcolor: darken(theme.palette.primary.main, 0.08),
+      boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+    },
+    '&:active': {
+      bgcolor: darken(theme.palette.primary.main, 0.16),
+    },
+    borderRadius: 2,
+    textTransform: 'none',
+    fontWeight: 700,
+  }), [theme]);
+
+  const primaryOutlinedSx = React.useMemo(() => ({
+    borderColor: alpha(theme.palette.primary.main, 0.4),
+    color: theme.palette.primary.main,
+    '&:hover': {
+      borderColor: theme.palette.primary.main,
+      bgcolor: alpha(theme.palette.primary.main, 0.06),
+    },
+    '&:active': {
+      bgcolor: alpha(theme.palette.primary.main, 0.10),
+    },
+    borderRadius: 2,
+    textTransform: 'none',
+    fontWeight: 700,
+  }), [theme]);
 
   // Arabic default
   const isArabic = React.useMemo(() => {
@@ -72,57 +97,7 @@ export default function PatientsIndexPage() {
   const [msgBody, setMsgBody] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
-  /* ---------- ensureDB: create/link patients from appointments ---------- */
-  const ensurePatientInDB = React.useCallback(async (uid, info, langIsAr) => {
-    // info: { pid?, phone?, name? }
-    const patientsCol = collection(db, 'patients');
-
-    // 1) Try patient doc by appointment's patientId
-    if (info.pid) {
-      const ref = doc(db, 'patients', info.pid);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        // idempotent: add this doctor to associatedDoctors
-        await updateDoc(ref, {
-          associatedDoctors: arrayUnion(uid),
-          updatedAt: serverTimestamp(),
-        }).catch(() => {});
-        return { id: ref.id, ...snap.data() };
-      }
-    }
-
-    // 2) Try to find by phone
-    if (info.phone) {
-      const qs = await getDocs(query(patientsCol, where('phone', '==', info.phone)));
-      if (!qs.empty) {
-        const d = qs.docs[0];
-        await updateDoc(doc(db, 'patients', d.id), {
-          associatedDoctors: arrayUnion(uid),
-          updatedAt: serverTimestamp(),
-        }).catch(() => {});
-        return { id: d.id, ...d.data() };
-      }
-    }
-
-    // 3) Create new minimal patient doc
-    const payload = {
-      name: info.name || (langIsAr ? 'بدون اسم' : 'Unnamed'),
-      phone: info.phone || null,
-      age: null,
-      gender: '',
-      maritalStatus: '',
-      address: '',
-      // tie to this doctor so it appears in their list forever
-      registeredBy: uid,
-      associatedDoctors: [uid],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    const created = await addDoc(patientsCol, payload);
-    return { id: created.id, ...payload };
-  }, []);
-
-  /* ---------- load: include all booked (phones + patientIds) ---------- */
+  /* ---------- load: ONLY what's in patients collection ---------- */
   React.useEffect(() => {
     if (!user?.uid) return;
     const uid = String(user.uid);
@@ -133,79 +108,18 @@ export default function PatientsIndexPage() {
       try {
         const patientsCol = collection(db, 'patients');
 
-        // (A) docs registered by doctor or already associated
-        const [snapRegistered, snapAssoc] = await Promise.all([
-          getDocs(query(patientsCol, where('registeredBy', '==', uid))),
-          getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid))),
-        ]);
+        // Docs registered by this doctor
+        const snapRegistered = await getDocs(query(patientsCol, where('registeredBy', '==', uid)));
+        // Docs already associated with this doctor (if you use associatedDoctors elsewhere)
+        const snapAssoc = await getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid)));
 
-        const rawDocs = new Map();
-        const push = (d) => {
-          const data = { id: d.id, ...d.data() };
-          if (data.mergedInto) return;
-          rawDocs.set(d.id, data);
-        };
+        const rowsMap = new Map();
+        const push = (d) => rowsMap.set(d.id, { id: d.id, ...d.data() });
         snapRegistered.docs.forEach(push);
         snapAssoc.docs.forEach(push);
 
-        // (B) collect all booked patients (phones + ids) from this doctor's appointments
-        const apptCol = collection(db, 'appointments');
-        const [snapA, snapB] = await Promise.all([
-          getDocs(query(apptCol, where('doctorId', '==', uid))),
-          getDocs(query(apptCol, where('doctorUID', '==', uid))),
-        ]);
-
-        // Build a unique set of "appointment patients" with as much info as we can
-        const apptInfosMap = new Map(); // key by (pid || phone)
-        const addApptInfo = (a) => {
-          const info = pickPatientFromAppt(a);
-          const key = info.pid || info.phone;
-          if (!key) return;
-          const prev = apptInfosMap.get(key) || {};
-          // prefer keeping a name/phone if available
-          apptInfosMap.set(key, {
-            pid: info.pid || prev.pid,
-            phone: info.phone || prev.phone,
-            name: info.name || prev.name,
-          });
-        };
-        [...snapA.docs, ...snapB.docs].forEach((s) => addApptInfo(s.data()));
-
-        // (C) existing maps (by id & phone) to decide if DB creation is needed
-        const byId = new Map();
-        const byPhone = new Map();
-        for (const row of rawDocs.values()) {
-          const phone = normalizePhone(row.phone || row.mobile);
-          byId.set(row.id, row);
-          if (phone) byPhone.set(phone, row);
-        }
-
-        // (D) persist any missing appointment patients into Firestore and
-        //     ensure the doctor is associated with existing ones.
-        const ensuredResults = [];
-        for (const info of apptInfosMap.values()) {
-          const already =
-            (info.pid && byId.has(info.pid)) ||
-            (info.phone && byPhone.has(info.phone));
-
-          // Even if "already", we still make an idempotent association update using arrayUnion.
-          // This keeps the write count modest while ensuring link is present.
-          ensuredResults.push(ensurePatientInDB(uid, info, isArabic));
-        }
-        await Promise.allSettled(ensuredResults);
-
-        // (E) Re-fetch the doctor’s patient docs after ensures (cheap and consistent)
-        const [snapRegistered2, snapAssoc2] = await Promise.all([
-          getDocs(query(patientsCol, where('registeredBy', '==', uid))),
-          getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid))),
-        ]);
-        const finalRows = new Map();
-        const keep = (d) => finalRows.set(d.id, { id: d.id, ...d.data() });
-        snapRegistered2.docs.forEach(keep);
-        snapAssoc2.docs.forEach(keep);
-
         // Sort by name
-        const rows = Array.from(finalRows.values()).sort((a, b) =>
+        const rows = Array.from(rowsMap.values()).sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
 
@@ -217,14 +131,14 @@ export default function PatientsIndexPage() {
         setLoading(false);
       }
     })();
-  }, [user, isArabic, ensurePatientInDB]);
+  }, [user, isArabic]);
 
   const filtered = React.useMemo(() => {
     const q = queryText.trim().toLowerCase();
     if (!q) return patients;
     return patients.filter((p) => {
       const name = String(p?.name ?? '').toLowerCase();
-      const id = String(p?.id ?? '').toLowerCase();
+      const id = String(p?.id ?? '').toLowerCase();          // phoneId (doc id)
       const phone = String(p?.phone ?? p?.mobile ?? '').toLowerCase();
       return name.includes(q) || id.includes(q) || phone.includes(q);
     });
@@ -236,7 +150,7 @@ export default function PatientsIndexPage() {
     else router.push(pathname);
   };
 
-  // Compose message (unchanged)
+  // Compose message
   const sendMessage = async () => {
     if (!user?.uid) return;
     if (!msgPatient?.id || !msgBody.trim()) {
@@ -281,7 +195,7 @@ export default function PatientsIndexPage() {
   return (
     <Protected>
       <AppLayout>
-        {/* Add Patient Dialog */}
+        {/* Always add via dialog */}
         <AddPatientDialog
           open={openAddPatient}
           onClose={() => setOpenAddPatient(false)}
@@ -344,19 +258,41 @@ export default function PatientsIndexPage() {
         <Container maxWidth="lg">
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
-              <Typography variant="h5" fontWeight={700}>
+              <Typography
+                variant="h5"
+                fontWeight={800}
+                color="text.primary"   // clearer title color
+                sx={{ letterSpacing: 0.2 }}
+              >
                 {isArabic ? 'قائمة المرضى' : 'Patient List'}
               </Typography>
-              <Button variant="contained" onClick={() => setOpenMsg(true)}>
-                {isArabic ? 'رسالة جديدة' : 'New Message'}
-              </Button>
+
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="contained"
+                  startIcon={<PersonAddAlt1Icon />}
+                  onClick={() => setOpenAddPatient(true)}
+                  sx={primaryContainedSx}
+                >
+                  {isArabic ? 'إضافة مريض' : 'Add Patient'}
+                </Button>
+
+                <Button
+                  variant="outlined"
+                  startIcon={<MailOutlineIcon />}
+                  onClick={() => setOpenMsg(true)}
+                  sx={primaryOutlinedSx}
+                >
+                  {isArabic ? 'رسالة جديدة' : 'New Message'}
+                </Button>
+              </Stack>
             </Stack>
 
             <PatientSearchBar
               isArabic={isArabic}
               value={queryText}
               onChange={(v) => setQueryText(v)}
-              onAddNew={() => setOpenAddPatient(true)}
+              onAddNew={() => setOpenAddPatient(true)} // always open dialog to add
             />
 
             {loading ? (
@@ -368,7 +304,10 @@ export default function PatientsIndexPage() {
                 ))}
               </Grid>
             ) : filtered.length === 0 ? (
-              <PatientListEmpty isArabic={isArabic} />
+              <PatientListEmpty
+                isArabic={isArabic}
+                onAddNew={() => setOpenAddPatient(true)}
+              />
             ) : (
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {filtered.map((p) => (

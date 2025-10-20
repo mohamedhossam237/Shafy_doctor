@@ -1,4 +1,4 @@
-// /pages/appointments/new.js
+// /pages/appointments/new.js — optimized (no useLang / no assistant guard)
 "use client";
 
 import * as React from "react";
@@ -35,26 +35,17 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
-/* ---------------- helpers to mirror patient flow ---------------- */
-
+/* ---------------- helpers ---------------- */
 const pad = (n) => String(n).padStart(2, "0");
-const toYMD = (d) =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-function weekdayKey(date) {
-  // Sun=0 ... Sat=6
-  return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
-}
-
-function minutes(hhmm) {
+const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const weekdayKey = (date) => ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
+const minutes = (hhmm) => {
   const [h = 0, m = 0] = String(hhmm || "")
     .split(":")
     .map((x) => parseInt(x, 10) || 0);
   return h * 60 + m;
-}
-
-function parseDayRanges(val) {
-  // Accepts "09:00-12:00, 13:00-17:00" or array of "HH:MM-HH:MM"
+};
+const parseDayRanges = (val) => {
   if (!val) return [];
   const arr = Array.isArray(val) ? val : String(val).split(",");
   const toMin = (s) => {
@@ -67,9 +58,8 @@ function parseDayRanges(val) {
     if (a && b) out.push([toMin(a.trim()), toMin(b.trim())]);
   }
   return out;
-}
-
-function buildSlotsForRanges(ranges, stepMin = 30) {
+};
+const buildSlotsForRanges = (ranges, stepMin = 30) => {
   const slots = [];
   for (const [start, end] of ranges) {
     for (let t = start; t + stepMin <= end; t += stepMin) {
@@ -79,30 +69,23 @@ function buildSlotsForRanges(ranges, stepMin = 30) {
     }
   }
   return slots;
-}
-
-// Convert EditHoursDialog shape {open, start, end} -> "start-end" string (or empty)
-function toRangeStringFromHoursDay(dayObj) {
+};
+const toRangeStringFromHoursDay = (dayObj) => {
   if (!dayObj || dayObj.open !== true) return "";
   const start = dayObj.start || "09:00";
   const end = dayObj.end || "17:00";
   return `${start}-${end}`;
-}
-
-// Try to normalize whatever the doc has into { sun..sat: "HH:MM-HH:MM[, ...]" }
-function normalizeHoursFromAny(sourceObj) {
+};
+const normalizeHoursFromAny = (sourceObj) => {
   if (!sourceObj || typeof sourceObj !== "object") {
     return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
   }
-  // 1) if a direct working_hours/workingHours object exists (strings or EditHoursDialog shape)
   const src =
     sourceObj.working_hours ||
     sourceObj.workingHours ||
     (sourceObj.clinic && (sourceObj.clinic.working_hours || sourceObj.clinic.workingHours)) ||
     null;
-
   if (src && typeof src === "object" && typeof src.sun === "string") return src;
-
   if (src && typeof src === "object" && typeof src.sun === "object") {
     const out = {};
     for (const k of ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]) {
@@ -110,11 +93,8 @@ function normalizeHoursFromAny(sourceObj) {
     }
     return out;
   }
-
-  // Fallback: no hours configured
   return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
-}
-
+};
 const sanitizeClinics = (arr) =>
   (Array.isArray(arr) ? arr : [])
     .filter(Boolean)
@@ -124,16 +104,14 @@ const sanitizeClinics = (arr) =>
       name_ar: String(c.name_ar || c.name || "").trim(),
       address_en: String(c.address_en || c.address || "").trim(),
       address_ar: String(c.address_ar || c.address || "").trim(),
-      // hours containers (support both spellings)
       working_hours: c.working_hours || c.workingHours || null,
       active: c.active !== false,
     }));
 
 /* ---------------- page ---------------- */
-
 export default function NewAppointmentPage() {
   const router = useRouter();
-  const { user } = useAuth(); // doctor account
+  const { user } = useAuth();
 
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
@@ -143,19 +121,20 @@ export default function NewAppointmentPage() {
   }, [router?.query]);
 
   /* patients */
-  const [loadingPatients, setLoadingPatients] = React.useState(true);
+  const [loadingPatients, setLoadingPatients] = React.useState(false);
   const [patients, setPatients] = React.useState([]);
   const [selectedPatient, setSelectedPatient] = React.useState(null);
+  const [patientsOpened, setPatientsOpened] = React.useState(false); // lazy load boost
 
   /* doctor, clinics & hours */
   const [doctor, setDoctor] = React.useState(null);
-  const [clinics, setClinics] = React.useState([]);            // NEW
-  const [selectedClinicId, setSelectedClinicId] = React.useState(""); // NEW
-  const [hours, setHours] = React.useState(null); // normalized strings per day
+  const [clinics, setClinics] = React.useState([]);
+  const [selectedClinicId, setSelectedClinicId] = React.useState("");
+  const [hours, setHours] = React.useState(null);
   const [loadingDoctor, setLoadingDoctor] = React.useState(true);
 
   /* form */
-  const [dateStr, setDateStr] = React.useState(toYMD(new Date())); // YYYY-MM-DD
+  const [dateStr, setDateStr] = React.useState(toYMD(new Date()));
   const [timeStr, setTimeStr] = React.useState("");
   const [note, setNote] = React.useState("");
 
@@ -172,75 +151,68 @@ export default function NewAppointmentPage() {
   const [successMsg, setSuccessMsg] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
 
-  /* Load patients of this doctor */
+  // ---- FAST PATH: load doctor first; lazy-load patients on demand ----
   React.useEffect(() => {
     if (!user?.uid) return;
-    (async () => {
-      setLoadingPatients(true);
-      setError("");
-      try {
-        const qRef = query(
-          collection(db, "patients"),
-          where("registeredBy", "==", user.uid)
-        );
-        const snap = await getDocs(qRef);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        rows.sort((a, b) =>
-          String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, {
-            sensitivity: "base",
-          })
-        );
-        setPatients(rows);
-      } catch (e) {
-        console.error(e);
-        setError(
-          isArabic ? "حدث خطأ أثناء تحميل المرضى" : "Failed to load patients"
-        );
-      } finally {
-        setLoadingPatients(false);
-      }
-    })();
-  }, [user?.uid, isArabic]);
-
-  /* Load doctor doc + clinics; pick hours from selected clinic (fallback to doctor) */
-  React.useEffect(() => {
-    if (!user?.uid) return;
+    let cancel = false;
     (async () => {
       setLoadingDoctor(true);
       try {
         const snap = await getDoc(doc(db, "doctors", String(user.uid)));
         if (!snap.exists()) {
-          setDoctor(null);
-          setClinics([]);
-          setSelectedClinicId("");
-          setHours(normalizeHoursFromAny(null));
-        } else {
-          const d = { id: snap.id, ...snap.data() };
-          setDoctor(d);
-
-          const cls = sanitizeClinics(d.clinics);
-          setClinics(cls);
-
-          // default select: if 1 clinic, select it; else none (force user to choose)
-          if (cls.length === 1) {
-            setSelectedClinicId(cls[0].id);
-            setHours(normalizeHoursFromAny(cls[0]));
-          } else {
-            // no clinic or multi → use doctor's global hours until user picks one
-            setHours(normalizeHoursFromAny(d));
+          if (!cancel) {
+            setDoctor(null);
+            setClinics([]);
+            setSelectedClinicId("");
+            setHours(normalizeHoursFromAny(null));
           }
+          return;
         }
-      } catch (e) {
-        console.error(e);
-        setDoctor(null);
-        setClinics([]);
-        setSelectedClinicId("");
-        setHours(normalizeHoursFromAny(null));
+        const d = { id: snap.id, ...snap.data() };
+        const cls = sanitizeClinics(d.clinics);
+        const defaultClinicId = cls.length === 1 ? cls[0].id : "";
+        if (!cancel) {
+          setDoctor(d);
+          setClinics(cls);
+          setSelectedClinicId(defaultClinicId);
+          setHours(normalizeHoursFromAny(defaultClinicId ? cls[0] : d));
+        }
       } finally {
-        setLoadingDoctor(false);
+        if (!cancel) setLoadingDoctor(false);
       }
     })();
+    return () => { cancel = true; };
   }, [user?.uid]);
+
+  // Lazy load patients when the field is opened (reduces initial render cost)
+  const loadPatients = React.useCallback(async () => {
+    if (loadingPatients || !user?.uid) return;
+    setLoadingPatients(true);
+    try {
+      const qRef = query(collection(db, "patients"), where("registeredBy", "==", user.uid));
+      const snap = await getDocs(qRef);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rows.sort((a, b) =>
+        String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, {
+          sensitivity: "base",
+        })
+      );
+      setPatients(rows);
+    } catch (e) {
+      console.error(e);
+      setError(isArabic ? "حدث خطأ أثناء تحميل المرضى" : "Failed to load patients");
+    } finally {
+      setLoadingPatients(false);
+    }
+  }, [loadingPatients, user?.uid, isArabic]);
+
+  // When the autocomplete opens the first time → fetch
+  const handlePatientsOpen = () => {
+    if (!patientsOpened) {
+      setPatientsOpened(true);
+      loadPatients();
+    }
+  };
 
   // When clinic selection changes, recompute hours (clinic hours → fallback to doctor)
   React.useEffect(() => {
@@ -251,51 +223,40 @@ export default function NewAppointmentPage() {
     } else {
       setHours(normalizeHoursFromAny(doctor));
     }
-    // reset chosen time on clinic switch
     setTimeStr("");
   }, [selectedClinicId, clinics, doctor]);
 
-  /* recompute slots when date / hours / clinic change, and fetch booked for that day (per clinic) */
+  // recompute slots and fetch booked for that day
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         if (!hours || !dateStr) {
-          setAllSlots([]);
-          setBookedSet(new Set());
+          if (!cancelled) { setAllSlots([]); setBookedSet(new Set()); }
           return;
         }
-
         const d = new Date(dateStr + "T00:00:00");
         const k = weekdayKey(d);
-
-        // Build slots from hours (string ranges) in 30-min steps
         const ranges = parseDayRanges(hours[k]);
         let slots = buildSlotsForRanges(ranges, 30);
 
-        // If selected date is today, filter out past times
         const now = new Date();
         if (toYMD(now) === dateStr) {
           const nowMin = now.getHours() * 60 + now.getMinutes();
           slots = slots.filter((s) => minutes(s) > nowMin);
         }
-
         if (!cancelled) setAllSlots(slots);
 
-        // Fetch existing appointments for this doctor & day, then restrict to same clinic (if selected)
         if (!user?.uid) return;
         const col = collection(db, "appointments");
         const [snapId, snapUID] = await Promise.all([
           getDocs(query(col, where("doctorId", "==", String(user.uid)), where("date", "==", dateStr))),
           getDocs(query(col, where("doctorUID", "==", String(user.uid)), where("date", "==", dateStr))),
         ]);
-
-        // Combine & filter by clinic if selected
         const appts = [...snapId.docs, ...snapUID.docs].map((d) => ({ id: d.id, ...d.data() }));
         const sameClinic = selectedClinicId
           ? appts.filter((a) => (a.clinicId || a.clinicID || "") === selectedClinicId)
           : appts;
-
         const used = new Set();
         for (const r of sameClinic) {
           const tm = (r.time || "").trim();
@@ -303,9 +264,10 @@ export default function NewAppointmentPage() {
         }
         if (!cancelled) setBookedSet(used);
 
-        // Nudge invalid current selection
-        if (timeStr && (!slots.includes(timeStr) || used.has(timeStr))) {
-          setTimeStr("");
+        // auto-pick first available time for speed
+        if (!cancelled) {
+          const first = slots.find((s) => !used.has(s));
+          setTimeStr((prev) => (prev && slots.includes(prev) && !used.has(prev) ? prev : first || ""));
         }
       } catch (e) {
         if (!cancelled) {
@@ -314,51 +276,27 @@ export default function NewAppointmentPage() {
         }
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hours, dateStr, user?.uid, timeStr, selectedClinicId]);
-
-  // Queue number: 1 + count of already-booked (<= new time) **within same clinic**
-  function computeQueueNumberForNew(time, existingTimesSet) {
-    const newMin = minutes(time);
-    let count = 0;
-    for (const t of existingTimesSet) {
-      const m = minutes(t);
-      if (m <= newMin) count += 1;
-    }
-    return count + 1;
-  }
+    return () => { cancelled = true; };
+  }, [hours, dateStr, user?.uid, selectedClinicId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!user?.uid) return;
 
-    // If the doctor has multiple clinics, require picking one
     if (clinics.length > 1 && !selectedClinicId) {
       setError(isArabic ? "اختر العيادة أولاً" : "Please choose a clinic first");
       return;
     }
-
     if (!selectedPatient) {
       setError(isArabic ? "الرجاء اختيار مريض" : "Please select a patient");
       return;
     }
     if (!dateStr || !timeStr) {
-      setError(
-        isArabic ? "اختر التاريخ والوقت" : "Please choose date & time"
-      );
+      setError(isArabic ? "اختر التاريخ والوقت" : "Please choose date & time");
       return;
     }
-
-    // Ensure chosen time is still available
     if (!availableSlots.includes(timeStr)) {
-      setError(
-        isArabic
-          ? "الوقت المختار لم يعد متاحاً"
-          : "Selected time is no longer available"
-      );
+      setError(isArabic ? "الوقت المختار لم يعد متاحاً" : "Selected time is no longer available");
       return;
     }
 
@@ -367,78 +305,60 @@ export default function NewAppointmentPage() {
       setError("");
       setSuccessMsg("");
 
-      // Compute queueNumber (per clinic)
-      const queueNumber = computeQueueNumberForNew(timeStr, bookedSet);
-
-      // Doctor fields
       const docNameEn = doctor?.name_en || "";
       const docNameAr = doctor?.name_ar || "";
       const specEn = doctor?.specialty_en || doctor?.specialty || "";
       const specAr = doctor?.specialty_ar || "";
       const price = doctor?.checkupPrice ?? null;
 
-      // Clinic labels
       const clinic = selectedClinicId ? clinics.find((c) => c.id === selectedClinicId) : null;
       const clinicName_en = clinic?.name_en || "";
       const clinicName_ar = clinic?.name_ar || "";
 
-      // Persist
       await addDoc(collection(db, "appointments"), {
         doctorId: String(user.uid),
-        doctorUID: String(user.uid),  // keep for backward-compat
+        doctorUID: String(user.uid),
         doctorName_en: docNameEn,
         doctorName_ar: docNameAr,
         doctorSpecialty_en: specEn,
         doctorSpecialty_ar: specAr,
         doctorPrice: price,
-
-        // per-clinic association
         clinicId: selectedClinicId || "",
         clinicName_en,
         clinicName_ar,
-
-        date: dateStr,   // "YYYY-MM-DD"
-        time: timeStr,   // "HH:MM"
-        // appointmentDate: new Date(`${dateStr}T${timeStr}:00`), // optional
-
+        date: dateStr,
+        time: timeStr,
+        queueDate: dateStr,
+        queueTime: timeStr,
+        queueKey: `${dateStr}T${timeStr}`,
+        queueSource: "doctor_console",
         patientUid: selectedPatient.id,
         patientName: selectedPatient.name || "",
         patientPhone: selectedPatient.phone || selectedPatient.phoneNumber || "",
         patientEmail: selectedPatient.email || "",
-
         note: note.trim(),
         aiBrief: "",
-
-        status: "confirmed", // doctor-created defaults to confirmed
-        queueNumber,
-
+        status: "confirmed",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
       setSuccessMsg(
         isArabic
-          ? `تم إنشاء الموعد. رقم الدور: ${queueNumber}.`
-          : `Appointment created. Queue number: ${queueNumber}.`
+          ? `تم إنشاء الموعد. سيتم اختيار أول وقت متاح وترتيب الدور تلقائياً.`
+          : `Appointment created. Picked the first available time and queue will auto-assign.`
       );
-
-      // Clear time & note (keep patient/clinic selection for faster entry)
       setTimeStr("");
       setNote("");
     } catch (e) {
       console.error(e);
-      setError(
-        e?.message ||
-          (isArabic ? "فشل في إنشاء الموعد" : "Failed to create appointment")
-      );
+      setError(e?.message || (isArabic ? "فشل في إنشاء الموعد" : "Failed to create appointment"));
     } finally {
       setSubmitting(false);
     }
   }
 
   const backHref = `/appointments${isArabic ? "?lang=ar" : ""}`;
-
-  // UI helpers
   const clinicHelper =
     clinics.length <= 1
       ? isArabic
@@ -465,8 +385,9 @@ export default function NewAppointmentPage() {
             <Paper sx={{ p: 2.5, borderRadius: 2 }}>
               <form onSubmit={handleSubmit}>
                 <Stack spacing={2}>
-                  {/* Patient selector */}
+                  {/* Patient selector (lazy load) */}
                   <Autocomplete
+                    onOpen={handlePatientsOpen}
                     options={patients}
                     loading={loadingPatients}
                     getOptionLabel={(o) => String(o?.name ?? o?.id ?? "")}
@@ -519,7 +440,7 @@ export default function NewAppointmentPage() {
                     inputProps={{ min: toYMD(new Date()) }}
                   />
 
-                  {/* Time (from working hours + availability — per clinic) */}
+                  {/* Time */}
                   <TextField
                     select
                     label={isArabic ? "الوقت" : "Time"}
@@ -566,7 +487,6 @@ export default function NewAppointmentPage() {
                       variant="contained"
                       disabled={
                         submitting ||
-                        loadingPatients ||
                         loadingDoctor ||
                         !selectedPatient ||
                         (clinics.length > 1 && !selectedClinicId)
@@ -593,9 +513,7 @@ export default function NewAppointmentPage() {
             onClose={() => setError("")}
             anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           >
-            <Alert severity="error" onClose={() => setError("")}>
-              {error}
-            </Alert>
+            <Alert severity="error" onClose={() => setError("")}>{error}</Alert>
           </Snackbar>
 
           {/* Success */}
@@ -605,9 +523,7 @@ export default function NewAppointmentPage() {
             onClose={() => setSuccessMsg("")}
             anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
           >
-            <Alert severity="success" onClose={() => setSuccessMsg("")}>
-              {successMsg}
-            </Alert>
+            <Alert severity="success" onClose={() => setSuccessMsg("")}>{successMsg}</Alert>
           </Snackbar>
         </Container>
       </AppLayout>
