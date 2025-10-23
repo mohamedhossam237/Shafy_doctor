@@ -1,4 +1,3 @@
-// /components/patients/PatientCard.jsx
 'use client';
 import * as React from 'react';
 import Link from 'next/link';
@@ -9,17 +8,9 @@ import {
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 export default function PatientCard({ patient, isArabic, onMessage }) {
-  // ---- show only if all required basics exist ----
-  const hasBasics =
-    Boolean(patient?.name?.trim()) &&
-    (patient?.age !== undefined && patient?.age !== null && String(patient.age).trim() !== '') &&
-    Boolean(patient?.phone?.trim()) &&
-    Boolean(patient?.gender?.trim()) &&
-    Boolean(patient?.address?.trim());
+  // Show only if at least a name and phone exist
+  if (!patient?.name || !patient?.phone) return null;
 
-  if (!hasBasics) return null;
-
-  // ---- UI prep ----
   const initials = String(patient?.name || '?')
     .split(' ')
     .map((s) => s[0])
@@ -46,7 +37,7 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
     if (g === 'male') return 'ذكر';
     if (g === 'female') return 'أنثى';
     if (g === 'other') return 'أخرى';
-    return patient.gender; // fallback
+    return patient.gender;
   })();
 
   return (
@@ -54,28 +45,38 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
       <Paper
         sx={{
           p: 2,
-          borderRadius: 2,
+          borderRadius: 3,
           display: 'flex',
           alignItems: 'center',
-          gap: 1.5,
-          height: 118,
+          gap: 1.8,
+          height: 130,
+          boxShadow: '0 3px 10px rgba(0,0,0,0.06)',
+          transition: 'all 0.25s ease',
+          '&:hover': {
+            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            transform: 'translateY(-3px)',
+          },
         }}
       >
-        <Avatar sx={{ bgcolor: 'primary.main' }}>{initials}</Avatar>
+        <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 600 }}>{initials}</Avatar>
 
         <Stack sx={{ flex: 1, minWidth: 0 }}>
           <Typography fontWeight={700} noWrap>
             {patient.name}
           </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>
-            {(isArabic ? 'العمر: ' : 'Age: ') + patient.age}
-          </Typography>
+          {patient.age && (
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {(isArabic ? 'العمر: ' : 'Age: ') + patient.age}
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary" noWrap>
             {(isArabic ? 'الهاتف: ' : 'Phone: ') + patient.phone}
           </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap title={patient.address}>
-            {(isArabic ? 'العنوان: ' : 'Address: ') + patient.address}
-          </Typography>
+          {patient.address && (
+            <Typography variant="caption" color="text.secondary" noWrap title={patient.address}>
+              {(isArabic ? 'العنوان: ' : 'Address: ') + patient.address}
+            </Typography>
+          )}
           <Typography variant="caption" color="text.secondary" noWrap>
             {(isArabic ? 'آخر زيارة: ' : 'Last Visit: ') + (patient.lastVisit || '—')}
           </Typography>

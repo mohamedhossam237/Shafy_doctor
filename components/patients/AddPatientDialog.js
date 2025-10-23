@@ -22,40 +22,21 @@ import { useAuth } from '@/providers/AuthProvider';
 /*                                   Utils                                    */
 /* -------------------------------------------------------------------------- */
 
-const PHONE_RE = /^[\d\s+()-]{8,}$/; // simple global-ish check (UI validation)
+const PHONE_RE = /^[\d\s+()-]{8,}$/;
 const DIGITS = /[^0-9]/g;
 
-/**
- * Normalize a phone string to a stable ID.
- * - Keeps leading '+' if present.
- * - If local format, upgrades based on countryCode heuristic.
- * - Converts leading '00' to '+'.
- * - Fallback returns digits-only (still unique enough for your use-case).
- *
- * Set `countryCode` per deployment (default +974 for Qatar).
- */
 function normalizePhoneForId(raw = '', { countryCode = '+974' } = {}) {
   const s = String(raw).trim();
   if (!s) return '';
 
-  // If it already starts with '+', keep only + and digits
   if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
-
-  // Remove non-digits
   const d = s.replace(DIGITS, '');
 
-  // Qatar heuristic: local 8 digits -> +974########
   if (countryCode === '+974' && d.length === 8) return `${countryCode}${d}`;
-
-  // Egypt heuristic: 11 digits starting with 01 -> +20##########
   if (countryCode === '+20' && d.length === 11 && d.startsWith('01')) {
-    return `${countryCode}${d.slice(1)}`; // drop leading 0
+    return `${countryCode}${d.slice(1)}`;
   }
-
-  // Convert 00CC... to +CC...
   if (d.startsWith('00')) return `+${d.slice(2)}`;
-
-  // Fallback: just digits
   return d;
 }
 
@@ -69,7 +50,6 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
   const { user } = useAuth();
 
-  // Language / direction
   const isArabic = React.useMemo(() => {
     if (typeof isArProp === 'boolean') return isArProp;
     const q = router?.query || {};
@@ -80,12 +60,10 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
   const t = (en, ar) => (isArabic ? ar : en);
   const dirProps = { dir: isArabic ? 'rtl' : 'ltr', sx: { textAlign: isArabic ? 'right' : 'left' } };
 
-  // UI state
   const [submitting, setSubmitting] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, msg: '', severity: 'success' });
   const [moreOpen, setMoreOpen] = React.useState(false);
 
-  // Form: minimal required (name, phone). Others optional behind "More details"
   const [form, setForm] = React.useState({
     name: '',
     phone: '',
@@ -133,11 +111,9 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
     const next = {};
 
     if (!form.name?.trim()) next.name = t('Required', 'مطلوب');
-
     if (!form.phone?.trim()) next.phone = t('Phone is required', 'رقم الهاتف مطلوب');
     else if (!PHONE_RE.test(form.phone)) next.phone = t('Invalid phone', 'رقم هاتف غير صالح');
 
-    // Optional fields: validate only if provided
     if (form.age && (!/^\d{1,3}$/.test(String(form.age)) || Number(form.age) > 120)) {
       next.age = t('Enter a valid age (0–120)', 'أدخل عمرًا صحيحًا (0–120)');
     }
@@ -158,9 +134,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
     try {
       setSubmitting(true);
-
-      // Enforce phone as primary key (document ID)
-      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+974' }); // change to '+20' if needed
+      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+974' });
       if (!phoneId || !/^[+0-9]{8,}$/.test(phoneId)) {
         setSnack({ open: true, msg: t('Invalid phone format.', 'صيغة الهاتف غير صالحة.'), severity: 'error' });
         setSubmitting(false);
@@ -168,26 +142,39 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
       }
 
       const patientRef = doc(db, 'patients', phoneId);
-
-      // Prevent duplicates
       const existing = await getDoc(patientRef);
+
+      // If patient exists: link doctor to patient
       if (existing.exists()) {
+        const data = existing.data();
+        const assoc = new Set(data.associatedDoctors || []);
+        assoc.add(user.uid);
+
+        await setDoc(
+          patientRef,
+          {
+            associatedDoctors: Array.from(assoc),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+
         setSnack({
           open: true,
-          msg: t('A patient with this phone already exists.', 'يوجد مريض بهذا الرقم بالفعل.'),
-          severity: 'warning',
+          msg: t('Existing patient linked to your list.', 'تم ربط المريض الموجود بقائمتك.'),
+          severity: 'info',
         });
         onSaved?.(patientRef.id);
         onClose?.();
+        setSubmitting(false);
         return;
       }
 
+      // Otherwise: create new record
       const payload = {
-        // Required
         name: form.name.trim(),
-        phone: form.phone.trim(),     // as entered for display
-        phoneId,                      // normalized mirror (primary key)
-        // Optional
+        phone: form.phone.trim(),
+        phoneId,
         age: form.age ? Number(form.age) : null,
         gender: form.gender || null,
         address: form.address?.trim() || null,
@@ -197,9 +184,9 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
         conditions: form.conditions?.trim() || '',
         medications: form.medications?.trim() || '',
         notes: form.notes?.trim() || '',
-        // Metadata
         lastVisit: null,
         registeredBy: user.uid,
+        associatedDoctors: [user.uid], // ✅ ensures visibility for the doctor
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -232,7 +219,6 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
       <DialogContent {...dirProps} sx={{ pt: 0.5, pb: 1, '& .MuiFormControl-root': { width: '100%' } }}>
         <Stack spacing={1.25}>
-          {/* Minimal required fields */}
           <Grid container spacing={1.25}>
             <Grid item xs={12}>
               <TextField
@@ -246,7 +232,6 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 fullWidth
               />
             </Grid>
-
             <Grid item xs={12}>
               <TextField
                 label={t('Phone *', 'الهاتف *')}
@@ -261,7 +246,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
             </Grid>
           </Grid>
 
-          {/* More details (optional) */}
+          {/* More details section */}
           <Box
             sx={{
               mt: 0.5,
@@ -273,22 +258,13 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
             }}
           >
             <Stack direction="row" alignItems="center" justifyContent="space-between">
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={1}
-                sx={{ ...(isArabic ? { flexDirection: 'row-reverse' } : {}) }}
-              >
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ ...(isArabic ? { flexDirection: 'row-reverse' } : {}) }}>
                 <Chip size="small" color="primary" variant="filled" label=" " sx={{ width: 8, height: 8 }} />
                 <Box component="span" sx={{ fontWeight: 700, fontSize: 13, color: 'text.secondary' }}>
                   {t('More details (optional)', 'تفاصيل إضافية (اختياري)')}
                 </Box>
               </Stack>
-              <IconButton
-                size="small"
-                onClick={() => setMoreOpen((v) => !v)}
-                aria-label={t('Toggle more details', 'إظهار/إخفاء التفاصيل')}
-              >
+              <IconButton size="small" onClick={() => setMoreOpen((v) => !v)}>
                 {moreOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
               </IconButton>
             </Stack>
@@ -320,15 +296,6 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                       value={form.gender}
                       onChange={handleChange('gender')}
                       displayEmpty
-                      MenuProps={{
-                        PaperProps: {
-                          sx: {
-                            maxHeight: 320,
-                            minWidth: 240,
-                            transformOrigin: isArabic ? 'right top' : 'left top',
-                          },
-                        },
-                      }}
                     >
                       <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
                       <MenuItem value="male">{t('Male', 'ذكر')}</MenuItem>
@@ -340,12 +307,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 </Grid>
 
                 <Grid item xs={12}>
-                  <TextField
-                    label={t('Address', 'العنوان')}
-                    value={form.address}
-                    onChange={handleChange('address')}
-                    fullWidth
-                  />
+                  <TextField label={t('Address', 'العنوان')} value={form.address} onChange={handleChange('address')} fullWidth />
                 </Grid>
 
                 <Grid item xs={12} sm={6}>
@@ -363,21 +325,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 <Grid item xs={12} sm={6}>
                   <FormControl fullWidth>
                     <InputLabel>{t('Blood Type', 'فصيلة الدم')}</InputLabel>
-                    <Select
-                      label={t('Blood Type', 'فصيلة الدم')}
-                      value={form.bloodType}
-                      onChange={handleChange('bloodType')}
-                      displayEmpty
-                      MenuProps={{
-                        PaperProps: {
-                          sx: {
-                            maxHeight: 320,
-                            minWidth: 240,
-                            transformOrigin: isArabic ? 'right top' : 'left top',
-                          },
-                        },
-                      }}
-                    >
+                    <Select label={t('Blood Type', 'فصيلة الدم')} value={form.bloodType} onChange={handleChange('bloodType')} displayEmpty>
                       <MenuItem value="">{t('Unspecified', 'غير محدد')}</MenuItem>
                       {['A+','A-','B+','B-','AB+','AB-','O+','O-'].map((bt) => (
                         <MenuItem key={bt} value={bt}>{bt}</MenuItem>
@@ -387,48 +335,19 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
                 </Grid>
 
                 <Grid item xs={12}>
-                  <TextField
-                    label={t('Allergies', 'الحساسيّات')}
-                    value={form.allergies}
-                    onChange={handleChange('allergies')}
-                    placeholder={t('e.g., Penicillin', 'مثال: بنسلين')}
-                    fullWidth
-                  />
+                  <TextField label={t('Allergies', 'الحساسيّات')} value={form.allergies} onChange={handleChange('allergies')} placeholder={t('e.g., Penicillin', 'مثال: بنسلين')} fullWidth />
                 </Grid>
 
                 <Grid item xs={12}>
-                  <TextField
-                    label={t('Chronic Conditions', 'الأمراض المزمنة')}
-                    value={form.conditions}
-                    onChange={handleChange('conditions')}
-                    placeholder={t('e.g., Diabetes, Hypertension', 'مثال: سكري، ضغط')}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                  />
+                  <TextField label={t('Chronic Conditions', 'الأمراض المزمنة')} value={form.conditions} onChange={handleChange('conditions')} placeholder={t('e.g., Diabetes, Hypertension', 'مثال: سكري، ضغط')} fullWidth multiline minRows={2} />
                 </Grid>
 
                 <Grid item xs={12}>
-                  <TextField
-                    label={t('Current Medications', 'الأدوية الحالية')}
-                    value={form.medications}
-                    onChange={handleChange('medications')}
-                    placeholder={t('e.g., Metformin', 'مثال: ميتفورمين')}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                  />
+                  <TextField label={t('Current Medications', 'الأدوية الحالية')} value={form.medications} onChange={handleChange('medications')} placeholder={t('e.g., Metformin', 'مثال: ميتفورمين')} fullWidth multiline minRows={2} />
                 </Grid>
 
                 <Grid item xs={12}>
-                  <TextField
-                    label={t('Medical Notes', 'ملاحظات طبية')}
-                    value={form.notes}
-                    onChange={handleChange('notes')}
-                    fullWidth
-                    multiline
-                    minRows={2}
-                  />
+                  <TextField label={t('Medical Notes', 'ملاحظات طبية')} value={form.notes} onChange={handleChange('notes')} fullWidth multiline minRows={2} />
                 </Grid>
               </Grid>
             </Collapse>
@@ -444,7 +363,8 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
       <DialogActions
         sx={{
-          px: 2, py: 1,
+          px: 2,
+          py: 1,
           position: fullScreen ? 'sticky' : 'static',
           bottom: 0,
           bgcolor: 'background.paper',

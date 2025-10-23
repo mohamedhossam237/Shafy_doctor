@@ -6,7 +6,7 @@ import { useRouter } from 'next/router';
 import {
   Container, Stack, Typography, Grid, Snackbar, Alert, Skeleton,
   Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Autocomplete, Box
+  TextField, Autocomplete, Box, Fade, Divider
 } from '@mui/material';
 
 import Protected from '@/components/Protected';
@@ -14,22 +14,21 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, getDocs, query, where,
-  addDoc, serverTimestamp
+  collection, onSnapshot, query, where, addDoc, serverTimestamp
 } from 'firebase/firestore';
 
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
 import PatientCard from '@/components/patients/PatientCard';
 import PatientListEmpty from '@/components/patients/PatientListEmpty';
-
 import AddPatientDialog from '@/components/patients/AddPatientDialog';
 
-// --- styling helpers from MUI theme
 import { useTheme, alpha, darken } from '@mui/material/styles';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 
-/* ---------- helpers ---------- */
+/* -------------------------------------------------------------------------- */
+/*                                Helper Utils                                */
+/* -------------------------------------------------------------------------- */
 const normalizePhone = (raw) => {
   const s = String(raw || '').trim();
   if (!s) return '';
@@ -38,44 +37,14 @@ const normalizePhone = (raw) => {
   return plus ? `+${digits}` : digits;
 };
 
+/* -------------------------------------------------------------------------- */
+/*                               Main Component                               */
+/* -------------------------------------------------------------------------- */
 export default function PatientsIndexPage() {
   const router = useRouter();
   const { user } = useAuth();
   const theme = useTheme();
 
-  // Reusable button styles
-  const primaryContainedSx = React.useMemo(() => ({
-    bgcolor: theme.palette.primary.main,
-    color: theme.palette.getContrastText(theme.palette.primary.main),
-    boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-    '&:hover': {
-      bgcolor: darken(theme.palette.primary.main, 0.08),
-      boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
-    },
-    '&:active': {
-      bgcolor: darken(theme.palette.primary.main, 0.16),
-    },
-    borderRadius: 2,
-    textTransform: 'none',
-    fontWeight: 700,
-  }), [theme]);
-
-  const primaryOutlinedSx = React.useMemo(() => ({
-    borderColor: alpha(theme.palette.primary.main, 0.4),
-    color: theme.palette.primary.main,
-    '&:hover': {
-      borderColor: theme.palette.primary.main,
-      bgcolor: alpha(theme.palette.primary.main, 0.06),
-    },
-    '&:active': {
-      bgcolor: alpha(theme.palette.primary.main, 0.10),
-    },
-    borderRadius: 2,
-    textTransform: 'none',
-    fontWeight: 700,
-  }), [theme]);
-
-  // Arabic default
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
     if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
@@ -83,13 +52,44 @@ export default function PatientsIndexPage() {
     return true;
   }, [router?.query]);
 
+  const t = (en, ar) => (isArabic ? ar : en);
+
+  /* ------------------------------ Styles ------------------------------ */
+  const primaryContainedSx = {
+    bgcolor: theme.palette.primary.main,
+    color: theme.palette.getContrastText(theme.palette.primary.main),
+    boxShadow: '0 3px 12px rgba(0,0,0,0.15)',
+    borderRadius: 2,
+    fontWeight: 600,
+    px: 2.5,
+    py: 1,
+    textTransform: 'none',
+    '&:hover': {
+      bgcolor: darken(theme.palette.primary.main, 0.08),
+      boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
+    },
+  };
+
+  const primaryOutlinedSx = {
+    borderColor: alpha(theme.palette.primary.main, 0.4),
+    color: theme.palette.primary.main,
+    borderRadius: 2,
+    px: 2.5,
+    py: 1,
+    fontWeight: 600,
+    textTransform: 'none',
+    '&:hover': {
+      borderColor: theme.palette.primary.main,
+      bgcolor: alpha(theme.palette.primary.main, 0.05),
+    },
+  };
+
+  /* ----------------------------- State ----------------------------- */
+  const [patients, setPatients] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [okMsg, setOkMsg] = React.useState('');
-  const [patients, setPatients] = React.useState([]);
   const [queryText, setQueryText] = React.useState('');
-
-  // dialogs
   const [openAddPatient, setOpenAddPatient] = React.useState(false);
   const [openMsg, setOpenMsg] = React.useState(false);
   const [msgPatient, setMsgPatient] = React.useState(null);
@@ -97,64 +97,51 @@ export default function PatientsIndexPage() {
   const [msgBody, setMsgBody] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
-  /* ---------- load: ONLY what's in patients collection ---------- */
+  /* ---------------------------- Firestore ---------------------------- */
   React.useEffect(() => {
     if (!user?.uid) return;
-    const uid = String(user.uid);
+    const q = query(
+      collection(db, 'patients'),
+      where('associatedDoctors', 'array-contains', user.uid)
+    );
 
-    (async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const patientsCol = collection(db, 'patients');
-
-        // Docs registered by this doctor
-        const snapRegistered = await getDocs(query(patientsCol, where('registeredBy', '==', uid)));
-        // Docs already associated with this doctor (if you use associatedDoctors elsewhere)
-        const snapAssoc = await getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', uid)));
-
-        const rowsMap = new Map();
-        const push = (d) => rowsMap.set(d.id, { id: d.id, ...d.data() });
-        snapRegistered.docs.forEach(push);
-        snapAssoc.docs.forEach(push);
-
-        // Sort by name
-        const rows = Array.from(rowsMap.values()).sort((a, b) =>
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        rows.sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
-
         setPatients(rows);
-      } catch (e) {
-        console.error(e);
-        setError(isArabic ? 'حدث خطأ أثناء تحميل البيانات' : 'Failed to load patients');
-      } finally {
+        setLoading(false);
+      },
+      (err) => {
+        console.error(err);
+        setError(t('Failed to load patients', 'حدث خطأ أثناء تحميل البيانات'));
         setLoading(false);
       }
-    })();
-  }, [user, isArabic]);
+    );
 
+    return () => unsub();
+  }, [user?.uid]);
+
+  /* ---------------------------- Search Filter ---------------------------- */
   const filtered = React.useMemo(() => {
     const q = queryText.trim().toLowerCase();
     if (!q) return patients;
     return patients.filter((p) => {
       const name = String(p?.name ?? '').toLowerCase();
-      const id = String(p?.id ?? '').toLowerCase();          // phoneId (doc id)
+      const id = String(p?.id ?? '').toLowerCase();
       const phone = String(p?.phone ?? p?.mobile ?? '').toLowerCase();
       return name.includes(q) || id.includes(q) || phone.includes(q);
     });
   }, [patients, queryText]);
 
-  const goToPatient = (newId) => {
-    const pathname = `/patients/${newId}`;
-    if (isArabic) router.push({ pathname, query: { lang: 'ar' } });
-    else router.push(pathname);
-  };
-
-  // Compose message
+  /* ------------------------------ Message Logic ------------------------------ */
   const sendMessage = async () => {
     if (!user?.uid) return;
     if (!msgPatient?.id || !msgBody.trim()) {
-      setError(isArabic ? 'اختر مريضًا واكتب الرسالة' : 'Choose a patient and write a message');
+      setError(t('Choose a patient and write a message', 'اختر مريضًا واكتب الرسالة'));
       return;
     }
     setSending(true);
@@ -174,28 +161,25 @@ export default function PatientsIndexPage() {
       setMsgPatient(null);
       setMsgSubject('');
       setMsgBody('');
-      setOkMsg(isArabic ? 'تم إرسال الرسالة' : 'Message sent');
+      setOkMsg(t('Message sent', 'تم إرسال الرسالة'));
     } catch (e) {
       console.error(e);
-      setError(isArabic ? 'تعذر إرسال الرسالة' : 'Failed to send message');
+      setError(t('Failed to send message', 'تعذر إرسال الرسالة'));
     } finally {
       setSending(false);
     }
   };
 
-  const patientOptions = React.useMemo(
-    () =>
-      patients.map((p) => ({
-        id: p.id,
-        name: p.name || (isArabic ? 'بدون اسم' : 'Unnamed'),
-      })),
-    [patients, isArabic]
-  );
+  const goToPatient = (id) => {
+    const path = `/patients/${id}`;
+    if (isArabic) router.push({ pathname: path, query: { lang: 'ar' } });
+    else router.push(path);
+  };
 
+  /* ------------------------------ Render ------------------------------ */
   return (
     <Protected>
       <AppLayout>
-        {/* Always add via dialog */}
         <AddPatientDialog
           open={openAddPatient}
           onClose={() => setOpenAddPatient(false)}
@@ -203,68 +187,52 @@ export default function PatientsIndexPage() {
           onSaved={(newId) => goToPatient(newId)}
         />
 
-        {/* Compose Message */}
+        {/* Message Dialog */}
         <Dialog open={openMsg} onClose={() => !sending && setOpenMsg(false)} fullWidth maxWidth="sm">
           <DialogTitle sx={{ fontWeight: 800 }}>
-            {isArabic ? 'رسالة إلى المريض' : 'Message Patient'}
+            {t('Message Patient', 'رسالة إلى المريض')}
           </DialogTitle>
           <DialogContent dividers>
             <Stack spacing={2} sx={{ mt: 0.5 }}>
               <Autocomplete
-                options={patientOptions}
+                options={patients.map((p) => ({ id: p.id, name: p.name || t('Unnamed', 'بدون اسم') }))}
                 value={msgPatient}
                 onChange={(_, v) => setMsgPatient(v)}
                 getOptionLabel={(o) => o?.name || ''}
-                isOptionEqualToValue={(o, v) => o.id === v.id}
                 renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label={isArabic ? 'اختر المريض' : 'Select patient'}
-                    placeholder={isArabic ? 'ابحث بالاسم' : 'Search by name'}
-                  />
+                  <TextField {...params} label={t('Select patient', 'اختر المريض')} />
                 )}
               />
               <TextField
-                label={isArabic ? 'الموضوع (اختياري)' : 'Subject (optional)'}
+                label={t('Subject (optional)', 'الموضوع (اختياري)')}
                 value={msgSubject}
                 onChange={(e) => setMsgSubject(e.target.value)}
               />
               <TextField
-                label={isArabic ? 'الرسالة' : 'Message'}
+                label={t('Message', 'الرسالة')}
                 value={msgBody}
                 onChange={(e) => setMsgBody(e.target.value)}
                 multiline
                 minRows={5}
-                placeholder={isArabic ? 'اكتب رسالتك هنا…' : 'Type your message…'}
               />
-              {msgPatient?.id && (
-                <Box sx={{ fontSize: 13, color: 'text.secondary' }}>
-                  {isArabic ? 'سيتم إرسال الرسالة إلى: ' : 'Will send to: ' }
-                  <strong>{msgPatient.name}</strong> (ID: {msgPatient.id})
-                </Box>
-              )}
             </Stack>
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setOpenMsg(false)} disabled={sending}>
-              {isArabic ? 'إلغاء' : 'Cancel'}
+              {t('Cancel', 'إلغاء')}
             </Button>
-            <Button onClick={sendMessage} variant="contained" disabled={sending}>
-              {sending ? (isArabic ? 'جارٍ الإرسال…' : 'Sending…') : (isArabic ? 'إرسال' : 'Send')}
+            <Button variant="contained" onClick={sendMessage} disabled={sending}>
+              {sending ? t('Sending…', 'جارٍ الإرسال…') : t('Send', 'إرسال')}
             </Button>
           </DialogActions>
         </Dialog>
 
-        <Container maxWidth="lg">
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between">
-              <Typography
-                variant="h5"
-                fontWeight={800}
-                color="text.primary"   // clearer title color
-                sx={{ letterSpacing: 0.2 }}
-              >
-                {isArabic ? 'قائمة المرضى' : 'Patient List'}
+        {/* Page Content */}
+        <Container maxWidth="xl" sx={{ py: 3 }}>
+          <Stack spacing={2}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+              <Typography variant="h5" fontWeight={800} sx={{ mb: { xs: 1, sm: 0 } }}>
+                {t('Patients List', 'قائمة المرضى')}
               </Typography>
 
               <Stack direction="row" spacing={1}>
@@ -274,66 +242,87 @@ export default function PatientsIndexPage() {
                   onClick={() => setOpenAddPatient(true)}
                   sx={primaryContainedSx}
                 >
-                  {isArabic ? 'إضافة مريض' : 'Add Patient'}
+                  {t('Add Patient', 'إضافة مريض')}
                 </Button>
-
                 <Button
                   variant="outlined"
                   startIcon={<MailOutlineIcon />}
                   onClick={() => setOpenMsg(true)}
                   sx={primaryOutlinedSx}
                 >
-                  {isArabic ? 'رسالة جديدة' : 'New Message'}
+                  {t('New Message', 'رسالة جديدة')}
                 </Button>
               </Stack>
             </Stack>
+
+            <Divider />
 
             <PatientSearchBar
               isArabic={isArabic}
               value={queryText}
               onChange={(v) => setQueryText(v)}
-              onAddNew={() => setOpenAddPatient(true)} // always open dialog to add
+              onAddNew={() => setOpenAddPatient(true)}
             />
 
+            {/* Loading State */}
             {loading ? (
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {Array.from({ length: 8 }).map((_, i) => (
                   <Grid key={i} item xs={12} sm={6} md={4} lg={3}>
-                    <Skeleton variant="rounded" height={118} />
+                    <Skeleton variant="rounded" height={130} />
                   </Grid>
                 ))}
               </Grid>
             ) : filtered.length === 0 ? (
-              <PatientListEmpty
-                isArabic={isArabic}
-                onAddNew={() => setOpenAddPatient(true)}
-              />
+              <PatientListEmpty isArabic={isArabic} onAddNew={() => setOpenAddPatient(true)} />
             ) : (
-              <Grid container spacing={2} sx={{ mt: 1 }}>
-                {filtered.map((p) => (
-                  <Grid key={p.id} item xs={12} sm={6} md={4} lg={3}>
-                    <PatientCard patient={p} isArabic={isArabic} />
-                  </Grid>
-                ))}
-              </Grid>
+              <Fade in timeout={500}>
+                <Grid
+                  container
+                  spacing={2.5}
+                  sx={{
+                    mt: 1,
+                    alignItems: 'stretch',
+                    justifyContent: { xs: 'center', md: 'flex-start' },
+                  }}
+                >
+                  {filtered.map((p) => (
+                    <Grid
+                      key={p.id}
+                      item
+                      xs={12}
+                      sm={6}
+                      md={4}
+                      lg={3}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <PatientCard
+                        patient={p}
+                        isArabic={isArabic}
+                        sx={{
+                          width: '100%',
+                          transition: '0.2s',
+                          '&:hover': {
+                            transform: 'translateY(-4px)',
+                            boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
+                          },
+                        }}
+                      />
+                    </Grid>
+                  ))}
+                </Grid>
+              </Fade>
             )}
           </Stack>
 
-          <Snackbar
-            open={Boolean(error)}
-            autoHideDuration={4000}
-            onClose={() => setError('')}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
+          {/* Snackbars */}
+          <Snackbar open={Boolean(error)} autoHideDuration={4000} onClose={() => setError('')}>
             <Alert severity="error" onClose={() => setError('')}>{error}</Alert>
           </Snackbar>
-
-          <Snackbar
-            open={Boolean(okMsg)}
-            autoHideDuration={3000}
-            onClose={() => setOkMsg('')}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
+          <Snackbar open={Boolean(okMsg)} autoHideDuration={3000} onClose={() => setOkMsg('')}>
             <Alert severity="success" onClose={() => setOkMsg('')}>{okMsg}</Alert>
           </Snackbar>
         </Container>
