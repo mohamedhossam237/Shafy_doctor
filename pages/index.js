@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
   Box, Container, Stack, Typography, Grid, Paper, CircularProgress,
-  Button, Avatar, Divider, Chip, Skeleton
+  Button, Avatar, Divider, Chip
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 
@@ -27,21 +27,12 @@ const grad = (from, to) => `linear-gradient(135deg, ${from} 0%, ${to} 100%)`;
 
 function formatLongDate(isArabic) {
   const locale = isArabic ? 'ar-EG-u-nu-arab' : undefined;
-  try {
-    return new Intl.DateTimeFormat(locale, {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }).format(new Date());
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    }).format(new Date());
-  }
+  return new Intl.DateTimeFormat(locale || undefined, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date());
 }
 
 function toDate(val) {
@@ -55,6 +46,7 @@ function toDate(val) {
   if (typeof val === 'object' && 'seconds' in val) return new Date(val.seconds * 1000);
   return null;
 }
+
 function isToday(d) {
   if (!d) return false;
   const now = new Date();
@@ -64,10 +56,12 @@ function isToday(d) {
     d.getDate() === now.getDate()
   );
 }
+
 function formatTime(d) {
   if (!d) return '—';
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(d);
 }
+
 function apptDate(appt) {
   if (appt?._dt) return appt._dt;
   if (appt?.appointmentDate) return toDate(appt.appointmentDate);
@@ -206,7 +200,8 @@ function AppointmentItem({ appt, isArabic, withLang }) {
       <Paper
         elevation={0}
         sx={{
-          px: 1.75, py: 1.4,
+          px: 1.75,
+          py: 1.4,
           borderRadius: 2.5,
           display: 'flex',
           alignItems: 'center',
@@ -219,8 +214,12 @@ function AppointmentItem({ appt, isArabic, withLang }) {
           <PeopleAltIcon fontSize="small" />
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} noWrap>{patientName}</Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>{formatTime(d)}</Typography>
+          <Typography fontWeight={700} noWrap>
+            {patientName}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>
+            {formatTime(d)}
+          </Typography>
         </Box>
         <Chip
           size="small"
@@ -289,7 +288,7 @@ export default function DashboardIndexPage() {
           .slice(0, 4);
         setAppointments(upcoming);
 
-        // ✅ fixed patient count logic (associatedDoctors OR registeredBy)
+        // ✅ patients (only with phone number)
         const patientsCol = collection(db, 'patients');
         const [snapAssoc, snapReg] = await Promise.all([
           getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', doctorUID))),
@@ -301,7 +300,11 @@ export default function DashboardIndexPage() {
         );
         const patientRows = Array.from(patientMap.values());
         const visiblePatients = patientRows.filter(
-          (p) => p?.name && String(p.name).trim() && p?.phone && String(p.phone).trim()
+          (p) =>
+            p?.name &&
+            String(p.name).trim() &&
+            typeof p.phone === 'string' &&
+            p.phone.trim() !== ''
         );
         const visiblePatientsCount = visiblePatients.length;
 
@@ -332,6 +335,7 @@ export default function DashboardIndexPage() {
   const addPatient = () => setOpenAddPatient(true);
   const addReport = () => router.push(withLang('/patient-reports/new'));
   const openClinicReports = () => router.push(withLang('/clinic-reports'));
+
   if (!mounted) return null;
 
   const todayPretty = formatLongDate(isArabic);

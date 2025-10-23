@@ -40,7 +40,7 @@ export default function PatientsIndexPage() {
   const [sending, setSending] = React.useState(false);
 
   /* ------------------------------------------------------------ */
-  /* 🔹 Load Patients for Current Doctor (deduplicated)           */
+  /* 🔹 Load Patients for Current Doctor (deduplicated + with phone) */
   /* ------------------------------------------------------------ */
   React.useEffect(() => {
     if (!user?.uid) return;
@@ -66,16 +66,20 @@ export default function PatientsIndexPage() {
             }, {})
           );
 
+          // ✅ Filter only patients with a valid phone number
+          const withPhone = unique.filter(
+            (p) => typeof p.phone === 'string' && p.phone.trim() !== ''
+          );
+
           // Sort alphabetically
-          unique.sort((a, b) =>
+          withPhone.sort((a, b) =>
             String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
           );
 
-          setPatients(unique);
+          setPatients(withPhone);
           setLoading(false);
         });
 
-        // cleanup both listeners
         return () => {
           unsub1();
           unsub2();
