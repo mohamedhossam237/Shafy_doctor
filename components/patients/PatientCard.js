@@ -8,8 +8,8 @@ import {
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 
 export default function PatientCard({ patient, isArabic, onMessage }) {
-  // Show only if at least a name and phone exist
-  if (!patient?.name || !patient?.phone) return null;
+  // show even if data incomplete, only skip if truly invalid
+  if (!patient || !patient.id) return null;
 
   const initials = String(patient?.name || '?')
     .split(' ')
@@ -19,29 +19,25 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
     .toUpperCase();
 
   const href = `/patients/${patient.id}${isArabic ? '?lang=ar' : ''}`;
-
   const handleMessageClick = (e) => {
     e.preventDefault();
     e.stopPropagation();
     if (typeof onMessage === 'function') {
-      onMessage({
-        id: patient.id,
-        name: patient.name,
-      });
+      onMessage({ id: patient.id, name: patient.name || '—' });
     }
   };
 
   const genderLabel = (() => {
     const g = (patient.gender || '').toLowerCase();
-    if (!isArabic) return patient.gender;
+    if (!isArabic) return patient.gender || '';
     if (g === 'male') return 'ذكر';
     if (g === 'female') return 'أنثى';
     if (g === 'other') return 'أخرى';
-    return patient.gender;
+    return patient.gender || '';
   })();
 
   return (
-    <Link href={href} style={{ textDecoration: 'none' }}>
+    <Link href={href} style={{ textDecoration: 'none', width: '100%' }}>
       <Paper
         sx={{
           p: 2,
@@ -50,28 +46,33 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
           alignItems: 'center',
           gap: 1.8,
           height: 130,
+          width: '100%',
           boxShadow: '0 3px 10px rgba(0,0,0,0.06)',
           transition: 'all 0.25s ease',
           '&:hover': {
-            boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+            boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
             transform: 'translateY(-3px)',
           },
         }}
       >
-        <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 600 }}>{initials}</Avatar>
+        <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 600 }}>
+          {initials}
+        </Avatar>
 
         <Stack sx={{ flex: 1, minWidth: 0 }}>
           <Typography fontWeight={700} noWrap>
-            {patient.name}
+            {patient.name || (isArabic ? 'بدون اسم' : 'Unnamed')}
           </Typography>
+          {patient.phone && (
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {(isArabic ? 'الهاتف: ' : 'Phone: ') + patient.phone}
+            </Typography>
+          )}
           {patient.age && (
             <Typography variant="caption" color="text.secondary" noWrap>
               {(isArabic ? 'العمر: ' : 'Age: ') + patient.age}
             </Typography>
           )}
-          <Typography variant="caption" color="text.secondary" noWrap>
-            {(isArabic ? 'الهاتف: ' : 'Phone: ') + patient.phone}
-          </Typography>
           {patient.address && (
             <Typography variant="caption" color="text.secondary" noWrap title={patient.address}>
               {(isArabic ? 'العنوان: ' : 'Address: ') + patient.address}
@@ -82,7 +83,7 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
           </Typography>
         </Stack>
 
-        {patient.gender && <Chip size="small" label={genderLabel} />}
+        {genderLabel && <Chip size="small" label={genderLabel} />}
 
         <Tooltip title={isArabic ? 'إرسال رسالة' : 'Send message'}>
           <span>
@@ -100,4 +101,3 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
     </Link>
   );
 }
-// End of PatientCard.js
