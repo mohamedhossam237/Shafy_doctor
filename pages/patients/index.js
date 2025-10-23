@@ -4,9 +4,8 @@ import { useRouter } from 'next/router';
 import {
   Container, Stack, Typography, Grid, Snackbar, Alert, Skeleton,
   Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Autocomplete, Box
+  TextField, Autocomplete
 } from '@mui/material';
-import { useTheme, alpha, darken } from '@mui/material/styles';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
 
@@ -15,7 +14,7 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, onSnapshot, query, where, or, addDoc, serverTimestamp
+  collection, onSnapshot, query, where, addDoc, serverTimestamp
 } from 'firebase/firestore';
 
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
@@ -26,7 +25,6 @@ import AddPatientDialog from '@/components/patients/AddPatientDialog';
 export default function PatientsIndexPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const theme = useTheme();
   const isArabic = true;
 
   const [patients, setPatients] = React.useState([]);
@@ -41,33 +39,48 @@ export default function PatientsIndexPage() {
   const [msgBody, setMsgBody] = React.useState('');
   const [sending, setSending] = React.useState(false);
 
+  /* ------------------------------------------------------------ */
+  /* 🔹 Load Patients for Current Doctor (deduplicated)           */
+  /* ------------------------------------------------------------ */
   React.useEffect(() => {
     if (!user?.uid) return;
     setLoading(true);
+
     try {
       const patientsCol = collection(db, 'patients');
+      const q1 = query(patientsCol, where('associatedDoctors', 'array-contains', user.uid));
+      const q2 = query(patientsCol, where('registeredBy', '==', user.uid));
 
-      // 🔹 Fetch only patients linked to this doctor
-      const q = query(
-        patientsCol,
-        or(
-          where('associatedDoctors', 'array-contains', user.uid),
-          where('registeredBy', '==', user.uid)
-        )
-      );
+      const unsub1 = onSnapshot(q1, (snap1) => {
+        const data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-      const unsub = onSnapshot(q, (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // sort alphabetically
-        rows.sort((a, b) =>
-          String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, {
-            sensitivity: 'base',
-          })
-        );
-        setPatients(rows);
-        setLoading(false);
+        const unsub2 = onSnapshot(q2, (snap2) => {
+          const data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+          // 🧩 Merge + deduplicate by ID
+          const combined = [...data1, ...data2];
+          const unique = Object.values(
+            combined.reduce((acc, cur) => {
+              acc[cur.id] = cur;
+              return acc;
+            }, {})
+          );
+
+          // Sort alphabetically
+          unique.sort((a, b) =>
+            String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
+          );
+
+          setPatients(unique);
+          setLoading(false);
+        });
+
+        // cleanup both listeners
+        return () => {
+          unsub1();
+          unsub2();
+        };
       });
-      return () => unsub();
     } catch (err) {
       console.error(err);
       setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
@@ -75,6 +88,9 @@ export default function PatientsIndexPage() {
     }
   }, [user?.uid]);
 
+  /* ------------------------------------------------------------ */
+  /* 🔍 Filter by search text                                    */
+  /* ------------------------------------------------------------ */
   const filtered = React.useMemo(() => {
     const q = queryText.trim().toLowerCase();
     if (!q) return patients;
@@ -85,11 +101,9 @@ export default function PatientsIndexPage() {
     });
   }, [patients, queryText]);
 
-  const goToPatient = (newId) => {
-    const pathname = `/patients/${newId}`;
-    router.push({ pathname, query: { lang: 'ar' } });
-  };
-
+  /* ------------------------------------------------------------ */
+  /* 📩 Message Sending                                          */
+  /* ------------------------------------------------------------ */
   const sendMessage = async () => {
     if (!user?.uid || !msgPatient?.id || !msgBody.trim()) {
       setError(isArabic ? 'اختر مريضًا واكتب الرسالة' : 'Select patient and write message');
@@ -121,9 +135,17 @@ export default function PatientsIndexPage() {
     }
   };
 
+  const goToPatient = (id) => {
+    router.push(`/patients/${id}${isArabic ? '?lang=ar' : ''}`);
+  };
+
+  /* ------------------------------------------------------------ */
+  /* 🧩 Render UI                                                */
+  /* ------------------------------------------------------------ */
   return (
     <Protected>
       <AppLayout>
+        {/* Add Patient Dialog */}
         <AddPatientDialog
           open={openAddPatient}
           onClose={() => setOpenAddPatient(false)}
@@ -131,7 +153,7 @@ export default function PatientsIndexPage() {
           onSaved={(newId) => goToPatient(newId)}
         />
 
-        {/* Message dialog */}
+        {/* Message Dialog */}
         <Dialog open={openMsg} onClose={() => !sending && setOpenMsg(false)} fullWidth maxWidth="sm">
           <DialogTitle>{isArabic ? 'رسالة إلى المريض' : 'Message Patient'}</DialogTitle>
           <DialogContent dividers>
@@ -167,6 +189,7 @@ export default function PatientsIndexPage() {
           </DialogActions>
         </Dialog>
 
+        {/* Main Content */}
         <Container maxWidth="lg" sx={{ mt: 3 }}>
           <Stack spacing={2}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
