@@ -100,3 +100,4 @@ export default function PatientCard({ patient, isArabic, onMessage }) {
     </Link>
   );
 }
+// End of PatientCard.js
