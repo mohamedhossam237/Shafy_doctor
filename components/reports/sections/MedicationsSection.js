@@ -26,24 +26,29 @@ export default function MedicationsSection({
   updateMedication,
   addMedication,
   removeMedication,
-  drugOptions,
+  drugOptions = [],
   drugLoading,
-  filterDrugs,
   debouncedSetQuery,
   isArabic,
 }) {
-  // --- Predefined dropdown lists ---
+  // --- Local filter function (prevents undefined error) ---
+  const filterDrugs = React.useCallback((q = '', list = []) => {
+    const n = q.toLowerCase().trim();
+    if (!n) return list.slice(0, 100);
+    return list
+      .filter(
+        (d) =>
+          d.displayName?.toLowerCase().includes(n) ||
+          d.genericName?.toLowerCase().includes(n) ||
+          d.brandName?.toLowerCase().includes(n)
+      )
+      .slice(0, 100);
+  }, []);
+
+  // --- Dropdown options ---
   const doseOptions = [
-    '250 mg',
-    '500 mg',
-    '750 mg',
-    '1 g',
-    '2 g',
-    '5 ml',
-    '10 ml',
-    '1 tablet',
-    '2 tablets',
-    '1 capsule',
+    '250 mg', '500 mg', '750 mg', '1 g', '2 g',
+    '5 ml', '10 ml', '1 tablet', '2 tablets', '1 capsule',
   ];
 
   const frequencyOptions = [
@@ -96,7 +101,7 @@ export default function MedicationsSection({
                   value={m.name || ''}
                   onInputChange={(_, v) => {
                     updateMedication(idx, 'name', v || '');
-                    debouncedSetQuery(v || '');
+                    debouncedSetQuery?.(v || '');
                   }}
                   getOptionLabel={(opt) => {
                     if (typeof opt === 'string') return opt;

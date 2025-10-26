@@ -24,8 +24,8 @@ export default function PatientSection({
   open,
   form,
   setForm,
-  errors,
-  setErrors,
+  errors = {}, // default value to avoid undefined
+  setErrors,   // may be undefined
 }) {
   const [patients, setPatients] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
@@ -94,6 +94,7 @@ export default function PatientSection({
     }
   };
 
+  // main render
   return (
     <SectionWrapper
       icon={<PersonIcon fontSize="small" />}
@@ -110,7 +111,12 @@ export default function PatientSection({
               setSelectedPatient(value);
               const id = value?.id || '';
               setForm((f) => ({ ...f, patientID: id, patientName: value?.name || '' }));
-              setErrors((prev) => ({ ...prev, patientID: undefined }));
+
+              // ✅ Safe guard against undefined setErrors
+              if (typeof setErrors === 'function') {
+                setErrors((prev) => ({ ...prev, patientID: undefined }));
+              }
+
               await fetchPatientDemographics(id);
             }}
             getOptionLabel={(opt) => (opt?.name ? String(opt.name) : '')}
