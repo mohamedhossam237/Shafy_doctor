@@ -1118,91 +1118,125 @@ export default function PatientDetailsPage() {
           />
        <Stack spacing={2} sx={{ mt: 2 }}>
 
-              {/* 🧾 Medical Notes Section */}
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography variant="h6" fontWeight={900} color="text.primary">
-                  {label('Medical Notes', 'ملاحظات طبية')}
-                </Typography>
-                <Button
-                  onClick={() => {
-                    setNotesDraft(patient?.notes || '');
-                    setNotesOpen(true);
-                  }}
-                  startIcon={<EditOutlinedIcon />}
-                  variant="outlined"
-                  size="small"
-                >
-                  {patient?.notes
-                    ? label('Edit Notes', 'تعديل الملاحظات')
-                    : label('Add Notes', 'إضافة ملاحظات')}
-                </Button>
-              </Stack>
+{/* 💰 Financial Notes Section */}
+<Stack direction="row" alignItems="center" justifyContent="space-between">
+  <Typography variant="h6" fontWeight={900} color="text.primary">
+    {label('Financial Notes', 'ملاحظات مالية')}
+  </Typography>
+  <Button
+    onClick={() => {
+      setNotesDraft(patient?.financialNotes || '');
+      setNotesOpen(true);
+    }}
+    startIcon={<EditOutlinedIcon />}
+    variant="outlined"
+    size="small"
+  >
+    {patient?.financialNotes
+      ? label('Edit Notes', 'تعديل الملاحظات')
+      : label('Add Notes', 'إضافة ملاحظات')}
+  </Button>
+</Stack>
 
-              <Paper
-                sx={{
-                  p: 2,
-                  borderRadius: 2,
-                  border: (t) => `1px solid ${t.palette.divider}`,
-                  bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
-                }}
-              >
-                <Typography variant="body1" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {patient?.notes || label('No notes yet.', 'لا توجد ملاحظات.')}
-                </Typography>
+<Paper
+  sx={{
+    p: 2,
+    borderRadius: 2,
+    border: (t) => `1px solid ${t.palette.divider}`,
+    bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
+  }}
+>
+  <Typography variant="body1" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
+    {patient?.financialNotes || label('No notes yet.', 'لا توجد ملاحظات.')}
+  </Typography>
 
-                {/* 🕒 Notes Metadata */}
-                {patient?.notesUpdatedAt && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ mt: 1, display: 'block', textAlign: isArabic ? 'right' : 'left' }}
-                  >
-                    {label('Last updated on', 'آخر تعديل في')}: {fmtNiceDateTime(patient.notesUpdatedAt)}
-                    {patient?.notesUpdatedBy && ` (${patient.notesUpdatedBy})`}
-                  </Typography>
-                )}
-              </Paper>
+  {patient?.financialNotesUpdatedAt && (
+    <Typography
+      variant="caption"
+      color="text.secondary"
+      sx={{ mt: 1, display: 'block', textAlign: isArabic ? 'right' : 'left' }}
+    >
+      {label('Last updated on', 'آخر تعديل في')}:{' '}
+      {fmtNiceDateTime(patient.financialNotesUpdatedAt)}
+      {patient?.financialNotesUpdatedBy && ` (${patient.financialNotesUpdatedBy})`}
+    </Typography>
+  )}
+</Paper>
 
-              {/* 📝 Notes Dialog */}
-              <Dialog open={notesOpen} onClose={() => !savingNotes && setNotesOpen(false)} fullWidth maxWidth="sm">
-                <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography fontWeight={900}>
-                    {label('Patient Medical Notes', 'ملاحظات المريض الطبية')}
-                  </Typography>
-                  <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
-                    <CloseRoundedIcon />
-                  </IconButton>
-                </DialogTitle>
-                <DialogContent dividers>
-                  <TextField
-                    autoFocus
-                    fullWidth
-                    multiline
-                    minRows={6}
-                    value={notesDraft}
-                    onChange={(e) => setNotesDraft(e.target.value)}
-                    placeholder={label('Type notes here…', 'اكتب الملاحظات هنا…')}
-                  />
-                  <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
-                    {label(
-                      'Only the doctor can edit these notes. Saved with timestamp and author.',
-                      'يمكن للطبيب فقط تعديل هذه الملاحظات. يتم حفظها مع الوقت والكاتب.'
-                    )}
-                  </Typography>
-                </DialogContent>
-                <DialogActions>
-                  <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
-                    {label('Cancel', 'إلغاء')}
-                  </Button>
-                  <Button
-                    onClick={handleSaveNotes}
-                    variant="contained"
-                    disabled={savingNotes}
-                  >
-                    {savingNotes ? label('Saving…', 'جارٍ الحفظ…') : label('Save Notes', 'حفظ الملاحظات')}
-                  </Button>
-                </DialogActions>
-              </Dialog>
+{/* 📝 Financial Notes Dialog */}
+<Dialog
+  open={notesOpen}
+  onClose={() => !savingNotes && setNotesOpen(false)}
+  fullWidth
+  maxWidth="sm"
+>
+  <DialogTitle
+    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+  >
+    <Typography fontWeight={900}>
+      {label('Patient Financial Notes', 'ملاحظات المريض المالية')}
+    </Typography>
+    <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
+      <CloseRoundedIcon />
+    </IconButton>
+  </DialogTitle>
+  <DialogContent dividers>
+    <TextField
+      autoFocus
+      fullWidth
+      multiline
+      minRows={6}
+      value={notesDraft}
+      onChange={(e) => setNotesDraft(e.target.value)}
+      placeholder={label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')}
+    />
+    <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
+      {label(
+        'Only authorized staff can edit these notes. Saved with timestamp and author.',
+        'يمكن فقط للموظفين المعتمدين تعديل هذه الملاحظات. يتم حفظها مع الوقت والكاتب.'
+      )}
+    </Typography>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
+      {label('Cancel', 'إلغاء')}
+    </Button>
+    <Button
+      onClick={async () => {
+        if (!patient?.id) return;
+        setSavingNotes(true);
+        try {
+          const ref = doc(db, 'patients', patient.id);
+          const updatedAt = new Date();
+          const updatedBy = user?.uid || user?.email || 'unknown';
+          await updateDoc(ref, {
+            financialNotes: notesDraft,
+            financialNotesUpdatedAt: updatedAt,
+            financialNotesUpdatedBy: updatedBy,
+          });
+          setPatient((prev) => ({
+            ...prev,
+            financialNotes: notesDraft,
+            financialNotesUpdatedAt: updatedAt,
+            financialNotesUpdatedBy: updatedBy,
+          }));
+          setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات المالية بنجاح.'));
+          setNotesOpen(false);
+        } catch (e) {
+          console.error(e);
+          setError(label('Failed to save notes.', 'تعذر حفظ الملاحظات.'));
+        } finally {
+          setSavingNotes(false);
+        }
+      }}
+      variant="contained"
+      disabled={savingNotes}
+    >
+      {savingNotes ? label('Saving…', 'جارٍ الحفظ…') : label('Save Notes', 'حفظ الملاحظات')}
+    </Button>
+  </DialogActions>
+</Dialog>
+  
 
               <Snackbar
                 open={Boolean(error)}
