@@ -10,6 +10,7 @@ import {
   LinearProgress
 } from '@mui/material';
 import { alpha, darken } from '@mui/material/styles';
+import EditHealthInfoDialog from '@/components/patients/EditHealthInfoDialog';
 
 import DescriptionIcon from '@mui/icons-material/Description';
 import EventIcon from '@mui/icons-material/Event';
@@ -252,6 +253,7 @@ export default function PatientDetailsPage() {
   // external lab_results
   const [xLabLoading, setXLabLoading] = React.useState(true);
   const [xLabResults, setXLabResults] = React.useState([]);
+  const [editHealthOpen, setEditHealthOpen] = React.useState(false);
 
   // notes
   const [notesOpen, setNotesOpen] = React.useState(false);
@@ -937,7 +939,20 @@ export default function PatientDetailsPage() {
                   )}
 
                   <Divider sx={{ my: 1 }} />
-                  <HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
+<Stack direction="row" alignItems="center" justifyContent="space-between">
+  <Typography variant="subtitle2" fontWeight={800} color="text.primary">
+  </Typography>
+  <Button
+    variant="outlined"
+    size="small"
+    startIcon={<EditOutlinedIcon />}
+    onClick={() => setEditHealthOpen(true)}
+  >
+    {label('Edit', 'تعديل')}
+  </Button>
+</Stack>
+
+<HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
                   <Divider sx={{ my: 1 }} />
 
                   <Typography variant="subtitle2" fontWeight={800} color="text.primary">
@@ -1239,7 +1254,17 @@ export default function PatientDetailsPage() {
     </Button>
   </DialogActions>
 </Dialog>
-  
+  <EditHealthInfoDialog
+  open={editHealthOpen}
+  onClose={() => setEditHealthOpen(false)}
+  patient={patient}
+  t={(en, ar) => label(en, ar)}     // reuse your label helper
+  isArabic={isArabic}
+  onSave={(updated) => {
+    setPatient((p) => ({ ...p, ...updated }));
+    setOkMsg(label('Health information updated', 'تم تحديث المعلومات الصحية'));
+  }}
+/>
 
               <Snackbar
                 open={Boolean(error)}

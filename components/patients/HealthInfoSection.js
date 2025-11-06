@@ -1,139 +1,149 @@
 'use client';
-import React from 'react';
+
+import * as React from 'react';
 import {
-  Paper, Typography, Grid, Chip, Stack, Divider, Box
+  Box,
+  Typography,
+  Paper,
+  Stack,
+  RadioGroup,
+  FormControlLabel,
+  Radio,
+  Divider,
+  useTheme,
 } from '@mui/material';
-import VaccinesIcon from '@mui/icons-material/Vaccines';
-import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
-import SmokingRoomsIcon from '@mui/icons-material/SmokingRooms';
-import LocalDrinkIcon from '@mui/icons-material/LocalDrink';
-import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
-import ChildFriendlyIcon from '@mui/icons-material/ChildFriendly';
-import BloodtypeIcon from '@mui/icons-material/Bloodtype';
-import { alpha } from '@mui/material/styles';
 
-const splitCsv = (v) =>
-  Array.isArray(v) ? v : String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+/**
+ * HealthInfoSection – Enhanced version (matches EditHealthInfoDialog)
+ * Each question appears as a clean, single-row card with hover effect.
+ */
+export default function HealthInfoSection({ form = {}, setForm = () => {}, t, isArabic }) {
+  const theme = useTheme();
 
-export default function HealthInfoSection({ patient, isArabic, label }) {
-  const fmtNiceDate = (d) => {
-    if (!d) return '—';
-    const dt = d?.toDate ? d.toDate() : new Date(d);
-    return new Intl.DateTimeFormat(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit'
-    }).format(dt);
-  };
+  // 🌍 Translation helper
+  const translate = React.useCallback(
+    (en, ar) => (typeof t === 'function' ? t(en, ar) : isArabic ? ar : en),
+    [t, isArabic]
+  );
+
+  // 🧩 State handler
+  const handleBool = React.useCallback(
+    (field) => (e) => {
+      const val = e.target.value === 'true';
+      if (typeof setForm === 'function') setForm((f) => ({ ...(f || {}), [field]: val }));
+    },
+    [setForm]
+  );
+
+  // 🩺 Questions list
+  const questions = React.useMemo(() => {
+    const base = [
+      { key: 'isDiabetic', label: translate('Is the patient diabetic?', 'هل المريض مصاب بالسكري؟') },
+      { key: 'hadSurgeries', label: translate('Has the patient had surgeries?', 'هل خضع المريض لعمليات؟') },
+      { key: 'isSmoker', label: translate('Does the patient smoke?', 'هل المريض مدخن؟') },
+      { key: 'drinksAlcohol', label: translate('Does the patient drink alcohol?', 'هل يشرب المريض الكحول؟') },
+      { key: 'familyHistory', label: translate('Family history of similar diseases?', 'هل يوجد تاريخ عائلي لأمراض مشابهة؟') },
+    ];
+    if (form?.gender?.toLowerCase() === 'female') {
+      base.push({ key: 'isPregnant', label: translate('Is the patient pregnant?', 'هل المريضة حامل؟') });
+    }
+    return base;
+  }, [translate, form?.gender]);
 
   return (
-    <Paper
-      sx={{
-        p: 2,
-        borderRadius: 2,
-        border: (t) => `1px solid ${t.palette.divider}`,
-        bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
-      }}
-    >
-      <Typography variant="h6" fontWeight={900} color="text.primary" sx={{ mb: 1 }}>
-        {label('Health Information', 'المعلومات الصحية')}
+    <Box sx={{ mt: 3 }}>
+      {/* 🩺 Title */}
+      <Typography
+        variant="h6"
+        fontWeight={900}
+        sx={{
+          mb: 2,
+          textAlign: isArabic ? 'right' : 'left',
+          color: theme.palette.text.primary,
+        }}
+      >
+        {translate('Health Assessment', 'تقييم الحالة الصحية')}
       </Typography>
 
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6}>
-          <Typography variant="caption" color="text.secondary">
-            {label('Blood Type', 'فصيلة الدم')}
-          </Typography>
-          <Chip label={patient?.bloodType || '—'} variant="outlined" sx={{ mt: 0.5 }} />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <Typography variant="caption" color="text.secondary">
-            {label('Last Visit Date', 'تاريخ آخر زيارة')}
-          </Typography>
-          <Chip label={fmtNiceDate(patient?.lastVisitDate)} variant="outlined" sx={{ mt: 0.5 }} />
-        </Grid>
-
-        <Grid item xs={12}>
-          <Typography variant="caption" color="text.secondary">
-            {label('Allergies', 'الحساسية')}
-          </Typography>
-          {splitCsv(patient?.allergies).length ? (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-              {splitCsv(patient.allergies).map((a, i) => (
-                <Chip key={i} label={a} color="warning" variant="outlined" size="small" />
-              ))}
-            </Stack>
-          ) : (
-            <Typography color="text.secondary">—</Typography>
-          )}
-        </Grid>
-
-        <Grid item xs={12}>
-          <Typography variant="caption" color="text.secondary">
-            {label('Chronic Conditions', 'الأمراض المزمنة')}
-          </Typography>
-          {splitCsv(patient?.chronicConditions).length ? (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-              {splitCsv(patient.chronicConditions).map((c, i) => (
-                <Chip key={i} label={c} variant="outlined" size="small" />
-              ))}
-            </Stack>
-          ) : (
-            <Typography color="text.secondary">—</Typography>
-          )}
-        </Grid>
-
-        <Grid item xs={12}>
-          <Typography variant="caption" color="text.secondary">
-            {label('Current Medications', 'الأدوية الحالية')}
-          </Typography>
-          {splitCsv(patient?.currentMedications).length ? (
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-              {splitCsv(patient.currentMedications).map((m, i) => (
-                <Chip key={i} label={m} variant="outlined" size="small" />
-              ))}
-            </Stack>
-          ) : (
-            <Typography color="text.secondary">—</Typography>
-          )}
-        </Grid>
-      </Grid>
-
-      <Divider sx={{ my: 2 }} />
-
-      <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>
-        {label('Health Conditions', 'الحالات الصحية')}
-      </Typography>
-
-      <Stack spacing={1}>
-        {[
-          ['isDiabetic', label('Is the patient diabetic?', 'هل المريض مصاب بالسكري؟'), <VaccinesIcon />],
-          ['hadSurgeries', label('Has the patient had surgeries?', 'هل خضع المريض لعمليات؟'), <LocalHospitalIcon />],
-          ['isSmoker', label('Does the patient smoke?', 'هل المريض مدخن؟'), <SmokingRoomsIcon />],
-          ['drinksAlcohol', label('Does the patient drink alcohol?', 'هل يشرب المريض الكحول؟'), <LocalDrinkIcon />],
-          ['familyHistory', label('Family history of similar diseases?', 'هل يوجد تاريخ عائلي لأمراض مشابهة؟'), <FamilyRestroomIcon />],
-        ].map(([key, question, icon]) => (
-          <Stack key={key} direction="row" alignItems="center" spacing={2}>
-            {icon}
-            <Typography sx={{ flex: 1 }}>{question}</Typography>
-            <Chip
-              label={patient?.[key] ? label('Yes', 'نعم') : label('No', 'لا')}
-              color={patient?.[key] ? 'success' : 'default'}
+      {/* 📋 Card container */}
+      <Paper
+        variant="outlined"
+        sx={{
+          p: { xs: 2, sm: 2.5 },
+          borderRadius: 4,
+          bgcolor: theme.palette.background.paper,
+          boxShadow: theme.shadows[2],
+          borderColor: theme.palette.divider,
+        }}
+      >
+        <Stack spacing={2.2}>
+          {questions.map((q, i) => (
+            <Paper
+              key={q.key}
               variant="outlined"
-            />
-          </Stack>
-        ))}
+              sx={{
+                p: { xs: 1.5, sm: 2 },
+                borderRadius: 3,
+                boxShadow: 'none',
+                bgcolor: (th) => th.palette.background.default,
+                border: (th) => `1px solid ${th.palette.divider}`,
+                transition: '0.25s ease',
+                '&:hover': {
+                  borderColor: theme.palette.primary.main,
+                  boxShadow: theme.shadows[3],
+                  transform: 'translateY(-2px)',
+                },
+                direction: isArabic ? 'rtl' : 'ltr',
+              }}
+            >
+              <Stack
+                direction="row"
+                justifyContent="space-between"
+                alignItems="center"
+                flexWrap="wrap"
+                spacing={1.5}
+              >
+                <Typography
+                  variant="subtitle1"
+                  fontWeight={700}
+                  color="text.primary"
+                  sx={{
+                    flex: 1,
+                    textAlign: isArabic ? 'right' : 'left',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {`${i + 1}. ${q.label}`}
+                </Typography>
 
-        {patient?.gender?.toLowerCase() === 'female' && (
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <ChildFriendlyIcon />
-            <Typography sx={{ flex: 1 }}>{label('Is the patient pregnant?', 'هل المريضة حامل؟')}</Typography>
-            <Chip
-              label={patient?.isPregnant ? label('Yes', 'نعم') : label('No', 'لا')}
-              color={patient?.isPregnant ? 'success' : 'default'}
-              variant="outlined"
-            />
-          </Stack>
-        )}
-      </Stack>
-    </Paper>
+                <RadioGroup
+                  row
+                  value={String(form?.[q.key] ?? false)}
+                  onChange={handleBool(q.key)}
+                  sx={{
+                    gap: 1.5,
+                    justifyContent: isArabic ? 'flex-start' : 'flex-end',
+                    flexShrink: 0,
+                  }}
+                >
+                  <FormControlLabel
+                    value="true"
+                    control={<Radio color="success" />}
+                    label={translate('Yes', 'نعم')}
+                  />
+                  <FormControlLabel
+                    value="false"
+                    control={<Radio color="error" />}
+                    label={translate('No', 'لا')}
+                  />
+                </RadioGroup>
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+
+        <Divider sx={{ mt: 3, opacity: 0.4 }} />
+      </Paper>
+    </Box>
   );
 }
