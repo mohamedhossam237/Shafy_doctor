@@ -29,6 +29,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PrintIcon from '@mui/icons-material/Print';
+import HealthInfoSection from '@/components/patients/HealthInfoSection';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
@@ -935,6 +936,8 @@ export default function PatientDetailsPage() {
                     </Stack>
                   )}
 
+                  <Divider sx={{ my: 1 }} />
+                  <HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
                   <Divider sx={{ my: 1 }} />
 
                   <Typography variant="subtitle2" fontWeight={800} color="text.primary">

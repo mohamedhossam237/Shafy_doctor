@@ -39,9 +39,6 @@ endAdornment: local ? (
 ) : null,
 }}
 />
-<Button variant="contained" onClick={onAddNew} sx={{ whiteSpace: 'nowrap' }}>
-{isArabic ? 'إضافة مريض' : 'Add Patient'}
-</Button>
 </Stack>
 );
 }
