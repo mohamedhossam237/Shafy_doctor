@@ -31,6 +31,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PrintIcon from '@mui/icons-material/Print';
 import HealthInfoSection from '@/components/patients/HealthInfoSection';
+import MedicalFileIntake from '@/components/patients/MedicalFileIntake';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
@@ -255,10 +256,11 @@ export default function PatientDetailsPage() {
   const [xLabResults, setXLabResults] = React.useState([]);
   const [editHealthOpen, setEditHealthOpen] = React.useState(false);
 
-  // notes
-  const [notesOpen, setNotesOpen] = React.useState(false);
-  const [notesDraft, setNotesDraft] = React.useState('');
-  const [savingNotes, setSavingNotes] = React.useState(false);
+const [notesOpen, setNotesOpen] = React.useState(false);
+const [notesDraft, setNotesDraft] = React.useState('');
+const [savingNotes, setSavingNotes] = React.useState(false);
+const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'financial'
+
 
   // AI
   const [aiBusy, setAiBusy] = React.useState(false);
@@ -827,6 +829,17 @@ export default function PatientDetailsPage() {
 
               {/* Clinical profile */}
               <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}`, bgcolor: (t) => alpha(t.palette.background.paper, 0.98) }}>
+                {/* Medical File Intake — Full Medical Extraction */}
+<MedicalFileIntake
+  patientId={patient?.id}
+  patient={patient}
+  isArabic={isArabic}
+  onExtract={(extractedData) => {
+    setPatient((prev) => ({ ...prev, ...extractedData }));
+    setOkMsg(label('Medical information extracted successfully.', 'تم استخراج المعلومات الطبية بنجاح.'));
+  }}
+/>
+
                 <Grid container spacing={2}>
                   <Grid item xs={12} md={4}>
                     <Labeled title={label('Marital Status','الحالة الاجتماعية')}>
@@ -978,25 +991,29 @@ export default function PatientDetailsPage() {
                 </Stack>
               </Paper>
 
-             {/* Medical Notes */}
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="h6" fontWeight={900} color="text.primary">
-            {label('Medical Notes', 'ملاحظات طبية')}
-          </Typography>
-          {canEditNotes && (
-            <Button
-              onClick={() => {
-                setNotesDraft(patient?.notes || '');
-                setNotesOpen(true);
-              }}
-              startIcon={<EditOutlinedIcon />}
-              variant="outlined"
-              size="small"
-            >
-              {patient?.notes ? label('Edit Notes', 'تعديل الملاحظات') : label('Add Notes', 'إضافة ملاحظات')}
-            </Button>
-          )}
-        </Stack>
+{/* Medical Notes */}
+<Stack direction="row" alignItems="center" justifyContent="space-between">
+  <Typography variant="h6" fontWeight={900} color="text.primary">
+    {label('Medical Notes', 'ملاحظات طبية')}
+  </Typography>
+  {canEditNotes && (
+    <Button
+      onClick={() => {
+        setNotesType('medical');
+        setNotesDraft(patient?.notes || '');
+        setNotesOpen(true);
+      }}
+      startIcon={<EditOutlinedIcon />}
+      variant="outlined"
+      size="small"
+    >
+      {patient?.notes
+        ? label('Edit Notes', 'تعديل الملاحظات')
+        : label('Add Notes', 'إضافة ملاحظات')}
+    </Button>
+  )}
+</Stack>
+
 
         <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
   <Typography variant="body1" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
@@ -1143,6 +1160,7 @@ export default function PatientDetailsPage() {
   </Typography>
   <Button
     onClick={() => {
+      setNotesType('financial');
       setNotesDraft(patient?.financialNotes || '');
       setNotesOpen(true);
     }}
@@ -1155,6 +1173,7 @@ export default function PatientDetailsPage() {
       : label('Add Notes', 'إضافة ملاحظات')}
   </Button>
 </Stack>
+
 
 <Paper
   sx={{
@@ -1181,7 +1200,6 @@ export default function PatientDetailsPage() {
   )}
 </Paper>
 
-{/* 📝 Financial Notes Dialog */}
 <Dialog
   open={notesOpen}
   onClose={() => !savingNotes && setNotesOpen(false)}
@@ -1192,12 +1210,15 @@ export default function PatientDetailsPage() {
     sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
   >
     <Typography fontWeight={900}>
-      {label('Patient Financial Notes', 'ملاحظات المريض المالية')}
+      {notesType === 'medical'
+        ? label('Medical Notes', 'ملاحظات طبية')
+        : label('Patient Financial Notes', 'ملاحظات المريض المالية')}
     </Typography>
     <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
       <CloseRoundedIcon />
     </IconButton>
   </DialogTitle>
+
   <DialogContent dividers>
     <TextField
       autoFocus
@@ -1206,7 +1227,11 @@ export default function PatientDetailsPage() {
       minRows={6}
       value={notesDraft}
       onChange={(e) => setNotesDraft(e.target.value)}
-      placeholder={label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')}
+      placeholder={
+        notesType === 'medical'
+          ? label('Type medical notes here…', 'اكتب الملاحظات الطبية هنا…')
+          : label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')
+      }
     />
     <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
       {label(
@@ -1215,6 +1240,7 @@ export default function PatientDetailsPage() {
       )}
     </Typography>
   </DialogContent>
+
   <DialogActions>
     <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
       {label('Cancel', 'إلغاء')}
@@ -1227,18 +1253,36 @@ export default function PatientDetailsPage() {
           const ref = doc(db, 'patients', patient.id);
           const updatedAt = new Date();
           const updatedBy = user?.uid || user?.email || 'unknown';
-          await updateDoc(ref, {
-            financialNotes: notesDraft,
-            financialNotesUpdatedAt: updatedAt,
-            financialNotesUpdatedBy: updatedBy,
-          });
-          setPatient((prev) => ({
-            ...prev,
-            financialNotes: notesDraft,
-            financialNotesUpdatedAt: updatedAt,
-            financialNotesUpdatedBy: updatedBy,
-          }));
-          setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات المالية بنجاح.'));
+
+          if (notesType === 'medical') {
+            await updateDoc(ref, {
+              notes: notesDraft,
+              notesUpdatedAt: updatedAt,
+              notesUpdatedBy: updatedBy,
+            });
+
+            setPatient((prev) => ({
+              ...prev,
+              notes: notesDraft,
+              notesUpdatedAt: updatedAt,
+              notesUpdatedBy: updatedBy,
+            }));
+          } else {
+            await updateDoc(ref, {
+              financialNotes: notesDraft,
+              financialNotesUpdatedAt: updatedAt,
+              financialNotesUpdatedBy: updatedBy,
+            });
+
+            setPatient((prev) => ({
+              ...prev,
+              financialNotes: notesDraft,
+              financialNotesUpdatedAt: updatedAt,
+              financialNotesUpdatedBy: updatedBy,
+            }));
+          }
+
+          setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات بنجاح.'));
           setNotesOpen(false);
         } catch (e) {
           console.error(e);
@@ -1250,10 +1294,13 @@ export default function PatientDetailsPage() {
       variant="contained"
       disabled={savingNotes}
     >
-      {savingNotes ? label('Saving…', 'جارٍ الحفظ…') : label('Save Notes', 'حفظ الملاحظات')}
+      {savingNotes
+        ? label('Saving…', 'جارٍ الحفظ…')
+        : label('Save Notes', 'حفظ الملاحظات')}
     </Button>
   </DialogActions>
 </Dialog>
+
   <EditHealthInfoDialog
   open={editHealthOpen}
   onClose={() => setEditHealthOpen(false)}
