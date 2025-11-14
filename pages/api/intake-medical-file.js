@@ -1,8 +1,7 @@
 // pages/api/intake-medical-file.js
 
-// ⛔ FIX FOR NEXT.JS (busboy must be imported using require)
-const Busboy = require("busboy"); 
-
+import formidable from "formidable";
+import fs from "fs";
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -54,7 +53,10 @@ async function fanarChat(messages) {
 function safeExtractJson(text) {
   if (!text) return null;
 
-  let cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+  let cleaned = text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 
   const match = cleaned.match(/\{[\s\S]+\}/);
   if (!match) return null;
@@ -67,47 +69,40 @@ function safeExtractJson(text) {
 }
 
 // ===================================================================
-// MULTIPART HANDLING (Busboy)
+// FORMIDABLE PARSER
 // ===================================================================
 
-function parseMultipart(req) {
+function parseForm(req) {
   return new Promise((resolve, reject) => {
-    try {
-      const busboy = Busboy({ headers: req.headers });
+    const form = formidable({
+      multiples: false,
+      maxFileSize: 50 * 1024 * 1024, // 50MB
+      keepExtensions: true,
+    });
 
-      let patientId = null;
-      let filename = "";
-      let mimeType = "";
-      let fileBuffer = Buffer.alloc(0);
+    form.parse(req, (err, fields, files) => {
+      if (err) return reject(err);
 
-      busboy.on("field", (name, value) => {
-        if (name === "patientId") patientId = value;
+      const file = files.file;
+      if (!file) return reject(new Error("Missing file"));
+
+      const fileBuffer = fs.readFileSync(file.filepath);
+
+      resolve({
+        patientId: fields.patientId,
+        filename: file.originalFilename,
+        mimeType: file.mimetype,
+        fileBuffer,
       });
-
-      busboy.on("file", (name, file, info) => {
-        if (name === "file") {
-          filename = info.filename;
-          mimeType = info.mimeType || info.mime || "";
-          file.on("data", (d) => (fileBuffer = Buffer.concat([fileBuffer, d])));
-        } else file.resume();
-      });
-
-      busboy.on("finish", () => {
-        resolve({ patientId, fileBuffer, filename, mimeType });
-      });
-
-      req.pipe(busboy);
-    } catch (err) {
-      reject(err);
-    }
+    });
   });
 }
 
 // ===================================================================
-// FILE → TEXT EXTRACTOR
+// FILE → TEXT
 // ===================================================================
 
-async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
+async function extractText(fileBuffer, filename, mimeType) {
   if (!fileBuffer?.length) return "";
 
   const name = (filename || "").toLowerCase();
@@ -135,7 +130,7 @@ async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
 }
 
 // ===================================================================
-// FIREBASE TOKEN VERIFY
+// FIREBASE VERIFY
 // ===================================================================
 
 const FIREBASE_PROJECT_ID =
@@ -227,13 +222,14 @@ async function updateFirestore(token, patientId, extracted) {
 }
 
 // ===================================================================
-// FANAR EXTRACTION
+// CHUNKING + MERGING
 // ===================================================================
 
 function splitChunks(text) {
   const chunks = [];
-  for (let i = 0; i < text.length; i += MAX_CHARS_PER_CHUNK)
+  for (let i = 0; i < text.length; i += MAX_CHARS_PER_CHUNK) {
     chunks.push(text.slice(i, i + MAX_CHARS_PER_CHUNK));
+  }
   return chunks;
 }
 
@@ -262,8 +258,8 @@ function makeEmpty() {
 function merge(parts) {
   const out = makeEmpty();
 
-  const mergeArr = (target, source) => {
-    (source || []).forEach((v) => {
+  const mergeArr = (target, src) => {
+    (src || []).forEach((v) => {
       const s = clean(v);
       if (s && !target.includes(s)) target.push(s);
     });
@@ -282,20 +278,25 @@ function merge(parts) {
       }
     });
 
-    if (Array.isArray(p.labResults)) out.labResults.push(...p.labResults);
+    if (Array.isArray(p.labResults)) {
+      out.labResults.push(...p.labResults);
+    }
 
     if (!out.age && p.age) out.age = clean(p.age);
     if (!out.gender && p.gender) out.gender = clean(p.gender);
     if (!out.maritalStatus && p.maritalStatus)
       out.maritalStatus = clean(p.maritalStatus);
-    if (!out.bloodType && p.bloodType)
-      out.bloodType = clean(p.bloodType);
+    if (!out.bloodType && p.bloodType) out.bloodType = clean(p.bloodType);
   }
 
   return out;
 }
 
-function buildNotesFromExtract(extracted) {
+// ===================================================================
+// BUILT NOTES
+// ===================================================================
+
+function buildNotes(extracted) {
   const parts = [];
 
   const add = (label, arr) => {
@@ -311,20 +312,24 @@ function buildNotesFromExtract(extracted) {
   if (extracted.findings) parts.push(`Findings: ${extracted.findings}`);
   if (extracted.procedures) parts.push(`Procedures: ${extracted.procedures}`);
 
-  if (Array.isArray(extracted.labResults) && extracted.labResults.length) {
-    parts.push("Lab Results:");
+  if (Array.isArray(extracted.labResults)) {
     extracted.labResults.forEach((lr) => {
       parts.push(
-        `- Test: ${lr.test}, Value: ${lr.value}, Unit: ${lr.unit}, Flag: ${lr.flag}`
+        `Lab -> ${lr.test}: ${lr.value} ${lr.unit} (${lr.flag})`
       );
     });
   }
 
-  if (clean(extracted.notes))
+  if (clean(extracted.notes)) {
     parts.push(`Other notes: ${clean(extracted.notes)}`);
+  }
 
   return parts.join("\n");
 }
+
+// ===================================================================
+// FANAR EXTRACTION
+// ===================================================================
 
 async function extractWithFanar(text) {
   const chunks = splitChunks(text);
@@ -332,8 +337,8 @@ async function extractWithFanar(text) {
 
   for (let i = 0; i < chunks.length; i++) {
     const system = `
-Extract ONLY medical information. 
-Return EXACT valid JSON structure without extra text.
+Extract ONLY medical information.
+Return EXACT valid JSON without extra text.
 `.trim();
 
     let attempt = 0;
@@ -349,10 +354,9 @@ Return EXACT valid JSON structure without extra text.
       ]);
 
       raw = resp.data?.choices?.[0]?.message?.content || "";
-
       json = safeExtractJson(raw);
 
-      if (!json) console.warn(`⚠️ INVALID JSON attempt ${attempt}:`, raw);
+      if (!json) console.warn("⚠️ FANAR INVALID JSON", raw);
     }
 
     if (!json) json = makeEmpty();
@@ -372,55 +376,33 @@ export default async function handler(req, res) {
     if (req.method !== "POST")
       return res.status(405).json({ error: "Method Not Allowed" });
 
-    // Verify token
     const token = req.headers.authorization?.replace("Bearer ", "").trim();
     if (!token) return res.status(401).json({ error: "Missing Token" });
 
     await verifyToken(token);
 
-    // Parse multipart
-    const { patientId, fileBuffer, filename, mimeType } =
-      await parseMultipart(req);
+    // 🎉 parse using formidable
+    const { patientId, fileBuffer, filename, mimeType } = await parseForm(req);
 
     if (!patientId)
       return res.status(400).json({ error: "Missing patientId" });
 
-    if (!fileBuffer?.length)
-      return res.status(400).json({ error: "Missing file" });
-
-    // Extract text
-    const raw = await extractTextFromBuffer(fileBuffer, filename, mimeType);
+    const raw = await extractText(fileBuffer, filename, mimeType);
     const cleanText = raw.replace(/\s+/g, " ").trim();
 
-    if (!cleanText) {
-      const emptyExtract = makeEmpty();
-      emptyExtract.notes = "";
-      await updateFirestore(token, patientId, emptyExtract);
+    let extracted = makeEmpty();
 
-      return res.status(200).json({
-        ok: true,
-        extracted: emptyExtract,
-        warning: "No text extracted",
-      });
-    }
-
-    // AI extraction
-    let extracted;
-    try {
+    if (cleanText) {
       extracted = await extractWithFanar(cleanText);
-    } catch (err) {
-      console.error("AI extraction failed:", err);
-      extracted = makeEmpty();
     }
 
-    extracted.notes = buildNotesFromExtract(extracted);
+    extracted.notes = buildNotes(extracted);
 
-    // Update Firestore
     await updateFirestore(token, patientId, extracted);
 
     res.status(200).json({ ok: true, extracted });
-  } catch (err) {
-    console.error("SERVER ERROR:", err);
-    res.status(500).json({ ok: false, error: err.message });
+  } catch (e) {
+    console.error("SERVER ERROR:", e);
+    res.status(500).json({ ok: false, error: e.message });
   }
-}
+};
