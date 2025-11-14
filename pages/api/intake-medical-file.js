@@ -1,6 +1,8 @@
 // pages/api/intake-medical-file.js
 
-const Busboy = require("busboy");
+// ⛔ FIX FOR NEXT.JS (busboy must be imported using require)
+const Busboy = require("busboy"); 
+
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
 import { createRemoteJWKSet, jwtVerify } from "jose";
@@ -46,19 +48,14 @@ async function fanarChat(messages) {
 }
 
 // ===================================================================
-// SAFE JSON PARSER (Improved)
+// SAFE JSON PARSER
 // ===================================================================
 
 function safeExtractJson(text) {
   if (!text) return null;
 
-  // cleanup
-  let cleaned = text
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
+  let cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-  // find first {...}
   const match = cleaned.match(/\{[\s\S]+\}/);
   if (!match) return null;
 
@@ -70,13 +67,14 @@ function safeExtractJson(text) {
 }
 
 // ===================================================================
-// MULTIPART HANDLING
+// MULTIPART HANDLING (Busboy)
 // ===================================================================
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
     try {
       const busboy = Busboy({ headers: req.headers });
+
       let patientId = null;
       let filename = "";
       let mimeType = "";
@@ -90,12 +88,8 @@ function parseMultipart(req) {
         if (name === "file") {
           filename = info.filename;
           mimeType = info.mimeType || info.mime || "";
-          file.on("data", (d) => {
-            fileBuffer = Buffer.concat([fileBuffer, d]);
-          });
-        } else {
-          file.resume();
-        }
+          file.on("data", (d) => (fileBuffer = Buffer.concat([fileBuffer, d])));
+        } else file.resume();
       });
 
       busboy.on("finish", () => {
@@ -110,7 +104,7 @@ function parseMultipart(req) {
 }
 
 // ===================================================================
-// FILE → TEXT
+// FILE → TEXT EXTRACTOR
 // ===================================================================
 
 async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
@@ -163,7 +157,7 @@ async function verifyToken(idToken) {
 }
 
 // ===================================================================
-// FIRESTORE PATCH
+// FIRESTORE UPDATE
 // ===================================================================
 
 async function updateFirestore(token, patientId, extracted) {
@@ -215,9 +209,7 @@ async function updateFirestore(token, patientId, extracted) {
           })),
         },
       },
-      medicalFileUpdatedAt: {
-        timestampValue: new Date().toISOString(),
-      },
+      medicalFileUpdatedAt: { timestampValue: new Date().toISOString() },
       maritalStatus: { stringValue: extracted.maritalStatus || "" },
       bloodType: { stringValue: extracted.bloodType || "" },
       age: { integerValue: extracted.age || "0" },
@@ -231,21 +223,17 @@ async function updateFirestore(token, patientId, extracted) {
     body: JSON.stringify(body),
   });
 
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(txt);
-  }
+  if (!r.ok) throw new Error(await r.text());
 }
 
 // ===================================================================
-// CHUNKING + MERGING
+// FANAR EXTRACTION
 // ===================================================================
 
 function splitChunks(text) {
   const chunks = [];
-  for (let i = 0; i < text.length; i += MAX_CHARS_PER_CHUNK) {
+  for (let i = 0; i < text.length; i += MAX_CHARS_PER_CHUNK)
     chunks.push(text.slice(i, i + MAX_CHARS_PER_CHUNK));
-  }
   return chunks;
 }
 
@@ -283,6 +271,7 @@ function merge(parts) {
 
   for (const p of parts) {
     if (!p) continue;
+
     mergeArr(out.allergies, p.allergies);
     mergeArr(out.conditions, p.conditions);
     mergeArr(out.medications, p.medications);
@@ -293,23 +282,18 @@ function merge(parts) {
       }
     });
 
-    if (Array.isArray(p.labResults)) {
-      out.labResults.push(...p.labResults);
-    }
+    if (Array.isArray(p.labResults)) out.labResults.push(...p.labResults);
 
     if (!out.age && p.age) out.age = clean(p.age);
     if (!out.gender && p.gender) out.gender = clean(p.gender);
     if (!out.maritalStatus && p.maritalStatus)
       out.maritalStatus = clean(p.maritalStatus);
-    if (!out.bloodType && p.bloodType) out.bloodType = clean(p.bloodType);
+    if (!out.bloodType && p.bloodType)
+      out.bloodType = clean(p.bloodType);
   }
 
   return out;
 }
-
-// ===================================================================
-// BUILD NOTES
-// ===================================================================
 
 function buildNotesFromExtract(extracted) {
   const parts = [];
@@ -336,16 +320,11 @@ function buildNotesFromExtract(extracted) {
     });
   }
 
-  if (clean(extracted.notes)) {
+  if (clean(extracted.notes))
     parts.push(`Other notes: ${clean(extracted.notes)}`);
-  }
 
   return parts.join("\n");
 }
-
-// ===================================================================
-// FANAR EXTRACTION (FINAL FIXED VERSION)
-// ===================================================================
 
 async function extractWithFanar(text) {
   const chunks = splitChunks(text);
@@ -373,15 +352,10 @@ Return EXACT valid JSON structure without extra text.
 
       json = safeExtractJson(raw);
 
-      if (!json) {
-        console.warn(`⚠️ INVALID JSON (attempt ${attempt}):`, raw);
-      }
+      if (!json) console.warn(`⚠️ INVALID JSON attempt ${attempt}:`, raw);
     }
 
-    if (!json) {
-      console.error("❌ Fanar returned INVALID JSON after 3 attempts.");
-      json = makeEmpty();
-    }
+    if (!json) json = makeEmpty();
 
     results.push(json);
   }
@@ -390,7 +364,7 @@ Return EXACT valid JSON structure without extra text.
 }
 
 // ===================================================================
-// MAIN ROUTE
+// MAIN HANDLER
 // ===================================================================
 
 export default async function handler(req, res) {
@@ -398,18 +372,23 @@ export default async function handler(req, res) {
     if (req.method !== "POST")
       return res.status(405).json({ error: "Method Not Allowed" });
 
+    // Verify token
     const token = req.headers.authorization?.replace("Bearer ", "").trim();
     if (!token) return res.status(401).json({ error: "Missing Token" });
 
     await verifyToken(token);
 
+    // Parse multipart
     const { patientId, fileBuffer, filename, mimeType } =
       await parseMultipart(req);
 
-    if (!patientId) return res.status(400).json({ error: "Missing patientId" });
+    if (!patientId)
+      return res.status(400).json({ error: "Missing patientId" });
+
     if (!fileBuffer?.length)
       return res.status(400).json({ error: "Missing file" });
 
+    // Extract text
     const raw = await extractTextFromBuffer(fileBuffer, filename, mimeType);
     const cleanText = raw.replace(/\s+/g, " ").trim();
 
@@ -417,6 +396,7 @@ export default async function handler(req, res) {
       const emptyExtract = makeEmpty();
       emptyExtract.notes = "";
       await updateFirestore(token, patientId, emptyExtract);
+
       return res.status(200).json({
         ok: true,
         extracted: emptyExtract,
@@ -424,22 +404,23 @@ export default async function handler(req, res) {
       });
     }
 
-    let extracted = makeEmpty();
-
+    // AI extraction
+    let extracted;
     try {
       extracted = await extractWithFanar(cleanText);
-    } catch (e) {
-      console.error("❌ AI extraction failed:", e);
+    } catch (err) {
+      console.error("AI extraction failed:", err);
       extracted = makeEmpty();
     }
 
     extracted.notes = buildNotesFromExtract(extracted);
 
+    // Update Firestore
     await updateFirestore(token, patientId, extracted);
 
     res.status(200).json({ ok: true, extracted });
-  } catch (e) {
-    console.error("SERVER ERROR:", e);
-    res.status(500).json({ ok: false, error: e.message });
+  } catch (err) {
+    console.error("SERVER ERROR:", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 }
