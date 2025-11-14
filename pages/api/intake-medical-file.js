@@ -1,17 +1,11 @@
 // pages/api/intake-medical-file.js
+export const config = {
+  runtime: "edge",
+};
 
-import formidable from "formidable";
-import fs from "fs";
-import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
-import { createRemoteJWKSet, jwtVerify } from "jose";
-
-export const config = { api: { bodyParser: false } };
-
-// ===================================================================
-// FANAR CONFIG
-// ===================================================================
-
+/* ============================================================
+   FANAR CONFIG
+============================================================ */
 const FANAR_BASE = "https://api.fanar.qa/v1";
 const FANAR_MODEL = "Fanar";
 const MAX_CHARS_PER_CHUNK = 4000;
@@ -42,14 +36,16 @@ async function fanarChat(messages) {
     }),
   });
 
-  const json = await resp.json().catch(() => null);
-  return { ok: resp.ok, status: resp.status, data: json };
+  return {
+    ok: resp.ok,
+    status: resp.status,
+    data: await resp.json().catch(() => null),
+  };
 }
 
-// ===================================================================
-// SAFE JSON PARSER
-// ===================================================================
-
+/* ============================================================
+   JSON CLEANER
+============================================================ */
 function safeExtractJson(text) {
   if (!text) return null;
 
@@ -68,163 +64,17 @@ function safeExtractJson(text) {
   }
 }
 
-// ===================================================================
-// FORMIDABLE PARSER
-// ===================================================================
-
-function parseForm(req) {
-  return new Promise((resolve, reject) => {
-    const form = formidable({
-      multiples: false,
-      maxFileSize: 50 * 1024 * 1024, // 50MB
-      keepExtensions: true,
-    });
-
-    form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
-
-      const file = files.file;
-      if (!file) return reject(new Error("Missing file"));
-
-      const fileBuffer = fs.readFileSync(file.filepath);
-
-      resolve({
-        patientId: fields.patientId,
-        filename: file.originalFilename,
-        mimeType: file.mimetype,
-        fileBuffer,
-      });
-    });
-  });
+/* ============================================================
+   FILE → TEXT (Edge Runtime)
+============================================================ */
+async function extractText(buf, filename, mime) {
+  const decoder = new TextDecoder("utf-8");
+  return decoder.decode(buf);
 }
 
-// ===================================================================
-// FILE → TEXT
-// ===================================================================
-
-async function extractText(fileBuffer, filename, mimeType) {
-  if (!fileBuffer?.length) return "";
-
-  const name = (filename || "").toLowerCase();
-  const mime = (mimeType || "").toLowerCase();
-
-  if (name.endsWith(".docx")) {
-    try {
-      const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
-      return value || "";
-    } catch {
-      return fileBuffer.toString("utf8");
-    }
-  }
-
-  if (name.endsWith(".pdf") || mime.includes("pdf")) {
-    try {
-      const data = await pdfParse(fileBuffer);
-      return data.text || "";
-    } catch {
-      return fileBuffer.toString("utf8");
-    }
-  }
-
-  return fileBuffer.toString("utf8");
-}
-
-// ===================================================================
-// FIREBASE VERIFY
-// ===================================================================
-
-const FIREBASE_PROJECT_ID =
-  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-  process.env.FIREBASE_PROJECT_ID;
-
-const JWKS = createRemoteJWKSet(
-  new URL(
-    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
-  )
-);
-
-async function verifyToken(idToken) {
-  const { payload } = await jwtVerify(idToken, JWKS, {
-    issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
-    audience: FIREBASE_PROJECT_ID,
-  });
-  return payload.user_id;
-}
-
-// ===================================================================
-// FIRESTORE UPDATE
-// ===================================================================
-
-async function updateFirestore(token, patientId, extracted) {
-  const url =
-    `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/patients/${patientId}?` +
-    [
-      "updateMask.fieldPaths=allergies",
-      "updateMask.fieldPaths=conditions",
-      "updateMask.fieldPaths=medications",
-      "updateMask.fieldPaths=diagnosis",
-      "updateMask.fieldPaths=findings",
-      "updateMask.fieldPaths=procedures",
-      "updateMask.fieldPaths=notes",
-      "updateMask.fieldPaths=labResultsFromFile",
-      "updateMask.fieldPaths=medicalFileUpdatedAt",
-      "updateMask.fieldPaths=maritalStatus",
-      "updateMask.fieldPaths=bloodType",
-      "updateMask.fieldPaths=age",
-      "updateMask.fieldPaths=gender",
-    ].join("&");
-
-  const arr = (list = []) => ({
-    arrayValue: {
-      values: (list || []).map((x) => ({ stringValue: x })),
-    },
-  });
-
-  const body = {
-    fields: {
-      allergies: arr(extracted.allergies),
-      conditions: arr(extracted.conditions),
-      medications: arr(extracted.medications),
-      diagnosis: { stringValue: extracted.diagnosis || "" },
-      findings: { stringValue: extracted.findings || "" },
-      procedures: { stringValue: extracted.procedures || "" },
-      notes: { stringValue: extracted.notes || "" },
-      labResultsFromFile: {
-        arrayValue: {
-          values: (extracted.labResults || []).map((x) => ({
-            mapValue: {
-              fields: {
-                test: { stringValue: x.test || "" },
-                value: { stringValue: x.value || "" },
-                unit: { stringValue: x.unit || "" },
-                referenceRange: { stringValue: x.referenceRange || "" },
-                flag: { stringValue: x.flag || "" },
-              },
-            },
-          })),
-        },
-      },
-      medicalFileUpdatedAt: { timestampValue: new Date().toISOString() },
-      maritalStatus: { stringValue: extracted.maritalStatus || "" },
-      bloodType: { stringValue: extracted.bloodType || "" },
-      age: { integerValue: extracted.age || "0" },
-      gender: { stringValue: extracted.gender || "" },
-    },
-  };
-
-  const r = await fetch(url, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!r.ok) throw new Error(await r.text());
-}
-
-// ===================================================================
-// CHUNKING + MERGING
-// ===================================================================
-
+/* ============================================================
+   CHUNKING + MERGING
+============================================================ */
 function splitChunks(text) {
   const chunks = [];
   for (let i = 0; i < text.length; i += MAX_CHARS_PER_CHUNK) {
@@ -233,9 +83,9 @@ function splitChunks(text) {
   return chunks;
 }
 
-function clean(value) {
-  if (!value) return "";
-  return String(value).replace(/\s+/g, " ").trim();
+function clean(v) {
+  if (!v) return "";
+  return String(v).replace(/\s+/g, " ").trim();
 }
 
 function makeEmpty() {
@@ -274,7 +124,9 @@ function merge(parts) {
 
     ["diagnosis", "findings", "procedures", "notes"].forEach((key) => {
       if (clean(p[key])) {
-        out[key] = out[key] ? out[key] + "\n" + clean(p[key]) : clean(p[key]);
+        out[key] = out[key]
+          ? `${out[key]}\n${clean(p[key])}`
+          : clean(p[key]);
       }
     });
 
@@ -284,19 +136,17 @@ function merge(parts) {
 
     if (!out.age && p.age) out.age = clean(p.age);
     if (!out.gender && p.gender) out.gender = clean(p.gender);
-    if (!out.maritalStatus && p.maritalStatus)
-      out.maritalStatus = clean(p.maritalStatus);
+    if (!out.maritalStatus && p.maritalStatus) out.maritalStatus = clean(p.maritalStatus);
     if (!out.bloodType && p.bloodType) out.bloodType = clean(p.bloodType);
   }
 
   return out;
 }
 
-// ===================================================================
-// BUILT NOTES
-// ===================================================================
-
-function buildNotes(extracted) {
+/* ============================================================
+   NOTES BUILDER
+============================================================ */
+function buildNotes(e) {
   const parts = [];
 
   const add = (label, arr) => {
@@ -304,105 +154,156 @@ function buildNotes(extracted) {
     if (list.length) parts.push(`${label}: ${list.join(", ")}`);
   };
 
-  add("Allergies", extracted.allergies);
-  add("Conditions", extracted.conditions);
-  add("Medications", extracted.medications);
+  add("Allergies", e.allergies);
+  add("Conditions", e.conditions);
+  add("Medications", e.medications);
 
-  if (extracted.diagnosis) parts.push(`Diagnosis: ${extracted.diagnosis}`);
-  if (extracted.findings) parts.push(`Findings: ${extracted.findings}`);
-  if (extracted.procedures) parts.push(`Procedures: ${extracted.procedures}`);
+  if (e.diagnosis) parts.push(`Diagnosis: ${e.diagnosis}`);
+  if (e.findings) parts.push(`Findings: ${e.findings}`);
+  if (e.procedures) parts.push(`Procedures: ${e.procedures}`);
 
-  if (Array.isArray(extracted.labResults)) {
-    extracted.labResults.forEach((lr) => {
-      parts.push(
-        `Lab -> ${lr.test}: ${lr.value} ${lr.unit} (${lr.flag})`
-      );
-    });
-  }
-
-  if (clean(extracted.notes)) {
-    parts.push(`Other notes: ${clean(extracted.notes)}`);
-  }
+  if (clean(e.notes)) parts.push(`Other notes: ${clean(e.notes)}`);
 
   return parts.join("\n");
 }
 
-// ===================================================================
-// FANAR EXTRACTION
-// ===================================================================
+/* ============================================================
+   FIREBASE TOKEN VERIFY — Edge Runtime
+============================================================ */
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
+const FIREBASE_PROJECT_ID =
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
+
+const JWKS = createRemoteJWKSet(
+  new URL(
+    "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+  )
+);
+
+async function verifyToken(idToken) {
+  const { payload } = await jwtVerify(idToken, JWKS, {
+    issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
+    audience: FIREBASE_PROJECT_ID,
+  });
+
+  return payload.user_id;
+}
+
+/* ============================================================
+   FIRESTORE UPDATE (REST API)
+============================================================ */
+async function updateFirestore(token, patientId, extracted) {
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/patients/${patientId}?` +
+    [
+      "updateMask.fieldPaths=allergies",
+      "updateMask.fieldPaths=conditions",
+      "updateMask.fieldPaths=medications",
+      "updateMask.fieldPaths=diagnosis",
+      "updateMask.fieldPaths=findings",
+      "updateMask.fieldPaths=procedures",
+      "updateMask.fieldPaths=notes",
+    ].join("&");
+
+  const arr = (lst = []) => ({
+    arrayValue: { values: lst.map((v) => ({ stringValue: v })) },
+  });
+
+  const body = {
+    fields: {
+      allergies: arr(extracted.allergies),
+      conditions: arr(extracted.conditions),
+      medications: arr(extracted.medications),
+      diagnosis: { stringValue: extracted.diagnosis },
+      findings: { stringValue: extracted.findings },
+      procedures: { stringValue: extracted.procedures },
+      notes: { stringValue: extracted.notes },
+    },
+  };
+
+  await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+/* ============================================================
+   FANAR EXTRACTION
+============================================================ */
 async function extractWithFanar(text) {
   const chunks = splitChunks(text);
   const results = [];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const system = `
-Extract ONLY medical information.
-Return EXACT valid JSON without extra text.
-`.trim();
-
-    let attempt = 0;
+  for (const chunk of chunks) {
+    let attempts = 0;
     let json = null;
     let raw = "";
 
-    while (attempt < 3 && !json) {
-      attempt++;
+    while (!json && attempts < 3) {
+      attempts++;
 
       const resp = await fanarChat([
-        { role: "system", content: system },
-        { role: "user", content: chunks[i] },
+        { role: "system", content: "Return ONLY valid JSON" },
+        { role: "user", content: chunk },
       ]);
 
       raw = resp.data?.choices?.[0]?.message?.content || "";
       json = safeExtractJson(raw);
-
-      if (!json) console.warn("⚠️ FANAR INVALID JSON", raw);
     }
 
     if (!json) json = makeEmpty();
-
     results.push(json);
   }
 
   return merge(results);
 }
 
-// ===================================================================
-// MAIN HANDLER
-// ===================================================================
-
-export default async function handler(req, res) {
+/* ============================================================
+   MAIN HANDLER — EDGE RUNTIME
+============================================================ */
+export default async function handler(req) {
   try {
-    if (req.method !== "POST")
-      return res.status(405).json({ error: "Method Not Allowed" });
+    if (req.method !== "POST") {
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405 });
+    }
 
-    const token = req.headers.authorization?.replace("Bearer ", "").trim();
-    if (!token) return res.status(401).json({ error: "Missing Token" });
+    const token = req.headers.get("authorization")?.replace("Bearer ", "").trim();
+    if (!token)
+      return new Response(JSON.stringify({ error: "Missing Token" }), { status: 401 });
 
     await verifyToken(token);
 
-    // 🎉 parse using formidable
-    const { patientId, fileBuffer, filename, mimeType } = await parseForm(req);
+    const form = await req.formData();
+    const file = form.get("file");
+    const patientId = form.get("patientId");
 
     if (!patientId)
-      return res.status(400).json({ error: "Missing patientId" });
+      return new Response(JSON.stringify({ error: "Missing patientId" }), { status: 400 });
 
-    const raw = await extractText(fileBuffer, filename, mimeType);
-    const cleanText = raw.replace(/\s+/g, " ").trim();
+    if (!file)
+      return new Response(JSON.stringify({ error: "Missing file" }), { status: 400 });
+
+    const arrayBuffer = await file.arrayBuffer();
+    const rawText = await extractText(arrayBuffer, file.name, file.type);
 
     let extracted = makeEmpty();
 
-    if (cleanText) {
-      extracted = await extractWithFanar(cleanText);
+    if (rawText.trim().length > 5) {
+      extracted = await extractWithFanar(rawText);
     }
 
     extracted.notes = buildNotes(extracted);
 
     await updateFirestore(token, patientId, extracted);
 
-    res.status(200).json({ ok: true, extracted });
-  } catch (e) {
-    console.error("SERVER ERROR:", e);
-    res.status(500).json({ ok: false, error: e.message });
+    return new Response(JSON.stringify({ ok: true, extracted }), { status: 200 });
+  } catch (err) {
+    console.error("ERROR:", err);
+    return new Response(JSON.stringify({ ok: false, error: err.message }), { status: 500 });
   }
-};
+}
