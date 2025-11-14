@@ -21,18 +21,10 @@ import VitalsSection from './sections/VitalsSection';
 import MedicationsSection from './sections/MedicationsSection';
 import TestsSection from './sections/TestsSection';
 
-/**
- * AddReportDialog — Arabic is default
- * fetches patients linked to doctor (same logic as PatientsIndex)
- */
 export default function AddReportDialog({ open, onClose, isArabic = true }) {
+  const { user } = useAuth(); // IMPORTANT
 
-  // ✅ IMPORTANT: Use "user" (NOT currentUser)
-  const { user } = useAuth();
-
-  // 🌐 Translation helper
   const t = React.useCallback((en, ar) => (isArabic ? ar : en), [isArabic]);
-
   const direction = isArabic ? 'rtl' : 'ltr';
   const align = isArabic ? 'right' : 'left';
 
@@ -65,12 +57,10 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
     severity: 'info',
   });
 
-  // ------------------- LISTS -------------------
+  // ------------------- MEDICATIONS LIST -------------------
   const [medicationsList, setMedicationsList] = React.useState([
     { name: '', dose: '', frequency: '', duration: '', notes: '' },
   ]);
-
-  const [testsList, setTestsList] = React.useState([{ name: '', notes: '' }]);
 
   const addMedication = () =>
     setMedicationsList((prev) => [
@@ -86,12 +76,42 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
       prev.map((m, idx) => (idx === i ? { ...m, [key]: val } : m))
     );
 
-  const addTest = () => setTestsList((prev) => [...prev, { name: '', notes: '' }]);
-  const removeTest = (i) => setTestsList((prev) => prev.filter((_, idx) => idx !== i));
+  // ------------------- TESTS LIST -------------------
+  const [testsList, setTestsList] = React.useState([{ name: '', notes: '' }]);
+
+  const addTest = () =>
+    setTestsList((prev) => [...prev, { name: '', notes: '' }]);
+
+  const removeTest = (i) =>
+    setTestsList((prev) => prev.filter((_, idx) => idx !== i));
+
   const updateTest = (i, key, val) =>
     setTestsList((prev) =>
       prev.map((m, idx) => (idx === i ? { ...m, [key]: val } : m))
     );
+
+  // ------------------- LOAD MEDICINE LIST (JSON) -------------------
+  const [drugOptions, setDrugOptions] = React.useState([]);
+  const [drugLoading, setDrugLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const loadMedicines = async () => {
+      try {
+        const res = await fetch('/data/medicines.min.json');
+        const json = await res.json();
+        setDrugOptions(json);
+      } catch (err) {
+        console.error('Failed loading medicines:', err);
+      } finally {
+        setDrugLoading(false);
+      }
+    };
+
+    loadMedicines();
+  }, []);
+
+  // Dummy debounced search placeholder
+  const debouncedSetQuery = React.useCallback(() => {}, []);
 
   // ------------------- SUBMIT -------------------
   const handleSubmit = async () => {
@@ -130,17 +150,13 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
         maxWidth="md"
         fullWidth
         PaperProps={{
-          sx: {
-            direction,
-            textAlign: align,
-          },
+          sx: { direction, textAlign: align },
         }}
       >
         <DialogTitle>{t('Add Medical Report', 'إضافة تقرير طبي')}</DialogTitle>
 
         <DialogContent dividers sx={{ direction }}>
           <Stack spacing={2.5} sx={{ my: 1 }}>
-            
             {/* Attachments */}
             <AttachmentSection
               {...{
@@ -156,7 +172,7 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
               }}
             />
 
-            {/* Patient — uses FULL logic from PatientsIndex */}
+            {/* Patient */}
             <PatientSection
               {...{
                 t,
@@ -170,10 +186,8 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
               }}
             />
 
-            {/* Meta */}
             <MetaSection {...{ t, form, setForm, errors, imgbbURL }} />
 
-            {/* Clinical */}
             <ClinicalSection
               {...{
                 t,
@@ -186,10 +200,9 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
               }}
             />
 
-            {/* Vitals */}
             <VitalsSection {...{ t, form, setForm }} />
 
-            {/* Medications */}
+            {/* Medications — WITH JSON DROPDOWN */}
             <MedicationsSection
               {...{
                 t,
@@ -197,6 +210,9 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
                 updateMedication,
                 addMedication,
                 removeMedication,
+                drugOptions,
+                drugLoading,
+                debouncedSetQuery,
                 isArabic,
               }}
             />
@@ -212,7 +228,6 @@ export default function AddReportDialog({ open, onClose, isArabic = true }) {
                 isArabic,
               }}
             />
-
           </Stack>
         </DialogContent>
 

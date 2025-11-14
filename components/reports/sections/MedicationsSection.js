@@ -1,20 +1,26 @@
 'use client';
 import * as React from 'react';
 import {
-  Box,
   Grid,
   Paper,
-  Stack,
+  Typography,
   TextField,
+  Autocomplete,
+  CircularProgress,
   IconButton,
   Button,
-  CircularProgress,
-  Autocomplete,
+  Dialog,
+  DialogTitle,
+  DialogActions,
+  DialogContent,
+  Stack,
 } from '@mui/material';
 import MedicationIcon from '@mui/icons-material/Medication';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import { alpha } from '@mui/material/styles';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import SectionWrapper from './SectionWrapper';
 
 export default function MedicationsSection({
@@ -23,223 +29,250 @@ export default function MedicationsSection({
   updateMedication,
   addMedication,
   removeMedication,
+  drugOptions,
+  drugLoading,
+  debouncedSetQuery,
   isArabic,
 }) {
-  const [drugOptions, setDrugOptions] = React.useState([]);
-  const [drugLoading, setDrugLoading] = React.useState(true);
+  const [openAddDrug, setOpenAddDrug] = React.useState(false);
+  const [newDrug, setNewDrug] = React.useState({
+    displayName: '',
+    genericName: '',
+    brandName: '',
+    strength: '',
+    form: '',
+    route: '',
+  });
 
-  // Load medicines list
-  React.useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch('/data/medicines.min.json');
-        const data = await res.json();
-        setDrugOptions(data || []);
-      } catch (err) {
-        console.error('Error loading drug list', err);
-      } finally {
-        setDrugLoading(false);
-      }
-    };
-    load();
-  }, []);
+  const handleSaveNewDrug = async () => {
+    if (!newDrug.displayName.trim()) return;
 
-  // Filter
+    await addDoc(collection(db, 'medicines_custom'), {
+      ...newDrug,
+      createdAt: serverTimestamp(),
+    });
+
+    setNewDrug({
+      displayName: '',
+      genericName: '',
+      brandName: '',
+      strength: '',
+      form: '',
+      route: '',
+    });
+
+    setOpenAddDrug(false);
+  };
+
+  // Filter list
   const filterDrugs = React.useCallback((q = '', list = []) => {
-    const text = q.toLowerCase().trim();
-    if (!text) return list.slice(0, 200);
+    const n = q.toLowerCase().trim();
+    if (!n) return list.slice(0, 100);
 
     return list
       .filter(
         (d) =>
-          d.displayName?.toLowerCase().includes(text) ||
-          d.genericName?.toLowerCase().includes(text) ||
-          d.brandName?.toLowerCase().includes(text)
+          d.displayName?.toLowerCase().includes(n) ||
+          d.genericName?.toLowerCase().includes(n) ||
+          d.brandName?.toLowerCase().includes(n)
       )
-      .slice(0, 200);
+      .slice(0, 100);
   }, []);
-
-  // Label builder
-  const getDrugLabel = (opt) => {
-    if (typeof opt === 'string') return opt;
-
-    const main = opt.displayName || opt.brandName || opt.genericName || '';
-    const extra = [opt.strength, opt.form, opt.route].filter(Boolean).join(' · ');
-
-    return extra ? `${main} — ${extra}` : main;
-  };
-
-  const doseOptions = ['250 mg', '500 mg', '1 g', '2 g', '5 ml', '10 ml', '1 tablet', '2 tablets'];
-  const freqOptions = [
-    t('Once daily', 'مرة يوميًا'),
-    t('Twice daily', 'مرتين يوميًا'),
-    t('Every 8 hours', 'كل 8 ساعات'),
-    t('As needed', 'عند اللزوم'),
-  ];
-  const durationOptions = [
-    t('3 days', '3 أيام'),
-    t('5 days', '5 أيام'),
-    t('7 days', '7 أيام'),
-    t('2 weeks', 'أسبوعين'),
-  ];
 
   return (
     <SectionWrapper
       icon={<MedicationIcon fontSize="small" />}
-      title={t('Medications / Prescriptions', 'الأدوية / الوصفات')}
+      title={t(
+        'Medications / Prescriptions (optional)',
+        'الأدوية / الوصفات'
+      )}
     >
       <Stack spacing={1.5}>
-        {medicationsList.map((m, idx) => {
-          const filteredList = filterDrugs(m.name, drugOptions);
+        {/* -------- Add New Medicine Button -------- */}
+        <Button
+          variant="outlined"
+          startIcon={<AddCircleOutlineIcon />}
+          onClick={() => setOpenAddDrug(true)}
+        >
+          {t('Add New Medicine', 'إضافة دواء جديد')}
+        </Button>
 
-          return (
-            <Paper
-              key={idx}
-              variant="outlined"
-              sx={{
-                p: 1.25,
-                borderRadius: 2,
-                borderStyle: 'dashed',
-                borderColor: (t2) => alpha(t2.palette.divider, 0.8),
-              }}
-            >
-              <Grid container spacing={1.25} alignItems="start">
-                {/* Drug Dropdown */}
-                <Grid item xs={12} md={3.8}>
-                  <Autocomplete
-                    options={filteredList}
-                    loading={drugLoading}
-                    value={m.name}
-                    onChange={(_, v) => {
-                      updateMedication(idx, 'name', getDrugLabel(v) || '');
+        {/* --------- Add New Drug Dialog --------- */}
+        <Dialog open={openAddDrug} onClose={() => setOpenAddDrug(false)}>
+          <DialogTitle>{t('Add Medicine', 'إضافة دواء')}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={1.5} sx={{ mt: 1 }}>
+              <TextField
+                label={t('Display Name', 'الاسم الظاهر')}
+                value={newDrug.displayName}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, displayName: e.target.value }))
+                }
+                fullWidth
+              />
 
-                      // Save preview
-                      updateMedication(idx, 'preview', typeof v === 'object' ? v : null);
-                    }}
-                    onInputChange={(_, v) => {
-                      updateMedication(idx, 'name', v);
-                    }}
-                    getOptionLabel={(opt) => getDrugLabel(opt)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label={t('Medicine name', 'اسم الدواء')}
-                        placeholder={t('Type to search…', 'اكتب للبحث…')}
-                        fullWidth
-                        InputProps={{
-                          ...params.InputProps,
-                          endAdornment: (
-                            <>
-                              {drugLoading ? <CircularProgress size={18} /> : null}
-                              {params.InputProps.endAdornment}
-                            </>
-                          ),
-                        }}
-                      />
-                    )}
-                  />
-                </Grid>
+              <TextField
+                label={t('Generic Name', 'الاسم العلمي')}
+                value={newDrug.genericName}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, genericName: e.target.value }))
+                }
+                fullWidth
+              />
 
-                {/* Dose */}
-                <Grid item xs={6} md={2}>
-                  <Autocomplete
-                    freeSolo
-                    options={doseOptions}
-                    value={m.dose || ''}
-                    onInputChange={(_, v) => updateMedication(idx, 'dose', v || '')}
-                    renderInput={(params) => (
-                      <TextField {...params} label={t('Dose', 'الجرعة')} fullWidth />
-                    )}
-                  />
-                </Grid>
+              <TextField
+                label={t('Brand Name', 'الاسم التجاري')}
+                value={newDrug.brandName}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, brandName: e.target.value }))
+                }
+                fullWidth
+              />
 
-                {/* Frequency */}
-                <Grid item xs={6} md={3}>
-                  <Autocomplete
-                    freeSolo
-                    options={freqOptions}
-                    value={m.frequency || ''}
-                    onInputChange={(_, v) => updateMedication(idx, 'frequency', v || '')}
-                    renderInput={(params) => (
-                      <TextField {...params} label={t('Frequency', 'التكرار')} fullWidth />
-                    )}
-                  />
-                </Grid>
+              <TextField
+                label={t('Strength', 'التركيز')}
+                value={newDrug.strength}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, strength: e.target.value }))
+                }
+                fullWidth
+              />
 
-                {/* Duration */}
-                <Grid item xs={6} md={2}>
-                  <Autocomplete
-                    freeSolo
-                    options={durationOptions}
-                    value={m.duration || ''}
-                    onInputChange={(_, v) => updateMedication(idx, 'duration', v || '')}
-                    renderInput={(params) => (
-                      <TextField {...params} label={t('Duration', 'المدة')} fullWidth />
-                    )}
-                  />
-                </Grid>
+              <TextField
+                label={t('Form', 'التركيب')}
+                value={newDrug.form}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, form: e.target.value }))
+                }
+                fullWidth
+              />
 
-                {/* Notes */}
-                <Grid item xs={12} md={2.5}>
-                  <TextField
-                    label={t('Notes', 'ملاحظات')}
-                    fullWidth
-                    value={m.notes || ''}
-                    onChange={(e) => updateMedication(idx, 'notes', e.target.value)}
-                  />
-                </Grid>
+              <TextField
+                label={t('Route', 'طريقة الاستخدام')}
+                value={newDrug.route}
+                onChange={(e) =>
+                  setNewDrug((d) => ({ ...d, route: e.target.value }))
+                }
+                fullWidth
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setOpenAddDrug(false)}>
+              {t('Cancel', 'إلغاء')}
+            </Button>
+            <Button variant="contained" onClick={handleSaveNewDrug}>
+              {t('Save', 'حفظ')}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
-                {/* Remove */}
-                <Grid item xs={12} md="auto">
-                  <IconButton color="error" onClick={() => removeMedication(idx)}>
-                    <DeleteOutlineIcon />
-                  </IconButton>
-                </Grid>
+        {/* -------- Medicines List -------- */}
+        {medicationsList.map((m, idx) => (
+          <Paper
+            key={idx}
+            variant="outlined"
+            sx={{
+              p: 1.25,
+              borderRadius: 2,
+              borderStyle: 'dashed',
+              borderColor: (t2) => alpha(t2.palette.divider, 0.8),
+            }}
+          >
+            <Grid container spacing={1.25} alignItems="center">
+              <Grid item xs={12} md={4}>
+                <Autocomplete
+                  freeSolo
+                  autoHighlight
+                  loading={drugLoading}
+                  options={filterDrugs('', drugOptions)}
+                  value={m.name || ''}
+                  onInputChange={(_, v) => {
+                    updateMedication(idx, 'name', v || '');
+                    debouncedSetQuery?.(v || '');
+                  }}
+                  getOptionLabel={(opt) => {
+                    if (typeof opt === 'string') return opt;
+                    return (
+                      opt.displayName ||
+                      opt.brandName ||
+                      opt.genericName ||
+                      ''
+                    );
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label={t('Medicine name', 'اسم الدواء')}
+                      fullWidth
+                      InputProps={{
+                        ...params.InputProps,
+                        endAdornment: (
+                          <>
+                            {drugLoading ? (
+                              <CircularProgress size={18} />
+                            ) : null}
+                            {params.InputProps.endAdornment}
+                          </>
+                        ),
+                      }}
+                    />
+                  )}
+                />
               </Grid>
 
-              {/* 📌 Preview Section */}
-              {m.preview && (
-                <Box
-                  sx={{
-                    mt: 1.5,
-                    p: 1,
-                    borderRadius: 2,
-                    border: '1px solid #ddd',
-                    bgcolor: '#fafafa',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  <strong>{t('Selected:', 'الدواء المختار:')}</strong> {m.preview.displayName}
-                  <br />
-                  {m.preview.brandName && (
-                    <>• {t('Brand:', 'التجاري:')} {m.preview.brandName}<br /></>
-                  )}
-                  {m.preview.genericName && (
-                    <>• {t('Generic:', 'العلمي:')} {m.preview.genericName}<br /></>
-                  )}
-                  {m.preview.strength && (
-                    <>• {t('Strength:', 'التركيز:')} {m.preview.strength}<br /></>
-                  )}
-                  {m.preview.form && (
-                    <>• {t('Form:', 'الهيئة:')} {m.preview.form}<br /></>
-                  )}
-                  {m.preview.route && (
-                    <>• {t('Route:', 'طريقة الإعطاء:')} {m.preview.route}<br /></>
-                  )}
-                  {m.preview.company && (
-                    <>• {t('Company:', 'الشركة:')} {m.preview.company}<br /></>
-                  )}
-                </Box>
-              )}
-            </Paper>
-          );
-        })}
+              <Grid item xs={6} md={2}>
+                <TextField
+                  label={t('Dose', 'الجرعة')}
+                  fullWidth
+                  value={m.dose}
+                  onChange={(e) =>
+                    updateMedication(idx, 'dose', e.target.value)
+                  }
+                />
+              </Grid>
 
-        <Box>
-          <Button startIcon={<AddCircleOutlineIcon />} variant="outlined" onClick={addMedication}>
-            {t('Add medicine', 'إضافة دواء')}
-          </Button>
-        </Box>
+              <Grid item xs={6} md={3}>
+                <TextField
+                  label={t('Frequency', 'التكرار')}
+                  fullWidth
+                  value={m.frequency}
+                  onChange={(e) =>
+                    updateMedication(idx, 'frequency', e.target.value)
+                  }
+                />
+              </Grid>
+
+              <Grid item xs={6} md={2}>
+                <TextField
+                  label={t('Duration', 'المدة')}
+                  fullWidth
+                  value={m.duration}
+                  onChange={(e) =>
+                    updateMedication(idx, 'duration', e.target.value)
+                  }
+                />
+              </Grid>
+
+              <Grid item xs={12} md="auto">
+                <IconButton
+                  color="error"
+                  onClick={() => removeMedication(idx)}
+                >
+                  <DeleteOutlineIcon />
+                </IconButton>
+              </Grid>
+            </Grid>
+          </Paper>
+        ))}
+
+        <Button
+          onClick={addMedication}
+          startIcon={<AddCircleOutlineIcon />}
+          variant="outlined"
+        >
+          {t('Add medicine', 'إضافة دواء')}
+        </Button>
       </Stack>
     </SectionWrapper>
   );
