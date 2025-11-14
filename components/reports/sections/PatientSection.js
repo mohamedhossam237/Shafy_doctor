@@ -3,7 +3,6 @@ import * as React from 'react';
 import {
   Grid,
   Paper,
-  Stack,
   Typography,
   TextField,
   Autocomplete,
@@ -12,66 +11,106 @@ import {
 import PersonIcon from '@mui/icons-material/Person';
 import { alpha } from '@mui/material/styles';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
+  getDoc,
+} from 'firebase/firestore';
 import SectionWrapper from './SectionWrapper';
 
-/**
- * PatientSection — allows selecting an existing patient and displays demographic data
- */
 export default function PatientSection({
   t,
   user,
   open,
   form,
   setForm,
-  errors = {}, // default value to avoid undefined
-  setErrors,   // may be undefined
+  errors = {},
+  setErrors,
+  isArabic = true,
 }) {
   const [patients, setPatients] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [selectedPatient, setSelectedPatient] = React.useState(null);
-  const [demo, setDemo] = React.useState({ mrn: '', sex: '', dobStr: '', phone: '' });
+  const [demo, setDemo] = React.useState({
+    mrn: '',
+    sex: '',
+    dobStr: '',
+    phone: '',
+  });
 
-  // load patients for current doctor
+  const direction = isArabic ? 'rtl' : 'ltr';
+  const align = isArabic ? 'right' : 'left';
+
+  /* ------------------------------------ */
+  /* 🔥 Load Patients (same logic as list) */
+  /* ------------------------------------ */
   React.useEffect(() => {
-    if (!open || !user) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const qRef = query(collection(db, 'patients'), where('registeredBy', '==', user.uid));
-        const snap = await getDocs(qRef);
-        const rows = snap.docs.map((d) => {
-          const data = d.data() || {};
-          return {
-            id: d.id,
-            name: String(data?.name ?? '').trim() || d.id,
-            phone: data?.phone || data?.mobile || '',
-          };
-        });
-        rows.sort((a, b) =>
-          String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, {
-            sensitivity: 'base',
-          })
-        );
-        setPatients(rows);
-      } catch (e) {
-        console.error('Failed loading patients', e);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [open, user]);
+    if (!open || !user?.uid) return;
 
-  // fetch demographics
+    setLoading(true);
+
+    try {
+      const col = collection(db, 'patients');
+
+      const q1 = query(col, where('associatedDoctors', 'array-contains', user.uid));
+      const q2 = query(col, where('registeredBy', '==', user.uid));
+
+      const unsub1 = onSnapshot(q1, (snap1) => {
+        const data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        const unsub2 = onSnapshot(q2, (snap2) => {
+          const data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+          // merge + dedupe
+          const combined = [...data1, ...data2];
+          const unique = Object.values(
+            combined.reduce((acc, cur) => {
+              acc[cur.id] = cur;
+              return acc;
+            }, {})
+          );
+
+          // Filter: must have phone
+          const withPhone = unique.filter(
+            (p) => typeof p.phone === 'string' && p.phone.trim() !== ''
+          );
+
+          // Sort A-Z
+          withPhone.sort((a, b) =>
+            (a?.name ?? '').localeCompare(b?.name ?? '', undefined, { sensitivity: 'base' })
+          );
+
+          setPatients(withPhone);
+          setLoading(false);
+        });
+
+        return () => {
+          unsub1();
+          unsub2();
+        };
+      });
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  }, [open, user?.uid]);
+
+  /* ------------------------------------ */
+  /* Load demographics                    */
+  /* ------------------------------------ */
   const fetchPatientDemographics = async (patientId) => {
     try {
       if (!patientId) {
         setDemo({ mrn: '', sex: '', dobStr: '', phone: '' });
         return;
       }
-      const ref = doc(db, 'patients', patientId);
-      const snap = await getDoc(ref);
+
+      const snap = await getDoc(doc(db, 'patients', patientId));
       const data = snap.exists() ? snap.data() : {};
+
       const dob =
         data?.dob instanceof Date
           ? data.dob
@@ -80,53 +119,66 @@ export default function PatientSection({
           : data?.dob
           ? new Date(data.dob)
           : null;
-      const dobStr =
-        dob && !isNaN(dob.getTime()) ? dob.toISOString().slice(0, 10) : '';
+
+      const dobStr = dob && !isNaN(dob.getTime()) ? dob.toISOString().slice(0, 10) : '';
+
       setDemo({
         mrn: data?.mrn || data?.medicalRecordNumber || '',
         sex: data?.sex || data?.gender || '',
         dobStr,
         phone: data?.phone || data?.mobile || '',
       });
-    } catch (e) {
-      console.error(e);
-      setDemo({ mrn: '', sex: '', dobStr: '', phone: '' });
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  // main render
+  /* ------------------------------------ */
+  /* Filter search                        */
+  /* ------------------------------------ */
+  const filterOptions = (options, { inputValue }) => {
+    if (!inputValue) return options;
+
+    const q = inputValue.toLowerCase();
+    return options.filter((opt) => {
+      const name = (opt.name || '').toLowerCase();
+      const phone = (opt.phone || '').toLowerCase();
+      return name.includes(q) || phone.includes(q);
+    });
+  };
+
   return (
     <SectionWrapper
       icon={<PersonIcon fontSize="small" />}
       title={t('Patient & Demographics', 'المريض والبيانات الديموغرافية')}
     >
-      <Grid container spacing={2}>
-        {/* Patient Selector */}
+      <Grid container spacing={2} sx={{ direction }}>
+        {/* Selector */}
         <Grid item xs={12} md={6}>
           <Autocomplete
             options={patients}
             loading={loading}
+            filterOptions={filterOptions}
             value={selectedPatient}
             onChange={async (_, value) => {
               setSelectedPatient(value);
+
               const id = value?.id || '';
+
               setForm((f) => ({ ...f, patientID: id, patientName: value?.name || '' }));
 
-              // ✅ Safe guard against undefined setErrors
-              if (typeof setErrors === 'function') {
-                setErrors((prev) => ({ ...prev, patientID: undefined }));
-              }
+              if (setErrors) setErrors((prev) => ({ ...prev, patientID: undefined }));
 
               await fetchPatientDemographics(id);
             }}
-            getOptionLabel={(opt) => (opt?.name ? String(opt.name) : '')}
-            isOptionEqualToValue={(opt, val) => opt?.id === val?.id}
-            noOptionsText={t('No patients', 'لا يوجد مرضى')}
+            getOptionLabel={(opt) => opt?.name || ''}
+            isOptionEqualToValue={(opt, val) => opt.id === val.id}
+            noOptionsText={t('No patients found', 'لا يوجد مرضى')}
             renderInput={(params) => (
               <TextField
                 {...params}
                 label={t('Select Patient *', 'اختر المريض *')}
-                placeholder={t('Search by name', 'ابحث بالاسم')}
+                placeholder={t('Search by name or phone', 'ابحث بالاسم أو الهاتف')}
                 error={Boolean(errors.patientID)}
                 helperText={
                   errors.patientID
@@ -137,11 +189,12 @@ export default function PatientSection({
                   ...params.InputProps,
                   endAdornment: (
                     <>
-                      {loading ? <CircularProgress size={18} /> : null}
+                      {loading && <CircularProgress size={18} />}
                       {params.InputProps.endAdornment}
                     </>
                   ),
                 }}
+                sx={{ textAlign: align }}
               />
             )}
           />
@@ -154,38 +207,35 @@ export default function PatientSection({
             sx={{
               p: 1.5,
               borderRadius: 2,
-              bgcolor: (t2) => alpha(t2.palette.primary.light, 0.06),
+              bgcolor: (theme) => alpha(theme.palette.primary.light, 0.06),
+              direction,
+              textAlign: align,
             }}
           >
             <Grid container spacing={1}>
-              <Grid item xs={6} sm={3.5}>
-                <Typography variant="caption" color="text.secondary">
-                  {t('MRN', 'رقم الملف')}
-                </Typography>
+              <Grid item xs={6} sm={4}>
+                <Typography variant="caption">{t('MRN', 'رقم الملف')}</Typography>
                 <Typography variant="body2" fontWeight={700}>
                   {demo.mrn || '-'}
                 </Typography>
               </Grid>
+
               <Grid item xs={6} sm={2.5}>
-                <Typography variant="caption" color="text.secondary">
-                  {t('Sex', 'النوع')}
-                </Typography>
+                <Typography variant="caption">{t('Sex', 'النوع')}</Typography>
                 <Typography variant="body2" fontWeight={700}>
                   {demo.sex || '-'}
                 </Typography>
               </Grid>
+
               <Grid item xs={6} sm={3}>
-                <Typography variant="caption" color="text.secondary">
-                  {t('DOB', 'تاريخ الميلاد')}
-                </Typography>
+                <Typography variant="caption">{t('DOB', 'تاريخ الميلاد')}</Typography>
                 <Typography variant="body2" fontWeight={700}>
                   {demo.dobStr || '-'}
                 </Typography>
               </Grid>
+
               <Grid item xs={6} sm={3}>
-                <Typography variant="caption" color="text.secondary">
-                  {t('Phone', 'هاتف')}
-                </Typography>
+                <Typography variant="caption">{t('Phone', 'هاتف')}</Typography>
                 <Typography variant="body2" fontWeight={700}>
                   {demo.phone || '-'}
                 </Typography>
