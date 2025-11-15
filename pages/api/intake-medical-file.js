@@ -1,6 +1,6 @@
 // pages/api/intake-medical-file.js
 
-const Busboy = require("busboy");
+import Busboy from "busboy";
 import mammoth from "mammoth";
 import pdfParse from "pdf-parse";
 import { createRemoteJWKSet, jwtVerify } from "jose";
