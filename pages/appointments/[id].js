@@ -138,7 +138,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [id, t]);
 
   /* ---------- load clinics ---------- */
   React.useEffect(() => {
@@ -255,10 +255,10 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     status === 'completed'
                       ? '#4caf50'
                       : status === 'confirmed'
-                      ? '#0288d1'
-                      : status === 'cancelled'
-                      ? '#757575'
-                      : '#ff9800',
+                        ? '#0288d1'
+                        : status === 'cancelled'
+                          ? '#757575'
+                          : '#ff9800',
                   color: '#fff', fontWeight: 700,
                 }}
               />
