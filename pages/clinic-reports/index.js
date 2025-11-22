@@ -20,7 +20,12 @@ import {
   ToggleButtonGroup,
   ToggleButton,
   Switch,
+  Chip,
+  Avatar,
+  useTheme,
+  alpha,
 } from '@mui/material';
+import { motion } from 'framer-motion';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -30,6 +35,9 @@ import SaveIcon from '@mui/icons-material/Save';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import EditIcon from '@mui/icons-material/Edit';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -46,7 +54,15 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  AreaChart,
+  Area,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
 } from 'recharts';
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 /* ---------------- utils ---------------- */
 
@@ -124,30 +140,73 @@ function inRange(d, start, end) {
   return t >= start.getTime() && t <= end.getTime();
 }
 
-function StatCard({ icon, title, value, isArabic }) {
+const MotionPaper = motion(Paper);
+
+function StatTile({ icon, title, value, isArabic, color = 'primary', delay = 0, trend, trendDir = 'up' }) {
+  const theme = useTheme();
   return (
-    <Paper
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay }}
+      elevation={0}
       sx={{
-        p: 2,
-        borderRadius: 3,
+        p: 3,
+        borderRadius: 4,
         height: '100%',
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
         display: 'flex',
         flexDirection: 'column',
-        gap: 1,
-        textAlign: isArabic ? 'right' : 'left',
+        justifyContent: 'space-between',
+        transition: 'all 0.3s ease',
+        '&:hover': {
+          transform: 'translateY(-4px)',
+          boxShadow: '0 12px 24px -10px rgba(0,0,0,0.1)',
+          borderColor: `${color}.main`,
+        }
       }}
-      elevation={1}
     >
-      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ flexShrink: 0 }}>
-        {icon}
-        <Typography variant="body2" color="text.secondary">
+      <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="flex-start">
+        <Avatar
+          variant="rounded"
+          sx={{
+            bgcolor: alpha(theme.palette[color].main, 0.1),
+            color: `${color}.main`,
+            width: 56,
+            height: 56,
+            borderRadius: 3
+          }}
+        >
+          {icon}
+        </Avatar>
+        {trend !== undefined && (
+          <Chip
+            size="small"
+            label={`${trend > 0 ? '+' : ''}${trend}%`}
+            color={trendDir === 'up' ? 'success' : 'error'}
+            variant="soft"
+            sx={{
+              bgcolor: alpha(theme.palette[trendDir === 'up' ? 'success' : 'error'].main, 0.1),
+              color: `${trendDir === 'up' ? 'success' : 'error'}.main`,
+              fontWeight: 700,
+              borderRadius: 2
+            }}
+            icon={trendDir === 'up' ? <TrendingUpIcon fontSize="small" /> : <TrendingUpIcon sx={{ transform: 'rotate(180deg)' }} fontSize="small" />}
+          />
+        )}
+      </Stack>
+
+      <Box sx={{ mt: 3, textAlign: isArabic ? 'right' : 'left' }}>
+        <Typography variant="h3" fontWeight={800} sx={{ color: 'text.primary', mb: 0.5 }}>
+          {value}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" fontWeight={600}>
           {title}
         </Typography>
-      </Stack>
-      <Typography variant="h5" fontWeight={800} sx={{ mt: 'auto' }}>
-        {value}
-      </Typography>
-    </Paper>
+      </Box>
+    </MotionPaper>
   );
 }
 
@@ -156,6 +215,7 @@ function StatCard({ icon, title, value, isArabic }) {
 export default function ClinicReportsPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const theme = useTheme();
 
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
@@ -178,9 +238,17 @@ export default function ClinicReportsPage() {
   const [patientsSeen, setPatientsSeen] = React.useState(0);
   const [missedAppointments, setMissedAppointments] = React.useState(0);
 
+  // trends
+  const [growthStats, setGrowthStats] = React.useState({});
+  const [activityData, setActivityData] = React.useState([]);
+  const [statusData, setStatusData] = React.useState([]);
+  const [topPatients, setTopPatients] = React.useState([]);
+
   // pricing & appointments
   const [checkupPrice, setCheckupPrice] = React.useState(0);
-  const [priceInput, setPriceInput] = React.useState('');
+  const [followUpPrice, setFollowUpPrice] = React.useState(0);
+  const [checkupPriceInput, setCheckupPriceInput] = React.useState('');
+  const [followUpPriceInput, setFollowUpPriceInput] = React.useState('');
   const [allAppts, setAllAppts] = React.useState([]); // normalized: {_dt, _status, raw...}
 
   // Financial (appointments-only) with period filter
@@ -255,6 +323,9 @@ export default function ClinicReportsPage() {
           if (dsnap.exists()) {
             const d = dsnap.data() || {};
             setCheckupPrice(Number(d.checkupPrice ?? 0));
+            setFollowUpPrice(Number(d.followUpPrice ?? 0));
+            setCheckupPriceInput(String(d.checkupPrice ?? ''));
+            setFollowUpPriceInput(String(d.followUpPrice ?? ''));
             // Load extras (if any)
             const ex = Array.isArray(d.extraServices) ? d.extraServices : [];
             // Backward compatibility: if you previously had plain "services" strings,
@@ -271,7 +342,7 @@ export default function ClinicReportsPage() {
                 }))
             );
           }
-        } catch {}
+        } catch { }
 
         // 2) load all appointments (no orderBy -> no index needed)
         const col = collection(db, 'appointments');
@@ -293,25 +364,103 @@ export default function ClinicReportsPage() {
         const { start, end } = getRangeBounds('month');
         const monthRows = rows.filter((r) => inRange(r._dt, start, end));
 
-        const total = monthRows.length;
-        const completed = monthRows.filter((r) => r._status === 'completed').length;
-        const seenSet = new Set(
-          monthRows
-            .filter((r) => r._status === 'completed')
-            .map((r) => r.patientUID || r.patientId || r.patientID || r.patientName || `anon-${r.id}`)
+        // Previous month for trends
+        const prevStart = new Date(start);
+        prevStart.setMonth(prevStart.getMonth() - 1);
+        const prevEnd = new Date(end);
+        prevEnd.setMonth(prevEnd.getMonth() - 1);
+        const prevMonthRows = rows.filter((r) => inRange(r._dt, prevStart, prevEnd));
+
+        const calcStats = (rs) => {
+          const tot = rs.length;
+          const comp = rs.filter((r) => r._status === 'completed').length;
+          const seen = new Set(
+            rs.filter((r) => r._status === 'completed')
+              .map((r) => r.patientUID || r.patientId || r.patientID || r.patientName || `anon-${r.id}`)
+          ).size;
+          const miss = rs.filter((r) => {
+            if (r._status === 'cancelled' || r._status === 'no_show') return true;
+            if (r._dt && r._dt < now && r._status !== 'completed') return true;
+            return false;
+          }).length;
+          return { tot, comp, seen, miss };
+        };
+
+        const currStats = calcStats(monthRows);
+        const prevStats = calcStats(prevMonthRows);
+
+        const getGrowth = (curr, prev) => {
+          if (prev === 0) return curr > 0 ? 100 : 0;
+          return Math.round(((curr - prev) / prev) * 100);
+        };
+
+        setGrowthStats({
+          total: getGrowth(currStats.tot, prevStats.tot),
+          completed: getGrowth(currStats.comp, prevStats.comp),
+          seen: getGrowth(currStats.seen, prevStats.seen),
+          missed: getGrowth(currStats.miss, prevStats.miss),
+        });
+
+        setTotalAppointments(currStats.tot);
+        setCompletedSessions(currStats.comp);
+        setPatientsSeen(currStats.seen);
+        setMissedAppointments(currStats.miss);
+
+        // 4) Activity Trend (Last 30 days)
+        const activityMap = new Map();
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        // Initialize last 30 days with 0
+        for (let i = 0; i <= 30; i++) {
+          const d = new Date(thirtyDaysAgo);
+          d.setDate(d.getDate() + i);
+          const key = d.toISOString().split('T')[0];
+          activityMap.set(key, 0);
+        }
+
+        rows.forEach(r => {
+          if (r._dt && r._dt >= thirtyDaysAgo) {
+            const key = r._dt.toISOString().split('T')[0];
+            if (activityMap.has(key)) {
+              activityMap.set(key, activityMap.get(key) + 1);
+            }
+          }
+        });
+
+        setActivityData(Array.from(activityMap.entries()).map(([date, count]) => ({
+          date: isArabic ? new Date(date).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' }) : new Date(date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
+          count
+        })));
+
+        // 5) Status Distribution (All time or filtered)
+        const statusCounts = rows.reduce((acc, r) => {
+          const s = r._status === 'completed' ? (isArabic ? 'مكتمل' : 'Completed') :
+            r._status === 'cancelled' ? (isArabic ? 'ملغي' : 'Cancelled') :
+              r._status === 'no_show' ? (isArabic ? 'لم يحضر' : 'No Show') :
+                (isArabic ? 'قادم' : 'Upcoming');
+          acc[s] = (acc[s] || 0) + 1;
+          return acc;
+        }, {});
+
+        setStatusData(Object.entries(statusCounts).map(([name, value]) => ({ name, value })));
+
+        // 6) Top Patients
+        const patientCounts = rows
+          .filter(r => r._status === 'completed')
+          .reduce((acc, r) => {
+            const name = r.patientName || (isArabic ? 'مريض مجهول' : 'Unknown Patient');
+            acc[name] = (acc[name] || 0) + 1;
+            return acc;
+          }, {});
+
+        setTopPatients(
+          Object.entries(patientCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([name, count]) => ({ name, count }))
         );
 
-        const now = new Date();
-        const missed = monthRows.filter((r) => {
-          if (r._status === 'cancelled' || r._status === 'no_show') return true;
-          if (r._dt && r._dt < now && r._status !== 'completed') return true;
-          return false;
-        }).length;
-
-        setTotalAppointments(total);
-        setCompletedSessions(completed);
-        setPatientsSeen(seenSet.size);
-        setMissedAppointments(missed);
       } catch (e) {
         console.error(e);
         setSnack({
@@ -352,7 +501,9 @@ export default function ClinicReportsPage() {
         a.payment?.amount
       );
       if (n > 0) return n;
-      return a._status === 'completed' ? Number(checkupPrice || 0) : 0;
+      // Fallback based on type
+      const isFollowUp = a.appointmentType === 'followup' || a.appointmentType === 'recheck';
+      return a._status === 'completed' ? Number((isFollowUp ? followUpPrice : checkupPrice) || 0) : 0;
     };
 
     const sum = allAppts
@@ -360,20 +511,26 @@ export default function ClinicReportsPage() {
       .reduce((acc, a) => acc + feeOf(a), 0);
 
     setApptRevenue(sum);
-  }, [allAppts, finRange, checkupPrice]);
+  }, [allAppts, finRange, checkupPrice, followUpPrice]);
 
-  const updatePrice = async () => {
+  const savePrices = async () => {
     if (!user) return;
-    const newPrice = parseInt(String(priceInput).trim(), 10);
-    if (Number.isNaN(newPrice)) {
-      setSnack({ open: true, message: isArabic ? 'أدخل رقماً صحيحاً' : 'Enter a valid number', severity: 'warning' });
+    const cPrice = parseInt(String(checkupPriceInput).trim(), 10);
+    const fPrice = parseInt(String(followUpPriceInput).trim(), 10);
+
+    if (Number.isNaN(cPrice) || Number.isNaN(fPrice)) {
+      setSnack({ open: true, message: isArabic ? 'أدخل أرقاماً صحيحة' : 'Enter valid numbers', severity: 'warning' });
       return;
     }
+
     try {
-      await updateDoc(doc(db, 'doctors', user.uid), { checkupPrice: newPrice });
-      setCheckupPrice(newPrice);
-      setPriceInput('');
-      setSnack({ open: true, message: isArabic ? 'تم تحديث السعر' : 'Price updated', severity: 'success' });
+      await updateDoc(doc(db, 'doctors', user.uid), {
+        checkupPrice: cPrice,
+        followUpPrice: fPrice
+      });
+      setCheckupPrice(cPrice);
+      setFollowUpPrice(fPrice);
+      setSnack({ open: true, message: isArabic ? 'تم تحديث الأسعار' : 'Prices updated', severity: 'success' });
     } catch (e) {
       setSnack({ open: true, message: e?.message || (isArabic ? 'فشل التحديث' : 'Update failed'), severity: 'error' });
     }
@@ -417,201 +574,411 @@ export default function ClinicReportsPage() {
           ) : (
             <>
               {/* Summary tiles (current month) */}
-              <Grid container spacing={2}>
-                <Grid item xs={6} sm={3}>
-                  <StatCard
+              <Grid container spacing={3}>
+                <Grid item xs={12} sm={6} md={3}>
+                  <StatTile
                     isArabic={isArabic}
-                    icon={<CalendarTodayIcon color="primary" />}
+                    icon={<CalendarTodayIcon />}
                     title={isArabic ? 'إجمالي المواعيد (هذا الشهر)' : 'Total Appointments (This Month)'}
                     value={totalAppointments}
+                    color="primary"
+                    delay={0.1}
+                    trend={growthStats.total}
+                    trendDir={growthStats.total >= 0 ? 'up' : 'down'}
                   />
                 </Grid>
-                <Grid item xs={6} sm={3}>
-                  <StatCard
+                <Grid item xs={12} sm={6} md={3}>
+                  <StatTile
                     isArabic={isArabic}
-                    icon={<CheckCircleIcon color="success" />}
+                    icon={<CheckCircleIcon />}
                     title={isArabic ? 'الجلسات المكتملة' : 'Completed Sessions'}
                     value={completedSessions}
+                    color="success"
+                    delay={0.2}
+                    trend={growthStats.completed}
+                    trendDir={growthStats.completed >= 0 ? 'up' : 'down'}
                   />
                 </Grid>
-                <Grid item xs={6} sm={3}>
-                  <StatCard
+                <Grid item xs={12} sm={6} md={3}>
+                  <StatTile
                     isArabic={isArabic}
-                    icon={<PeopleIcon color="info" />}
+                    icon={<PeopleIcon />}
                     title={isArabic ? 'عدد المرضى (مميز)' : 'Patients Seen (Unique)'}
                     value={patientsSeen}
+                    color="info"
+                    delay={0.3}
+                    trend={growthStats.seen}
+                    trendDir={growthStats.seen >= 0 ? 'up' : 'down'}
                   />
                 </Grid>
-                <Grid item xs={6} sm={3}>
-                  <StatCard
+                <Grid item xs={12} sm={6} md={3}>
+                  <StatTile
                     isArabic={isArabic}
-                    icon={<CancelIcon color="warning" />}
+                    icon={<CancelIcon />}
                     title={isArabic ? 'المواعيد الفائتة/الملغاة' : 'Missed/Cancelled'}
                     value={missedAppointments}
+                    color="warning"
+                    delay={0.4}
+                    trend={growthStats.missed}
+                    trendDir={growthStats.missed <= 0 ? 'up' : 'down'} // Less missed is good (up), more is bad (down) - logic inverted for display? No, let's keep it simple: +% is red for bad things usually, but here we use up/down arrow. Let's stick to simple growth.
                   />
                 </Grid>
               </Grid>
 
-              {/* Price + Update */}
-              <Paper
-                sx={{
-                  mt: 2,
-                  p: 2,
-                  borderRadius: 3,
-                  display: 'flex',
-                  alignItems: { xs: 'stretch', sm: 'center' },
-                  justifyContent: 'space-between',
-                  gap: 2,
-                  flexDirection: { xs: 'column', sm: isArabic ? 'row-reverse' : 'row' },
-                  border: (t) => `1px solid ${t.palette.divider}`,
-                }}
+              {/* Advanced Analytics Section */}
+              <Grid container spacing={3} sx={{ mt: 1 }}>
+                {/* Activity Trend */}
+                <Grid item xs={12} md={8}>
+                  <MotionPaper
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.5 }}
+                    elevation={0}
+                    sx={{ p: 3, borderRadius: 4, border: '1px solid', borderColor: 'divider', height: '100%' }}
+                  >
+                    <Typography variant="h6" fontWeight={800} gutterBottom>
+                      {isArabic ? 'نشاط العيادة (آخر 30 يوم)' : 'Clinic Activity (Last 30 Days)'}
+                    </Typography>
+                    <Box sx={{ width: '100%', height: 300 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={activityData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor={theme.palette.primary.main} stopOpacity={0.8} />
+                              <stop offset="95%" stopColor={theme.palette.primary.main} stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.palette.divider} />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} dy={10} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} />
+                          <Tooltip
+                            contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                          />
+                          <Area type="monotone" dataKey="count" stroke={theme.palette.primary.main} fillOpacity={1} fill="url(#colorCount)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </MotionPaper>
+                </Grid>
+
+                {/* Status Distribution */}
+                <Grid item xs={12} md={4}>
+                  <MotionPaper
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.6 }}
+                    elevation={0}
+                    sx={{ p: 3, borderRadius: 4, border: '1px solid', borderColor: 'divider', height: '100%' }}
+                  >
+                    <Typography variant="h6" fontWeight={800} gutterBottom>
+                      {isArabic ? 'توزيع الحالات' : 'Status Distribution'}
+                    </Typography>
+                    <Box sx={{ width: '100%', height: 300 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={statusData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {statusData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }} />
+                          <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </MotionPaper>
+                </Grid>
+
+                {/* Top Patients */}
+                <Grid item xs={12}>
+                  <MotionPaper
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.7 }}
+                    elevation={0}
+                    sx={{ p: 3, borderRadius: 4, border: '1px solid', borderColor: 'divider' }}
+                  >
+                    <Typography variant="h6" fontWeight={800} gutterBottom>
+                      {isArabic ? 'أكثر المرضى زيارة' : 'Top Visiting Patients'}
+                    </Typography>
+                    <Grid container spacing={2}>
+                      {topPatients.map((p, i) => (
+                        <Grid item xs={12} sm={6} md={2.4} key={i}>
+                          <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, textAlign: 'center', bgcolor: 'background.default' }}>
+                            <Avatar sx={{ width: 48, height: 48, margin: '0 auto 8px', bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' }}>
+                              {p.name.charAt(0)}
+                            </Avatar>
+                            <Typography variant="subtitle2" fontWeight={700} noWrap>
+                              {p.name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {p.count} {isArabic ? 'زيارات' : 'Visits'}
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                      ))}
+                      {topPatients.length === 0 && (
+                        <Grid item xs={12}>
+                          <Typography color="text.secondary" align="center">
+                            {isArabic ? 'لا توجد بيانات كافية' : 'Not enough data yet'}
+                          </Typography>
+                        </Grid>
+                      )}
+                    </Grid>
+                  </MotionPaper>
+                </Grid>
+              </Grid>
+
+              {/* Price Settings */}
+              <MotionPaper
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.5 }}
                 elevation={0}
+                sx={{
+                  mt: 4,
+                  p: 4,
+                  borderRadius: 4,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                }}
               >
-                <Stack direction="row" spacing={1.25} alignItems="center">
-                  <AttachMoneyIcon color="success" />
-                  <Typography fontWeight={700}>
-                    {isArabic
-                      ? `سعر الكشف الحالي: ${checkupPrice} ج.م`
-                      : `Current checkup price: QAR ${checkupPrice}`}
+                <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+                  <Avatar sx={{ bgcolor: 'success.light', color: 'success.dark' }}>
+                    <AttachMoneyIcon />
+                  </Avatar>
+                  <Typography variant="h6" fontWeight={800}>
+                    {isArabic ? 'إعدادات الأسعار' : 'Pricing Settings'}
                   </Typography>
                 </Stack>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                  <TextField
-                    size="small"
-                    type="number"
-                    value={priceInput}
-                    onChange={(e) => setPriceInput(e.target.value)}
-                    label={isArabic ? 'تحديث سعر الكشف' : 'Update Checkup Price'}
-                    sx={{ minWidth: 220 }}
-                  />
-                  <Button onClick={updatePrice} variant="contained" startIcon={<SaveIcon />}>
-                    {isArabic ? 'حفظ' : 'Save'}
-                  </Button>
-                </Stack>
-              </Paper>
+
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <TextField
+                      fullWidth
+                      label={isArabic ? 'سعر الكشف (جديد)' : 'Examination Price (New)'}
+                      type="number"
+                      value={checkupPriceInput}
+                      onChange={(e) => setCheckupPriceInput(e.target.value)}
+                      InputProps={{
+                        startAdornment: <Typography color="text.secondary" sx={{ mx: 1 }}>EGP</Typography>
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <TextField
+                      fullWidth
+                      label={isArabic ? 'سعر إعادة الكشف' : 'Re-examination Price'}
+                      type="number"
+                      value={followUpPriceInput}
+                      onChange={(e) => setFollowUpPriceInput(e.target.value)}
+                      InputProps={{
+                        startAdornment: <Typography color="text.secondary" sx={{ mx: 1 }}>EGP</Typography>
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Button
+                      variant="contained"
+                      size="large"
+                      startIcon={<SaveIcon />}
+                      onClick={savePrices}
+                      sx={{ px: 4, py: 1.5, borderRadius: 2 }}
+                    >
+                      {isArabic ? 'حفظ التغييرات' : 'Save Changes'}
+                    </Button>
+                  </Grid>
+                </Grid>
+              </MotionPaper>
 
               {/* ---------- NEW: Extra Services Editor ---------- */}
-              <Paper sx={{ mt: 2, p: 2, borderRadius: 3 }} elevation={0}>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>
-                  {isArabic ? 'الخدمات الإضافية (يختارها المريض أثناء الحجز)' : 'Extra Services (Selectable by patient during booking)'}
-                </Typography>
-
-                {/* Add new extra service */}
-                <Stack
-                  direction={{ xs: 'column', md: isArabic ? 'row-reverse' : 'row' }}
-                  spacing={1}
-                  sx={{ mb: 1 }}
-                >
-                  <TextField
-                    label={isArabic ? 'اسم الخدمة (عربي)' : 'Service name (Arabic)'}
-                    value={newExtraNameAr}
-                    onChange={(e) => setNewExtraNameAr(e.target.value)}
-                    fullWidth
-                  />
-                  <TextField
-                    label={isArabic ? 'اسم الخدمة (إنجليزي)' : 'Service name (English)'}
-                    value={newExtraNameEn}
-                    onChange={(e) => setNewExtraNameEn(e.target.value)}
-                    fullWidth
-                  />
-                  <TextField
-                    label={isArabic ? 'السعر' : 'Price'}
-                    type="number"
-                    value={newExtraPrice}
-                    onChange={(e) => setNewExtraPrice(e.target.value)}
-                    sx={{ minWidth: 160 }}
-                  />
-                  <Button
-                    startIcon={<AddIcon />}
-                    variant="outlined"
-                    onClick={addExtra}
-                    sx={{ whiteSpace: 'nowrap' }}
-                  >
-                    {isArabic ? 'إضافة' : 'Add'}
-                  </Button>
+              <MotionPaper
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.6 }}
+                elevation={0}
+                sx={{ mt: 4, p: 4, borderRadius: 4, border: '1px solid', borderColor: 'divider' }}
+              >
+                <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
+                  <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.dark' }}>
+                    <TrendingUpIcon />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h6" fontWeight={800}>
+                      {isArabic ? 'الخدمات الإضافية' : 'Extra Services'}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {isArabic ? 'خدمات يمكن للمريض اختيارها أثناء الحجز' : 'Services patients can select during booking'}
+                    </Typography>
+                  </Box>
                 </Stack>
 
-                <Divider sx={{ my: 1 }} />
+                {/* Add new extra service */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 3, bgcolor: 'background.default', borderStyle: 'dashed' }}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>
+                    {isArabic ? 'إضافة خدمة جديدة' : 'Add New Service'}
+                  </Typography>
+                  <Grid container spacing={2} alignItems="center">
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        label={isArabic ? 'اسم الخدمة (عربي)' : 'Service name (Arabic)'}
+                        value={newExtraNameAr}
+                        onChange={(e) => setNewExtraNameAr(e.target.value)}
+                        fullWidth
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        label={isArabic ? 'اسم الخدمة (إنجليزي)' : 'Service name (English)'}
+                        value={newExtraNameEn}
+                        onChange={(e) => setNewExtraNameEn(e.target.value)}
+                        fullWidth
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid item xs={6} md={2}>
+                      <TextField
+                        label={isArabic ? 'السعر' : 'Price'}
+                        type="number"
+                        value={newExtraPrice}
+                        onChange={(e) => setNewExtraPrice(e.target.value)}
+                        fullWidth
+                        size="small"
+                      />
+                    </Grid>
+                    <Grid item xs={6} md={2}>
+                      <Button
+                        startIcon={<AddIcon />}
+                        variant="contained"
+                        onClick={addExtra}
+                        fullWidth
+                        disableElevation
+                      >
+                        {isArabic ? 'إضافة' : 'Add'}
+                      </Button>
+                    </Grid>
+                  </Grid>
+                </Paper>
 
                 {/* List / edit existing extras */}
                 {extras.length === 0 ? (
-                  <Typography color="text.secondary" sx={{ py: 1 }}>
-                    {isArabic ? 'لا توجد خدمات إضافية بعد.' : 'No extra services yet.'}
-                  </Typography>
+                  <Box sx={{ textAlign: 'center', py: 4, bgcolor: 'background.default', borderRadius: 3 }}>
+                    <Typography color="text.secondary">
+                      {isArabic ? 'لا توجد خدمات إضافية بعد.' : 'No extra services yet.'}
+                    </Typography>
+                  </Box>
                 ) : (
-                  <Stack spacing={1}>
+                  <Stack spacing={2}>
                     {extras.map((e) => (
                       <Paper
                         key={e.id}
                         variant="outlined"
                         sx={{
-                          p: 1,
-                          borderRadius: 2,
-                          display: 'grid',
-                          gridTemplateColumns: '1fr 1fr 140px auto',
-                          gap: 8,
+                          p: 2,
+                          borderRadius: 3,
+                          display: 'flex',
+                          flexDirection: { xs: 'column', md: 'row' },
+                          gap: 2,
                           alignItems: 'center',
-                          ...(isArabic && { direction: 'rtl' }),
+                          transition: 'all 0.2s',
+                          '&:hover': { borderColor: 'primary.main', bgcolor: 'background.default' }
                         }}
                       >
-                        <TextField
-                          size="small"
-                          label={isArabic ? 'الاسم (عربي)' : 'Name (Arabic)'}
-                          value={e.name_ar}
-                          onChange={(ev) => updateExtra(e.id, { name_ar: ev.target.value })}
-                        />
-                        <TextField
-                          size="small"
-                          label={isArabic ? 'الاسم (إنجليزي)' : 'Name (English)'}
-                          value={e.name_en}
-                          onChange={(ev) => updateExtra(e.id, { name_en: ev.target.value })}
-                        />
-                        <TextField
-                          size="small"
-                          type="number"
-                          label={isArabic ? 'السعر' : 'Price'}
-                          value={e.price}
-                          onChange={(ev) => updateExtra(e.id, { price: Number(ev.target.value) })}
-                        />
-                        <Stack direction="row" alignItems="center" spacing={1} justifyContent={isArabic ? 'flex-start' : 'flex-end'}>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            <Typography variant="caption" color="text.secondary">
-                              {isArabic ? 'مفعّل' : 'Active'}
-                            </Typography>
-                            <Switch
-                              checked={e.active !== false}
-                              onChange={(ev) => updateExtra(e.id, { active: ev.target.checked })}
+                        <Grid container spacing={2} alignItems="center">
+                          <Grid item xs={12} sm={4}>
+                            <TextField
+                              size="small"
+                              label={isArabic ? 'الاسم (عربي)' : 'Name (Arabic)'}
+                              value={e.name_ar}
+                              onChange={(ev) => updateExtra(e.id, { name_ar: ev.target.value })}
+                              fullWidth
+                              variant="standard"
                             />
-                          </Stack>
-                          <IconButton aria-label="delete" onClick={() => deleteExtra(e.id)}>
-                            <DeleteIcon />
-                          </IconButton>
-                        </Stack>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <TextField
+                              size="small"
+                              label={isArabic ? 'الاسم (إنجليزي)' : 'Name (English)'}
+                              value={e.name_en}
+                              onChange={(ev) => updateExtra(e.id, { name_en: ev.target.value })}
+                              fullWidth
+                              variant="standard"
+                            />
+                          </Grid>
+                          <Grid item xs={6} sm={2}>
+                            <TextField
+                              size="small"
+                              type="number"
+                              label={isArabic ? 'السعر' : 'Price'}
+                              value={e.price}
+                              onChange={(ev) => updateExtra(e.id, { price: Number(ev.target.value) })}
+                              fullWidth
+                              variant="standard"
+                            />
+                          </Grid>
+                          <Grid item xs={6} sm={2}>
+                            <Stack direction="row" alignItems="center" justifyContent="flex-end" spacing={1}>
+                              <Switch
+                                size="small"
+                                checked={e.active !== false}
+                                onChange={(ev) => updateExtra(e.id, { active: ev.target.checked })}
+                              />
+                              <IconButton size="small" color="error" onClick={() => deleteExtra(e.id)}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Stack>
+                          </Grid>
+                        </Grid>
                       </Paper>
                     ))}
                   </Stack>
                 )}
 
-                <Stack direction="row" justifyContent={isArabic ? 'flex-start' : 'flex-end'} sx={{ mt: 1 }}>
-                  <Button startIcon={<SaveIcon />} variant="contained" onClick={saveExtras}>
+                <Stack direction="row" justifyContent={isArabic ? 'flex-start' : 'flex-end'} sx={{ mt: 3 }}>
+                  <Button startIcon={<SaveIcon />} variant="contained" onClick={saveExtras} size="large" sx={{ px: 4, borderRadius: 2 }}>
                     {isArabic ? 'حفظ الخدمات' : 'Save Services'}
                   </Button>
                 </Stack>
-              </Paper>
+              </MotionPaper>
               {/* ---------- /Extra Services Editor ---------- */}
 
               {/* Financial chart (appointments-only) */}
-              <Paper sx={{ mt: 2, p: 2, borderRadius: 3 }} elevation={0}>
+              <MotionPaper
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.7 }}
+                elevation={0}
+                sx={{ mt: 4, p: 4, borderRadius: 4, border: '1px solid', borderColor: 'divider' }}
+              >
                 <Stack
                   direction={{ xs: 'column', sm: 'row' }}
                   alignItems={{ xs: 'flex-start', sm: 'center' }}
                   justifyContent="space-between"
                   spacing={1}
-                  sx={{ mb: 1.5 }}
+                  sx={{ mb: 3 }}
                 >
-                  <Typography variant="h6" fontWeight={800}>
-                    {isArabic ? 'التقارير المالية (المواعيد فقط)' : 'Financial Reports (Appointments Only)'}
-                  </Typography>
+                  <Stack direction="row" alignItems="center" spacing={2}>
+                    <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.dark' }}>
+                      <AttachMoneyIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="h6" fontWeight={800}>
+                        {isArabic ? 'التقارير المالية' : 'Financial Reports'}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {isArabic ? 'إيرادات المواعيد فقط' : 'Appointments revenue only'}
+                      </Typography>
+                    </Box>
+                  </Stack>
 
                   {/* Range selector */}
                   <ToggleButtonGroup
@@ -619,6 +986,15 @@ export default function ClinicReportsPage() {
                     exclusive
                     onChange={(_, v) => v && setFinRange(v)}
                     size="small"
+                    sx={{
+                      '& .MuiToggleButton-root': {
+                        borderRadius: 2,
+                        mx: 0.5,
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        '&.Mui-selected': { bgcolor: 'primary.main', color: 'white', '&:hover': { bgcolor: 'primary.dark' } }
+                      }
+                    }}
                   >
                     <ToggleButton value="week">{isArabic ? 'أسبوع' : 'Week'}</ToggleButton>
                     <ToggleButton value="month">{isArabic ? 'شهر' : 'Month'}</ToggleButton>
@@ -626,26 +1002,40 @@ export default function ClinicReportsPage() {
                   </ToggleButtonGroup>
                 </Stack>
 
-                <Typography color="text.secondary" sx={{ mb: 1 }}>
-                  {isArabic
-                    ? `إجمالي الإيرادات للفترة المختارة: ${Math.round(apptRevenue)}`
-                    : `Total Revenue for selected period: QAR ${Math.round(apptRevenue)}`}
-                </Typography>
-
-                <Divider sx={{ mb: 2 }} />
+                <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3, bgcolor: 'background.default', textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    {isArabic ? 'إجمالي الإيرادات للفترة المختارة' : 'Total Revenue for selected period'}
+                  </Typography>
+                  <Typography variant="h3" fontWeight={800} color="primary">
+                    {Math.round(apptRevenue).toLocaleString()} <Typography component="span" variant="h5" color="text.secondary">EGP</Typography>
+                  </Typography>
+                </Paper>
 
                 <Box sx={{ width: '100%', height: 340 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={chartData} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="value" />
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme.palette.divider} />
+                      <XAxis
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: theme.palette.text.secondary }}
+                        dy={10}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: theme.palette.text.secondary }}
+                      />
+                      <Tooltip
+                        cursor={{ fill: alpha(theme.palette.primary.main, 0.1) }}
+                        contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+                      />
+                      <Bar dataKey="value" fill={theme.palette.primary.main} radius={[8, 8, 0, 0]} barSize={60} />
                     </BarChart>
                   </ResponsiveContainer>
                 </Box>
-              </Paper>
+              </MotionPaper>
             </>
           )}
 

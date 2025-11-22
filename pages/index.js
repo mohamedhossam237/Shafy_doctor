@@ -3,10 +3,14 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
-  Box, Container, Stack, Typography, Grid, Paper, CircularProgress,
-  Button, Avatar, Divider, Chip
+  Box, Container, Stack, Typography, Paper, CircularProgress,
+  Button, Avatar, Divider, Chip, Grid, IconButton
 } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, alpha } from '@mui/material/styles';
+import { motion } from 'framer-motion';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
+} from 'recharts';
 
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
@@ -14,11 +18,14 @@ import AnalyticsIcon from '@mui/icons-material/Analytics';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import WavingHandIcon from '@mui/icons-material/WavingHand';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import AddPatientDialog from '@/components/patients/AddPatientDialog';
 
 /* --------------------------- Helpers --------------------------- */
@@ -77,158 +84,550 @@ function apptDate(appt) {
   return null;
 }
 
+function getGreeting(isArabic) {
+  const hour = new Date().getHours();
+  if (hour < 12) return isArabic ? 'صباح الخير' : 'Good Morning';
+  if (hour < 18) return isArabic ? 'مساء الخير' : 'Good Afternoon';
+  return isArabic ? 'مساء الخير' : 'Good Evening';
+}
+
 /* --------------------------- UI Components --------------------------- */
 
-function SectionCard({ children, isArabic, tint = 'transparent', sx = {}, ...props }) {
+// Helper for relative time
+function getRelativeTime(date, isArabic) {
+  if (!date) return '';
+  const now = new Date();
+  const diffInSeconds = Math.floor((now - new Date(date)) / 1000);
+
+  const rtf = new Intl.RelativeTimeFormat(isArabic ? 'ar' : 'en', { numeric: 'auto' });
+
+  if (diffInSeconds < 60) return isArabic ? 'الآن' : 'Just now';
+  if (diffInSeconds < 3600) return rtf.format(-Math.floor(diffInSeconds / 60), 'minute');
+  if (diffInSeconds < 86400) return rtf.format(-Math.floor(diffInSeconds / 3600), 'hour');
+  if (diffInSeconds < 604800) return rtf.format(-Math.floor(diffInSeconds / 86400), 'day');
+  return new Date(date).toLocaleDateString(isArabic ? 'ar-EG' : 'en-US');
+}
+
+const MotionPaper = motion(Paper);
+const MotionBox = motion(Box);
+
+function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddReport, onStats, remainingAppts }) {
   const theme = useTheme();
-  const bgImage = typeof tint === 'function' ? tint(theme) : tint;
+  const greeting = getGreeting(isArabic);
+
   return (
-    <Paper
-      {...props}
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
       elevation={0}
       sx={{
-        p: { xs: 1.25, sm: 2 },
-        borderRadius: 3,
-        border: (t) => `1px solid ${t.palette.divider}`,
-        ...(bgImage && bgImage !== 'transparent' ? { backgroundImage: bgImage } : {}),
-        backgroundColor: 'background.paper',
-        textAlign: isArabic ? 'right' : 'left',
-        boxShadow: '0 6px 18px rgba(0,0,0,.06)',
+        p: { xs: 4, md: 6 },
+        minHeight: 220,
+        borderRadius: 5,
+        background: `linear-gradient(120deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+        color: 'white',
+        position: 'relative',
         overflow: 'hidden',
-        ...sx,
+        boxShadow: '0 20px 40px -10px rgba(0,0,0,0.3)',
+        display: 'flex',
+        flexDirection: { xs: 'column', md: 'row' },
+        alignItems: { xs: 'flex-start', md: 'center' },
+        justifyContent: 'space-between',
+        gap: { xs: 4, md: 10 }
       }}
     >
-      {children}
-    </Paper>
+      {/* Decorative circles */}
+      <Box sx={{ position: 'absolute', top: -20, right: -20, width: 150, height: 150, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+      <Box sx={{ position: 'absolute', bottom: -40, left: 10, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+
+      <Stack direction="row" alignItems="center" spacing={3} sx={{ position: 'relative', zIndex: 1 }}>
+        <Avatar
+          sx={{
+            width: 72, height: 72,
+            bgcolor: 'rgba(255,255,255,0.2)',
+            color: 'white',
+            border: '2px solid rgba(255,255,255,0.3)',
+            boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
+          }}
+        >
+          <WavingHandIcon sx={{ fontSize: 40 }} />
+        </Avatar>
+        <Box>
+          <Typography variant="overline" sx={{ opacity: 0.9, letterSpacing: 1.5, fontWeight: 600 }}>
+            {todayPretty}
+          </Typography>
+          <Typography variant="h3" fontWeight={800} sx={{ mb: 1, textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            {greeting}, {isArabic ? 'د.' : 'Dr.'} {doctorName}
+          </Typography>
+          <Typography variant="h6" sx={{ opacity: 0.95, fontWeight: 500 }}>
+            {remainingAppts > 0
+              ? (isArabic ? `لديك ${remainingAppts} مواعيد متبقية اليوم` : `You have ${remainingAppts} appointments remaining today`)
+              : (isArabic ? 'لا توجد مواعيد متبقية اليوم' : 'No appointments remaining today')}
+          </Typography>
+        </Box>
+      </Stack>
+
+      {/* Quick Actions in Banner */}
+      <Stack direction="row" spacing={3} sx={{ position: 'relative', zIndex: 1, width: { xs: '100%', md: 'auto' } }}>
+        <Button
+          onClick={onAddPatient}
+          variant="contained"
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.15)',
+            color: 'white',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: 'none',
+            minWidth: 130,
+            py: 1.5,
+            px: 3,
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
+          }}
+          startIcon={<PersonAddAlt1Icon />}
+        >
+          {isArabic ? 'مريض' : 'Patient'}
+        </Button>
+        <Button
+          onClick={onAddReport}
+          variant="contained"
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.15)',
+            color: 'white',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: 'none',
+            minWidth: 130,
+            py: 1.5,
+            px: 3,
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
+          }}
+          startIcon={<AssessmentIcon />}
+        >
+          {isArabic ? 'تقرير' : 'Report'}
+        </Button>
+        <Button
+          onClick={onStats}
+          variant="contained"
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.15)',
+            color: 'white',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: 'none',
+            minWidth: 130,
+            py: 1.5,
+            px: 3,
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
+          }}
+          startIcon={<AnalyticsIcon />}
+        >
+          {isArabic ? 'إحصائيات' : 'Stats'}
+        </Button>
+      </Stack>
+    </MotionPaper>
   );
 }
 
-function StatTile({ icon, label, count, href, isArabic, withLang }) {
+function StatTile({ icon, label, count, href, isArabic, withLang, color, delay }) {
+  const theme = useTheme();
+
   return (
     <Link href={withLang(href)} style={{ textDecoration: 'none' }}>
-      <Paper
+      <MotionPaper
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay }}
         elevation={0}
         sx={{
-          borderRadius: 3,
-          border: (t) => `1px solid ${t.palette.divider}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 1.25,
+          p: 3,
+          borderRadius: 4,
           height: '100%',
-          p: 1.75,
-          transition: 'all .15s ease',
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          transition: 'all 0.3s ease',
           '&:hover': {
-            transform: 'translateY(-2px)',
-            boxShadow: '0 8px 20px rgba(0,0,0,.08)',
-          },
-          textAlign: isArabic ? 'right' : 'left',
+            transform: 'translateY(-4px)',
+            boxShadow: '0 12px 24px -10px rgba(0,0,0,0.1)',
+            borderColor: color,
+          }
         }}
       >
-        {isArabic ? (
-          <>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" fontWeight={800}>
-                {count}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" noWrap>
-                {label.ar}
-              </Typography>
-            </Box>
-            <ChevronRightIcon sx={{ color: 'text.disabled', transform: 'rotate(180deg)' }} />
-            <Avatar sx={{ bgcolor: 'primary.main', color: 'white' }}>{icon}</Avatar>
-          </>
-        ) : (
-          <>
-            <Avatar sx={{ bgcolor: 'primary.main', color: 'white' }}>{icon}</Avatar>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" fontWeight={800}>
-                {count}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" noWrap>
-                {label.en}
-              </Typography>
-            </Box>
-            <ChevronRightIcon sx={{ color: 'text.disabled' }} />
-          </>
-        )}
-      </Paper>
+        <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="flex-start">
+          <Avatar
+            variant="rounded"
+            sx={{
+              bgcolor: alpha(color, 0.1),
+              color: color,
+              width: 56,
+              height: 56,
+              borderRadius: 3
+            }}
+          >
+            {icon}
+          </Avatar>
+          <Box
+            sx={{
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              color: 'text.disabled',
+              transition: 'color 0.2s',
+              '.MuiPaper-root:hover &': { color: color }
+            }}
+          >
+            <ArrowForwardIcon fontSize="small" sx={{ transform: isArabic ? 'rotate(180deg)' : 'none' }} />
+          </Box>
+        </Stack>
+
+        <Box sx={{ mt: 3, textAlign: isArabic ? 'right' : 'left' }}>
+          <Typography variant="h3" fontWeight={800} sx={{ color: 'text.primary', mb: 0.5 }}>
+            {count}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" fontWeight={600}>
+            {isArabic ? label.ar : label.en}
+          </Typography>
+        </Box>
+      </MotionPaper>
     </Link>
   );
 }
 
-function QuickActions({ isArabic, onAddPatient, onAddReport, onOpenClinicReports }) {
+function ActionButton({ icon, label, onClick, color = 'primary', delay }) {
   return (
-    <SectionCard
-      isArabic={isArabic}
-      tint={(t) => grad(t.palette.primary.light, '#ffffff')}
+    <MotionPaper
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.3, delay }}
+      elevation={0}
+      component="button"
+      onClick={onClick}
+      sx={{
+        width: '100%',
+        p: 2,
+        borderRadius: 3,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 1.5,
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          bgcolor: alpha(color === 'primary' ? '#1976d2' : '#ed6c02', 0.04),
+          borderColor: color === 'primary' ? 'primary.main' : 'warning.main',
+          transform: 'translateY(-2px)',
+        }
+      }}
     >
-      <Stack
-        direction={isArabic ? 'row-reverse' : 'row'}
-        justifyContent="space-between"
-        alignItems="center"
-        flexWrap="wrap"
-        spacing={1}
-      >
-        <Typography fontWeight={800}>
-          {isArabic ? 'ابدأ بسرعة' : 'Quick Actions'}
-        </Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <Button variant="contained" startIcon={<PersonAddAlt1Icon />} onClick={onAddPatient}>
-            {isArabic ? 'إضافة مريض' : 'Add Patient'}
-          </Button>
-          <Button variant="outlined" startIcon={<AssessmentIcon />} onClick={onAddReport}>
-            {isArabic ? 'إضافة تقرير' : 'Add Report'}
-          </Button>
-          <Button variant="outlined" startIcon={<AnalyticsIcon />} onClick={onOpenClinicReports}>
-            {isArabic ? 'تقارير العيادة' : 'Clinic Reports'}
-          </Button>
-        </Stack>
-      </Stack>
-    </SectionCard>
+      <Avatar sx={{ bgcolor: alpha(color === 'primary' ? '#1976d2' : '#ed6c02', 0.1), color: color === 'primary' ? 'primary.main' : 'warning.main' }}>
+        {icon}
+      </Avatar>
+      <Typography variant="subtitle2" fontWeight={700}>
+        {label}
+      </Typography>
+    </MotionPaper>
   );
 }
 
-function AppointmentItem({ appt, isArabic, withLang }) {
+function AppointmentItem({ appt, isArabic, withLang, index, isLast }) {
   const d = apptDate(appt);
   const patientName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
   const status = String(appt?.status || '').toLowerCase();
   const completed = status === 'completed';
   const detailHref = appt?.patientId ? withLang(`/patients/${appt.patientId}`) : withLang('/patients');
+  const theme = useTheme();
+
+  // Calculate if starting soon (within 1 hour)
+  const now = new Date();
+  const diffMins = Math.floor((d - now) / 60000);
+  const isStartingSoon = !completed && diffMins > 0 && diffMins <= 60;
 
   return (
-    <Link href={detailHref} style={{ textDecoration: 'none' }}>
-      <Paper
+    <Link href={detailHref} style={{ textDecoration: 'none', width: '100%' }}>
+      <MotionPaper
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.4, delay: index * 0.1 }}
         elevation={0}
         sx={{
-          px: 1.75,
-          py: 1.4,
-          borderRadius: 2.5,
+          p: 2,
+          borderRadius: 3,
           display: 'flex',
           alignItems: 'center',
-          gap: 1.1,
-          border: (t) => `1px solid ${t.palette.divider}`,
-          '&:hover': { backgroundColor: 'action.hover' },
+          gap: 2,
+          border: '1px solid',
+          borderColor: isStartingSoon ? 'warning.main' : 'divider',
+          position: 'relative',
+          transition: 'all 0.2s ease',
+          bgcolor: isStartingSoon ? alpha(theme.palette.warning.main, 0.02) : 'background.paper',
+          '&:hover': {
+            borderColor: 'primary.main',
+            bgcolor: alpha(theme.palette.primary.main, 0.02),
+            transform: 'translateX(4px)',
+          },
         }}
       >
-        <Avatar sx={{ bgcolor: completed ? 'success.main' : 'warning.main', color: 'white' }}>
-          <PeopleAltIcon fontSize="small" />
-        </Avatar>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography fontWeight={700} noWrap>
-            {patientName}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>
+        {/* Timeline connector line (visual only, simplified for card view) */}
+        {!isLast && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 30,
+              bottom: -20,
+              width: 2,
+              height: 20,
+              bgcolor: 'divider',
+              display: { xs: 'none', sm: 'block' } // Hide on mobile if stack is tight
+            }}
+          />
+        )}
+
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: 60,
+            p: 1,
+            borderRadius: 2,
+            bgcolor: completed ? alpha(theme.palette.success.main, 0.1) : alpha(theme.palette.primary.main, 0.1),
+            color: completed ? 'success.main' : 'primary.main',
+          }}
+        >
+          <AccessTimeIcon fontSize="small" />
+          <Typography variant="caption" fontWeight={700} sx={{ mt: 0.5 }}>
             {formatTime(d)}
           </Typography>
         </Box>
-        <Chip
-          size="small"
-          label={completed ? (isArabic ? 'منجز' : 'Completed') : (isArabic ? 'قيد الانتظار' : 'Pending')}
-          color={completed ? 'success' : 'warning'}
-          variant="outlined"
-        />
-      </Paper>
+
+        <Box sx={{ flex: 1, minWidth: 0, textAlign: isArabic ? 'right' : 'left' }}>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="subtitle1" fontWeight={700} noWrap sx={{ color: 'text.primary' }}>
+              {patientName}
+            </Typography>
+            {isStartingSoon && (
+              <Chip
+                label={isArabic ? `خلال ${diffMins} دقيقة` : `In ${diffMins}m`}
+                size="small"
+                color="warning"
+                sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
+              />
+            )}
+          </Stack>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="caption" color="text.secondary">
+              {isArabic ? 'كشف' : 'Consultation'}
+            </Typography>
+            {appt?.appointmentType === 'followup' && (
+              <Chip label={isArabic ? 'إعادة' : 'Re-exam'} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
+            )}
+          </Stack>
+        </Box>
+
+        {completed && (
+          <Chip
+            size="small"
+            label={isArabic ? 'منجز' : 'Done'}
+            color="success"
+            variant="soft" // If supported, else default
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          />
+        )}
+      </MotionPaper>
     </Link>
+  );
+}
+
+function WeeklyChart({ data, isArabic }) {
+  const theme = useTheme();
+  return (
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+      elevation={0}
+      sx={{
+        p: 3,
+        borderRadius: 4,
+        border: '1px solid',
+        borderColor: 'divider',
+        height: 350,
+        position: 'relative'
+      }}
+    >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+        <Typography variant="h6" fontWeight={800}>
+          {isArabic ? 'نشاط الأسبوع' : 'Weekly Activity'}
+        </Typography>
+        <Chip
+          label={isArabic ? `الإجمالي: ${data.reduce((a, b) => a + b.count, 0)}` : `Total: ${data.reduce((a, b) => a + b.count, 0)}`}
+          size="small"
+          color="primary"
+          variant="soft"
+        />
+      </Stack>
+      <ResponsiveContainer width="100%" height="85%">
+        <BarChart data={data}>
+          <XAxis
+            dataKey="day"
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+            dy={10}
+          />
+          <Tooltip
+            cursor={{ fill: alpha(theme.palette.primary.main, 0.1) }}
+            contentStyle={{ borderRadius: 12, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}
+          />
+          <Bar dataKey="count" radius={[6, 6, 6, 6]} barSize={32}>
+            {data.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={entry.today ? theme.palette.primary.main : alpha(theme.palette.primary.main, 0.3)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </MotionPaper>
+  );
+}
+
+function RecentPatientsList({ patients, isArabic, withLang }) {
+  return (
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.3 }}
+      elevation={0}
+      sx={{ p: 3, borderRadius: 4, border: '1px solid', borderColor: 'divider', height: '100%' }}
+    >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+        <Typography variant="h6" fontWeight={800}>
+          {isArabic ? 'أحدث المرضى' : 'Recent Patients'}
+        </Typography>
+        <Link href={withLang('/patients')} style={{ textDecoration: 'none' }}>
+          <Typography variant="body2" color="primary" fontWeight={700} sx={{ '&:hover': { textDecoration: 'underline' } }}>
+            {isArabic ? 'عرض الكل' : 'View All'}
+          </Typography>
+        </Link>
+      </Stack>
+      <Stack spacing={1}>
+        {patients.length === 0 ? (
+          <Typography color="text.secondary" variant="body2">
+            {isArabic ? 'لا يوجد مرضى مؤخراً' : 'No recent patients'}
+          </Typography>
+        ) : (
+          patients.map((p) => (
+            <Button
+              key={p.id}
+              component={Link}
+              href={withLang(`/patients/${p.id}`)}
+              sx={{
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                p: 1.5,
+                borderRadius: 2,
+                color: 'text.primary',
+                '&:hover': { bgcolor: 'action.hover' }
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ width: '100%' }}>
+                <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.dark', width: 40, height: 40 }}>
+                  {String(p.name || '?')[0].toUpperCase()}
+                </Avatar>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2" fontWeight={700} noWrap>
+                    {p.name}
+                  </Typography>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Typography variant="caption" color="text.secondary">
+                      {p.phone || '—'}
+                    </Typography>
+                    {p.createdAt && (
+                      <Typography variant="caption" color="text.disabled">
+                        • {getRelativeTime(p.createdAt?.toDate ? p.createdAt.toDate() : p.createdAt, isArabic)}
+                      </Typography>
+                    )}
+                  </Stack>
+                </Box>
+                <ChevronRightIcon fontSize="small" sx={{ color: 'text.disabled', transform: isArabic ? 'rotate(180deg)' : 'none' }} />
+              </Stack>
+            </Button>
+          ))
+        )}
+      </Stack>
+    </MotionPaper>
+  );
+}
+
+function RecentReportsList({ reports, isArabic, withLang }) {
+  return (
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.4 }}
+      elevation={0}
+      sx={{ p: 3, borderRadius: 4, border: '1px solid', borderColor: 'divider', height: '100%' }}
+    >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+        <Typography variant="h6" fontWeight={800}>
+          {isArabic ? 'أحدث التقارير' : 'Recent Reports'}
+        </Typography>
+        <Link href={withLang('/patient-reports')} style={{ textDecoration: 'none' }}>
+          <Typography variant="body2" color="primary" fontWeight={700} sx={{ '&:hover': { textDecoration: 'underline' } }}>
+            {isArabic ? 'عرض الكل' : 'View All'}
+          </Typography>
+        </Link>
+      </Stack>
+      <Stack spacing={1}>
+        {reports.length === 0 ? (
+          <Typography color="text.secondary" variant="body2">
+            {isArabic ? 'لا توجد تقارير مؤخراً' : 'No recent reports'}
+          </Typography>
+        ) : (
+          reports.map((r) => (
+            <Button
+              key={r.id}
+              component={Link}
+              href={withLang('/patient-reports')} // Or specific report dialog if possible, but link to page is safer
+              sx={{
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                p: 1.5,
+                borderRadius: 2,
+                color: 'text.primary',
+                '&:hover': { bgcolor: 'action.hover' }
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ width: '100%' }}>
+                <Avatar sx={{ bgcolor: 'info.light', color: 'info.dark', width: 40, height: 40 }}>
+                  <AssessmentIcon fontSize="small" />
+                </Avatar>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2" fontWeight={700} noWrap>
+                    {r.patientName || (isArabic ? 'مريض' : 'Patient')}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {r.title || (isArabic ? 'تقرير' : 'Report')}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', minWidth: 70, textAlign: 'end' }}>
+                  {getRelativeTime(r.date, isArabic)}
+                </Typography>
+              </Stack>
+            </Button>
+          ))
+        )}
+      </Stack>
+    </MotionPaper>
   );
 }
 
@@ -237,12 +636,16 @@ function AppointmentItem({ appt, isArabic, withLang }) {
 export default function DashboardIndexPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const theme = useTheme();
   const [mounted, setMounted] = React.useState(false);
   const [isArabic, setIsArabic] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState('');
   const [doctorName, setDoctorName] = React.useState('Doctor');
   const [appointments, setAppointments] = React.useState([]);
+  const [weeklyData, setWeeklyData] = React.useState([]);
+  const [recentPatients, setRecentPatients] = React.useState([]);
+  const [recentReports, setRecentReports] = React.useState([]);
   const [counts, setCounts] = React.useState({ appointments: 0, patients: 0, reports: 0 });
   const [openAddPatient, setOpenAddPatient] = React.useState(false);
 
@@ -288,8 +691,34 @@ export default function DashboardIndexPage() {
           .slice(0, 4);
         setAppointments(upcoming);
 
-        // ✅ patients (only with phone number)
+        // Weekly Data (last 7 days)
+        const last7Days = Array.from({ length: 7 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (6 - i));
+          return d;
+        });
+
+        const weeklyStats = last7Days.map(day => {
+          const dayStr = day.toLocaleDateString('en-CA'); // YYYY-MM-DD
+          const count = rows.filter(r => {
+            const rd = r._dt;
+            return rd && rd.getDate() === day.getDate() && rd.getMonth() === day.getMonth() && rd.getFullYear() === day.getFullYear();
+          }).length;
+          return {
+            day: day.toLocaleDateString(isArabic ? 'ar-EG' : 'en-US', { weekday: 'short' }),
+            count,
+            today: isToday(day)
+          };
+        });
+        setWeeklyData(weeklyStats);
+
+        // Recent Patients
         const patientsCol = collection(db, 'patients');
+        const pQuery = query(patientsCol, where('registeredBy', '==', doctorUID), orderBy('createdAt', 'desc'), limit(5));
+        const pSnap = await getDocs(pQuery);
+        setRecentPatients(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+        // Total Patients Count (approximate for now, using previous logic)
         const [snapAssoc, snapReg] = await Promise.all([
           getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', doctorUID))),
           getDocs(query(patientsCol, where('registeredBy', '==', doctorUID))),
@@ -298,18 +727,15 @@ export default function DashboardIndexPage() {
         [...snapAssoc.docs, ...snapReg.docs].forEach((d) =>
           patientMap.set(d.id, { id: d.id, ...d.data() })
         );
-        const patientRows = Array.from(patientMap.values());
-        const visiblePatients = patientRows.filter(
-          (p) =>
-            p?.name &&
-            String(p.name).trim() &&
-            typeof p.phone === 'string' &&
-            p.phone.trim() !== ''
-        );
-        const visiblePatientsCount = visiblePatients.length;
+        const visiblePatientsCount = patientMap.size;
 
-        // reports
+        // Recent Reports
         const colRep = collection(db, 'reports');
+        const rQuery = query(colRep, where('doctorUID', '==', doctorUID), orderBy('createdAt', 'desc'), limit(5));
+        // Note: if 'createdAt' is missing on some reports, this might fail or return empty. 
+        // Fallback to client-side sort if needed, but let's try query first.
+        // Actually, let's stick to the previous logic of fetching all and sorting client side for reports to be safe, 
+        // but limit to 5 for the UI.
         const [repSnapUID, repSnapId] = await Promise.all([
           getDocs(query(colRep, where('doctorUID', '==', doctorUID))),
           getDocs(query(colRep, where('doctorId', '==', doctorUID))),
@@ -317,6 +743,9 @@ export default function DashboardIndexPage() {
         const repMap = new Map();
         [...repSnapUID.docs, ...repSnapId.docs].forEach((d) => repMap.set(d.id, { id: d.id, ...d.data() }));
         const repRows = Array.from(repMap.values());
+        // Sort by date desc
+        repRows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
+        setRecentReports(repRows.slice(0, 5));
 
         setCounts({
           appointments: todayAll.length,
@@ -349,99 +778,147 @@ export default function DashboardIndexPage() {
         onSaved={(newId) => router.push(withLang(`/patients/${newId}`))}
       />
 
-      <Box dir={isArabic ? 'rtl' : 'ltr'}>
-        <Container maxWidth="lg" sx={{ py: 3 }}>
-          <SectionCard isArabic={isArabic} tint={() => grad('#e9f3ff', '#ffffff')}>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ bgcolor: 'primary.main', color: 'white' }}>Dr</Avatar>
-              <Box>
-                <Typography variant="overline" color="text.secondary">
-                  {todayPretty}
-                </Typography>
-                <Typography variant="h5" fontWeight={800}>
-                  {isArabic ? 'مرحباً بعودتك، د.' : 'Welcome back, Dr.'} {doctorName}
-                </Typography>
-              </Box>
-            </Stack>
-          </SectionCard>
+      <Box dir={isArabic ? 'rtl' : 'ltr'} sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+        <Container maxWidth="lg" sx={{ py: 4 }}>
+
+          <Box sx={{ mb: 5 }}>
+            <WelcomeBanner
+              doctorName={doctorName}
+              isArabic={isArabic}
+              todayPretty={todayPretty}
+              onAddPatient={addPatient}
+              onAddReport={addReport}
+              onStats={openClinicReports}
+              remainingAppts={appointments.filter(a => String(a.status).toLowerCase() !== 'completed').length}
+            />
+          </Box>
 
           {loading ? (
-            <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
-              <CircularProgress />
+            <Box sx={{ display: 'grid', placeItems: 'center', py: 10 }}>
+              <CircularProgress size={60} thickness={4} />
             </Box>
           ) : err ? (
-            <Typography color="error">{err}</Typography>
+            <Typography color="error" align="center" sx={{ mt: 4 }}>{err}</Typography>
           ) : (
-            <>
-              {/* Stats */}
-              <Box
-                sx={{
-                  mt: 2,
-                  display: 'grid',
-                  gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(3, 1fr)' },
-                  gap: 1.5,
-                }}
-              >
-                <StatTile
-                  icon={<CalendarTodayIcon />}
-                  label={{ en: "Today's Appointments", ar: 'مواعيد اليوم' }}
-                  count={counts.appointments}
-                  href="/appointments"
-                  isArabic={isArabic}
-                  withLang={withLang}
-                />
-                <StatTile
-                  icon={<PeopleAltIcon />}
-                  label={{ en: 'Patients (You)', ar: 'المرضى (مسجّلين لديك)' }}
-                  count={counts.patients}
-                  href="/patients"
-                  isArabic={isArabic}
-                  withLang={withLang}
-                />
-                <StatTile
-                  icon={<AnalyticsIcon />}
-                  label={{ en: 'Reports', ar: 'تقارير' }}
-                  count={counts.reports}
-                  href="/patient-reports"
-                  isArabic={isArabic}
-                  withLang={withLang}
-                />
-              </Box>
+            <Grid container spacing={5} sx={{ mt: 1 }}>
 
-              {/* Quick Actions */}
-              <Box sx={{ mt: 3 }}>
-                <QuickActions
-                  isArabic={isArabic}
-                  onAddPatient={addPatient}
-                  onAddReport={addReport}
-                  onOpenClinicReports={openClinicReports}
-                />
-              </Box>
-
-              {/* Appointments */}
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="h6" fontWeight={800}>
-                  {isArabic ? 'المواعيد القادمة اليوم' : 'Upcoming Today'}
+              {/* Stats Row */}
+              <Grid item xs={12}>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 2 }}>
+                  {isArabic ? 'نظرة عامة' : 'Overview'}
                 </Typography>
-                <Divider sx={{ my: 1 }} />
-                <Stack spacing={1.25}>
-                  {appointments.length === 0 ? (
-                    <Typography color="text.secondary">
-                      {isArabic ? 'لا توجد مواعيد قادمة اليوم' : 'No upcoming appointments today'}
-                    </Typography>
-                  ) : (
-                    appointments.map((appt) => (
-                      <AppointmentItem
-                        key={appt.id}
-                        appt={appt}
-                        isArabic={isArabic}
-                        withLang={withLang}
-                      />
-                    ))
-                  )}
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <StatTile
+                      icon={<CalendarTodayIcon />}
+                      label={{ en: "Today's Appts", ar: 'مواعيد اليوم' }}
+                      count={counts.appointments}
+                      href="/appointments"
+                      isArabic={isArabic}
+                      withLang={withLang}
+                      color={theme.palette.primary.main}
+                      delay={0.1}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <StatTile
+                      icon={<PeopleAltIcon />}
+                      label={{ en: 'Total Patients', ar: 'إجمالي المرضى' }}
+                      count={counts.patients}
+                      href="/patients"
+                      isArabic={isArabic}
+                      withLang={withLang}
+                      color="#00b894"
+                      delay={0.2}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <StatTile
+                      icon={<AnalyticsIcon />}
+                      label={{ en: 'Total Reports', ar: 'التقارير' }}
+                      count={counts.reports}
+                      href="/patient-reports"
+                      isArabic={isArabic}
+                      withLang={withLang}
+                      color="#6c5ce7"
+                      delay={0.3}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+
+              {/* Left Column: Chart & Recent Data */}
+              <Grid item xs={12} md={8}>
+                {/* Weekly Chart */}
+                <Box sx={{ mb: 4 }}>
+                  <WeeklyChart data={weeklyData} isArabic={isArabic} />
+                </Box>
+
+                {/* Recent Lists (Side-by-side) */}
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <RecentPatientsList patients={recentPatients} isArabic={isArabic} withLang={withLang} />
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <RecentReportsList reports={recentReports} isArabic={isArabic} withLang={withLang} />
+                  </Grid>
+                </Grid>
+              </Grid>
+
+              {/* Right Column: Stats, Actions, Upcoming */}
+              <Grid item xs={12} md={4}>
+                <Stack spacing={4}>
+
+                  {/* Upcoming Appointments */}
+                  <Box>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                      <Typography variant="h6" fontWeight={800}>
+                        {isArabic ? 'القادم اليوم' : 'Up Next'}
+                      </Typography>
+                      <Link href={withLang('/appointments')} style={{ textDecoration: 'none' }}>
+                        <Typography variant="body2" color="primary" fontWeight={700} sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
+                          {isArabic ? 'عرض الكل' : 'View All'}
+                        </Typography>
+                      </Link>
+                    </Stack>
+
+                    <Stack spacing={2}>
+                      {appointments.length === 0 ? (
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 4,
+                            textAlign: 'center',
+                            borderRadius: 3,
+                            bgcolor: 'background.paper',
+                            border: '1px dashed',
+                            borderColor: 'divider'
+                          }}
+                        >
+                          <CalendarTodayIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
+                          <Typography color="text.secondary">
+                            {isArabic ? 'لا توجد مواعيد قادمة اليوم' : 'No upcoming appointments today'}
+                          </Typography>
+                        </Paper>
+                      ) : (
+                        appointments.map((appt, i) => (
+                          <AppointmentItem
+                            key={appt.id}
+                            appt={appt}
+                            isArabic={isArabic}
+                            withLang={withLang}
+                            index={i}
+                            isLast={i === appointments.length - 1}
+                          />
+                        ))
+                      )}
+                    </Stack>
+                  </Box>
+
                 </Stack>
-              </Box>
-            </>
+              </Grid>
+
+            </Grid>
           )}
         </Container>
       </Box>

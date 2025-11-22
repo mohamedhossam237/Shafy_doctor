@@ -125,6 +125,7 @@ export default function NewAppointmentPage() {
   const [dateStr, setDateStr] = React.useState(toYMD(new Date()));
   const [timeStr, setTimeStr] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [appointmentType, setAppointmentType] = React.useState("checkup"); // checkup | followup
   const [additionalFees, setAdditionalFees] = React.useState("");
   const [totalAmount, setTotalAmount] = React.useState(0);
 
@@ -206,10 +207,15 @@ export default function NewAppointmentPage() {
 
   /* ---- Update total ---- */
   React.useEffect(() => {
-    const base = Number(doctor?.checkupPrice || 0);
+    let base = 0;
+    if (appointmentType === "checkup") {
+      base = Number(doctor?.checkupPrice || 0);
+    } else {
+      base = Number(doctor?.followUpPrice || 0);
+    }
     const extra = Number(additionalFees || 0);
     setTotalAmount(base + extra);
-  }, [doctor?.checkupPrice, additionalFees]);
+  }, [doctor?.checkupPrice, doctor?.followUpPrice, additionalFees, appointmentType]);
 
   /* ---- Submit ---- */
   async function handleSubmit(e) {
@@ -255,7 +261,8 @@ export default function NewAppointmentPage() {
         doctorId: user.uid,
         doctorName_ar: doctor?.name_ar || "",
         doctorName_en: doctor?.name_en || "",
-        doctorPrice: doctor?.checkupPrice || 0,
+        doctorPrice: appointmentType === "checkup" ? (doctor?.checkupPrice || 0) : (doctor?.followUpPrice || 0),
+        appointmentType,
         additionalFees: Number(additionalFees || 0),
         totalAmount,
         clinicId: selectedClinicId,
@@ -378,6 +385,41 @@ export default function NewAppointmentPage() {
                     </TextField>
                   )}
 
+                  <Divider />
+
+                  {/* Appointment Type Selection */}
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Typography variant="subtitle2" sx={{ minWidth: 80 }}>
+                      {isArabic ? "نوع الكشف:" : "Type:"}
+                    </Typography>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant={appointmentType === "checkup" ? "contained" : "outlined"}
+                        onClick={() => setAppointmentType("checkup")}
+                        size="small"
+                        sx={{
+                          borderRadius: 4,
+                          textTransform: "none",
+                          boxShadow: "none",
+                        }}
+                      >
+                        {isArabic ? "كشف جديد" : "Examination"}
+                      </Button>
+                      <Button
+                        variant={appointmentType === "followup" ? "contained" : "outlined"}
+                        onClick={() => setAppointmentType("followup")}
+                        size="small"
+                        sx={{
+                          borderRadius: 4,
+                          textTransform: "none",
+                          boxShadow: "none",
+                        }}
+                      >
+                        {isArabic ? "إعادة كشف" : "Re-examination"}
+                      </Button>
+                    </Stack>
+                  </Stack>
+
                   <TextField
                     label={isArabic ? "التاريخ" : "Date"}
                     type="date"
@@ -452,8 +494,8 @@ export default function NewAppointmentPage() {
                           ? "جاري الحجز..."
                           : "Booking..."
                         : isArabic
-                        ? "تأكيد الحجز"
-                        : "Book"}
+                          ? "تأكيد الحجز"
+                          : "Book"}
                     </Button>
                   </Stack>
                 </Stack>

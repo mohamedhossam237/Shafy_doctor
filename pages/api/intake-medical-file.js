@@ -10,9 +10,9 @@ export const config = {
   }
 };
 
-// ===================================================================
+// ===============================================================
 // FANAR CONFIG
-// ===================================================================
+// ===============================================================
 
 const FANAR_BASE = "https://api.fanar.qa/v1";
 const FANAR_MODEL = "Fanar";
@@ -48,9 +48,9 @@ async function fanarChat(messages) {
   return { ok: resp.ok, status: resp.status, data: json };
 }
 
-// ===================================================================
+// ===============================================================
 // SAFE JSON
-// ===================================================================
+// ===============================================================
 
 function safeExtractJson(text) {
   if (!text) return null;
@@ -70,9 +70,9 @@ function safeExtractJson(text) {
   }
 }
 
-// ===================================================================
-// MULTIPART (FORMIDABLE)
-// ===================================================================
+// ===============================================================
+// MULTIPART PARSER (FORMIDABLE)
+// ===============================================================
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
@@ -90,46 +90,39 @@ function parseMultipart(req) {
         : fields.patientId;
 
       let file = files.file;
+      if (Array.isArray(file)) file = file[0];
 
-      // Fix: formidable sometimes returns an array
-      if (Array.isArray(file)) {
-        file = file[0];
-      }
+      if (!file) return reject(new Error("File not found"));
+      if (!file.filepath) return reject(new Error("Uploaded file has no filepath"));
 
-      if (!file) {
-        return reject(new Error("Missing file field"));
-      }
-
-      if (!file.filepath) {
-        return reject(new Error("File has no filepath property"));
-      }
-
-      let fileBuffer = null;
+      let fileBuffer;
       try {
         fileBuffer = fs.readFileSync(file.filepath);
       } catch (e) {
-        return reject(new Error("Failed to read uploaded file"));
+        return reject(new Error("Cannot read uploaded file"));
       }
 
-      const filename = file.originalFilename || "";
-      const mimeType = file.mimetype || "";
-
-      resolve({ patientId, fileBuffer, filename, mimeType });
+      resolve({
+        patientId,
+        fileBuffer,
+        filename: file.originalFilename || "",
+        mimeType: file.mimetype || ""
+      });
     });
   });
 }
 
-// ===================================================================
+// ===============================================================
 // FILE TO TEXT
-// ===================================================================
+// ===============================================================
 
 async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
   if (!fileBuffer || !fileBuffer.length) return "";
 
-  const lowerName = (filename || "").toLowerCase();
-  const lowerMime = (mimeType || "").toLowerCase();
+  const name = (filename || "").toLowerCase();
+  const mime = (mimeType || "").toLowerCase();
 
-  if (lowerName.endsWith(".docx")) {
+  if (name.endsWith(".docx")) {
     try {
       const { value } = await mammoth.extractRawText({ buffer: fileBuffer });
       return value || "";
@@ -138,7 +131,7 @@ async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
     }
   }
 
-  if (lowerName.endsWith(".pdf") || lowerMime.includes("pdf")) {
+  if (name.endsWith(".pdf") || mime.includes("pdf")) {
     try {
       const data = await pdfParse(fileBuffer);
       return data.text || "";
@@ -150,9 +143,9 @@ async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
   return fileBuffer.toString("utf8");
 }
 
-// ===================================================================
-// FIREBASE TOKEN
-// ===================================================================
+// ===============================================================
+// FIREBASE TOKEN VERIFICATION
+// ===============================================================
 
 const FIREBASE_PROJECT_ID =
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
@@ -173,77 +166,117 @@ async function verifyToken(idToken) {
   return payload.user_id;
 }
 
-// ===================================================================
-// FIRESTORE UPDATE
-// ===================================================================
+// ===============================================================
+// FIRESTORE MERGE HELPERS
+// ===============================================================
+
+function convertFirestoreDocument(fields = {}) {
+  const out = {};
+
+  for (const key in fields) {
+    const v = fields[key];
+
+    if (v.stringValue !== undefined) out[key] = v.stringValue;
+    else if (v.integerValue !== undefined) out[key] = v.integerValue;
+    else if (v.arrayValue !== undefined) {
+      out[key] = (v.arrayValue.values || []).map(x => x.stringValue || "");
+    }
+    else if (v.mapValue !== undefined) {
+      out[key] = convertFirestoreDocument(v.mapValue.fields);
+    }
+    else out[key] = "";
+  }
+
+  return out;
+}
+
+function toFirestoreFields(data) {
+  const fields = {};
+
+  for (const key in data) {
+    const val = data[key];
+
+    if (Array.isArray(val)) {
+      fields[key] = {
+        arrayValue: {
+          values: val.map(x => ({ stringValue: String(x) }))
+        }
+      };
+    } else {
+      fields[key] = { stringValue: String(val || "") };
+    }
+  }
+
+  return fields;
+}
+
+function mergeArrays(oldArr = [], newArr = []) {
+  const set = new Set([
+    ...oldArr.map(x => x.trim()),
+    ...newArr.map(x => x.trim())
+  ]);
+  return Array.from(set).filter(Boolean);
+}
+
+function mergeLabResults(oldList = [], newList = []) {
+  const merged = [...oldList];
+
+  for (const item of newList) {
+    const exists = merged.some(
+      x => x.test.toLowerCase() === (item.test || "").toLowerCase()
+    );
+    if (!exists) merged.push(item);
+  }
+
+  return merged;
+}
+
+// ===============================================================
+// UPDATE FIRESTORE (MERGE, DO NOT DELETE OLD DATA)
+// ===============================================================
 
 async function updateFirestore(token, patientId, extracted) {
-  const url =
-    `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/patients/${patientId}?` +
-    [
-      "updateMask.fieldPaths=allergies",
-      "updateMask.fieldPaths=conditions",
-      "updateMask.fieldPaths=medications",
-      "updateMask.fieldPaths=diagnosis",
-      "updateMask.fieldPaths=findings",
-      "updateMask.fieldPaths=procedures",
-      "updateMask.fieldPaths=notes",
-      "updateMask.fieldPaths=labResultsFromFile",
-      "updateMask.fieldPaths=medicalFileUpdatedAt",
-      "updateMask.fieldPaths=maritalStatus",
-      "updateMask.fieldPaths=bloodType",
-      "updateMask.fieldPaths=age",
-      "updateMask.fieldPaths=gender"
-    ].join("&");
+  const docUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/patients/${patientId}`;
 
-  const arr = (list = []) => ({
-    arrayValue: {
-      values: (list || []).map((x) => ({ stringValue: x }))
-    }
+  const existingRes = await fetch(docUrl, {
+    headers: { Authorization: `Bearer ${token}` }
   });
 
-  const body = {
-    fields: {
-      allergies: arr(extracted.allergies),
-      conditions: arr(extracted.conditions),
-      medications: arr(extracted.medications),
+  let existing = {};
+  if (existingRes.ok) {
+    const json = await existingRes.json();
+    existing = convertFirestoreDocument(json.fields || {});
+  }
 
-      diagnosis: { stringValue: extracted.diagnosis || "" },
-      findings: { stringValue: extracted.findings || "" },
-      procedures: { stringValue: extracted.procedures || "" },
-      notes: { stringValue: extracted.notes || "" },
+  const merged = {
+    allergies: mergeArrays(existing.allergies, extracted.allergies),
+    conditions: mergeArrays(existing.conditions, extracted.conditions),
+    medications: mergeArrays(existing.medications, extracted.medications),
 
-      labResultsFromFile: {
-        arrayValue: {
-          values: (extracted.labResults || []).map((x) => ({
-            mapValue: {
-              fields: {
-                test: { stringValue: x.test || "" },
-                value: { stringValue: x.value || "" },
-                unit: { stringValue: x.unit || "" },
-                referenceRange: { stringValue: x.referenceRange || "" },
-                flag: { stringValue: x.flag || "" }
-              }
-            }
-          }))
-        }
-      },
+    notes: [
+      existing.notes || "",
+      extracted.notes || ""
+    ].filter(Boolean).join("\n"),
 
-      medicalFileUpdatedAt: { timestampValue: new Date().toISOString() },
-      maritalStatus: { stringValue: extracted.maritalStatus || "" },
-      bloodType: { stringValue: extracted.bloodType || "" },
+    diagnosis: extracted.diagnosis || existing.diagnosis || "",
+    findings: extracted.findings || existing.findings || "",
+    procedures: extracted.procedures || existing.procedures || "",
 
-      age: {
-        integerValue: extracted.age
-          ? String(extracted.age).replace(/\D/g, "") || "0"
-          : "0"
-      },
+    labResults: mergeLabResults(existing.labResults, extracted.labResults),
 
-      gender: { stringValue: extracted.gender || "" }
-    }
+    age: extracted.age || existing.age || "",
+    gender: extracted.gender || existing.gender || "",
+    bloodType: extracted.bloodType || existing.bloodType || "",
+    maritalStatus: extracted.maritalStatus || existing.maritalStatus || "",
+
+    medicalFileUpdatedAt: new Date().toISOString()
   };
 
-  const r = await fetch(url, {
+  const body = {
+    fields: toFirestoreFields(merged)
+  };
+
+  const r = await fetch(docUrl, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -253,14 +286,18 @@ async function updateFirestore(token, patientId, extracted) {
   });
 
   if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(txt);
+    throw new Error(await r.text());
   }
 }
 
-// ===================================================================
-// CHUNK / MERGE
-// ===================================================================
+// ===============================================================
+// TEXT CLEANING + CHUNKING
+// ===============================================================
+
+function clean(s) {
+  if (!s) return "";
+  return String(s).replace(/\s+/g, " ").trim();
+}
 
 function splitChunks(text) {
   const chunks = [];
@@ -268,11 +305,6 @@ function splitChunks(text) {
     chunks.push(text.slice(i, i + MAX_CHARS_PER_CHUNK));
   }
   return chunks;
-}
-
-function clean(s) {
-  if (!s) return "";
-  return String(s).replace(/\s+/g, " ").trim();
 }
 
 function makeEmpty() {
@@ -292,108 +324,9 @@ function makeEmpty() {
   };
 }
 
-function merge(parts) {
-  const out = makeEmpty();
-
-  const mergeArr = (target, arr) => {
-    (arr || []).forEach((v) => {
-      const s = clean(v);
-      if (s && !target.includes(s)) target.push(s);
-    });
-  };
-
-  for (const p of parts) {
-    if (!p) continue;
-
-    mergeArr(out.allergies, p.allergies);
-    mergeArr(out.conditions, p.conditions);
-    mergeArr(out.medications, p.medications);
-
-    ["diagnosis", "findings", "procedures", "notes"].forEach((k) => {
-      if (p[k]) {
-        const val = clean(p[k]);
-        if (val) {
-          out[k] = out[k] ? out[k] + "\n" + val : val;
-        }
-      }
-    });
-
-    if (Array.isArray(p.labResults)) {
-      out.labResults.push(
-        ...p.labResults.map((x) => ({
-          test: clean(x.test),
-          value: clean(x.value),
-          unit: clean(x.unit),
-          referenceRange: clean(x.referenceRange),
-          flag: clean(x.flag)
-        }))
-      );
-    }
-
-    if (!out.age && p.age) out.age = clean(p.age);
-    if (!out.gender && p.gender) out.gender = clean(p.gender);
-    if (!out.maritalStatus && p.maritalStatus)
-      out.maritalStatus = clean(p.maritalStatus);
-    if (!out.bloodType && p.bloodType)
-      out.bloodType = clean(p.bloodType);
-  }
-
-  return out;
-}
-
-// ===================================================================
-// NOTES BUILDER
-// ===================================================================
-
-function buildNotesFromExtract(extracted) {
-  const sections = [];
-
-  const arr = (label, list) => {
-    const items = (list || []).map(clean).filter(Boolean);
-    if (items.length) {
-      sections.push(`${label}: ${items.join(", ")}`);
-    }
-  };
-
-  arr("Allergies", extracted.allergies);
-  arr("Conditions", extracted.conditions);
-  arr("Medications", extracted.medications);
-
-  if (clean(extracted.diagnosis))
-    sections.push("Diagnosis: " + clean(extracted.diagnosis));
-  if (clean(extracted.findings))
-    sections.push("Findings: " + clean(extracted.findings));
-  if (clean(extracted.procedures))
-    sections.push("Procedures: " + clean(extracted.procedures));
-
-  if (Array.isArray(extracted.labResults)) {
-    const lines = extracted.labResults
-      .map((x) => {
-        const parts = [];
-        if (clean(x.test)) parts.push("Test: " + clean(x.test));
-        if (clean(x.value)) parts.push("Value: " + clean(x.value));
-        if (clean(x.unit)) parts.push("Unit: " + clean(x.unit));
-        if (clean(x.flag)) parts.push("Flag: " + clean(x.flag));
-        if (!parts.length) return null;
-        return "- " + parts.join(", ");
-      })
-      .filter(Boolean);
-
-    if (lines.length) {
-      sections.push("Lab Results:");
-      sections.push(...lines);
-    }
-  }
-
-  if (clean(extracted.notes))
-    sections.push("Other notes: " + clean(extracted.notes));
-
-  return sections.join("\n").trim();
-}
-
-// ===================================================================
+// ===============================================================
 // FANAR EXTRACTION
-// ===================================================================
+// ===============================================================
 
 async function extractWithFanar(text) {
   const chunks = splitChunks(text);
@@ -401,8 +334,8 @@ async function extractWithFanar(text) {
 
   const system = `
 Extract only medical information.
-Remove all personal identifiers.
-Return JSON exactly matching schema:
+Remove personal identifiers.
+Return strict JSON:
 {
   "allergies": [],
   "conditions": [],
@@ -425,36 +358,125 @@ Return JSON exactly matching schema:
       { role: "user", content: chunks[i] }
     ]);
 
-    if (!resp.ok) {
-      throw new Error(resp.data?.message || "Fanar error");
-    }
+    if (!resp.ok) throw new Error("Fanar API error");
 
     const raw = resp.data?.choices?.[0]?.message?.content || "";
     const json = safeExtractJson(raw);
-
-    if (!json) {
-      throw new Error("Invalid JSON from Fanar");
-    }
+    if (!json) throw new Error("Invalid JSON");
 
     results.push(json);
   }
 
-  return merge(results);
+  return mergeExtract(results);
 }
 
-// ===================================================================
+function mergeExtract(parts) {
+  const out = makeEmpty();
+
+  const appendArray = (target, arr) => {
+    (arr || []).forEach(v => {
+      const s = clean(v);
+      if (s && !target.includes(s)) target.push(s);
+    });
+  };
+
+  for (const p of parts) {
+    appendArray(out.allergies, p.allergies);
+    appendArray(out.conditions, p.conditions);
+    appendArray(out.medications, p.medications);
+
+    ["diagnosis", "findings", "procedures", "notes"].forEach(key => {
+      if (p[key]) {
+        const val = clean(p[key]);
+        if (val) {
+          out[key] = out[key] ? out[key] + "\n" + val : val;
+        }
+      }
+    });
+
+    if (Array.isArray(p.labResults)) {
+      out.labResults.push(
+        ...p.labResults.map(x => ({
+          test: clean(x.test),
+          value: clean(x.value),
+          unit: clean(x.unit),
+          referenceRange: clean(x.referenceRange),
+          flag: clean(x.flag)
+        }))
+      );
+    }
+
+    if (!out.age && p.age) out.age = clean(p.age);
+    if (!out.gender && p.gender) out.gender = clean(p.gender);
+    if (!out.maritalStatus && p.maritalStatus)
+      out.maritalStatus = clean(p.maritalStatus);
+    if (!out.bloodType && p.bloodType)
+      out.bloodType = clean(p.bloodType);
+  }
+
+  return out;
+}
+
+// ===============================================================
+// BUILD NOTES
+// ===============================================================
+
+function buildNotes(extracted) {
+  const parts = [];
+
+  const pushArr = (label, arr) => {
+    const items = (arr || []).map(clean).filter(Boolean);
+    if (items.length) {
+      parts.push(label + ": " + items.join(", "));
+    }
+  };
+
+  pushArr("Allergies", extracted.allergies);
+  pushArr("Conditions", extracted.conditions);
+  pushArr("Medications", extracted.medications);
+
+  if (clean(extracted.diagnosis))
+    parts.push("Diagnosis: " + clean(extracted.diagnosis));
+  if (clean(extracted.findings))
+    parts.push("Findings: " + clean(extracted.findings));
+  if (clean(extracted.procedures))
+    parts.push("Procedures: " + clean(extracted.procedures));
+
+  if (Array.isArray(extracted.labResults)) {
+    const lines = extracted.labResults.map(lr => {
+      const seg = [];
+      if (clean(lr.test)) seg.push("Test: " + clean(lr.test));
+      if (clean(lr.value)) seg.push("Value: " + clean(lr.value));
+      if (clean(lr.unit)) seg.push("Unit: " + clean(lr.unit));
+      if (clean(lr.flag)) seg.push("Flag: " + clean(lr.flag));
+      return seg.length ? "- " + seg.join(", ") : null;
+    }).filter(Boolean);
+
+    if (lines.length) {
+      parts.push("Lab Results:");
+      parts.push(...lines);
+    }
+  }
+
+  if (clean(extracted.notes))
+    parts.push("Other notes: " + clean(extracted.notes));
+
+  return parts.join("\n").trim();
+}
+
+// ===============================================================
 // MAIN HANDLER
-// ===================================================================
+// ===============================================================
 
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method Not Allowed" });
+      return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const token = req.headers.authorization?.replace("Bearer ", "").trim();
+    const token = req.headers.authorization?.replace("Bearer ", "");
     if (!token) {
-      return res.status(401).json({ error: "Missing Token" });
+      return res.status(401).json({ error: "Missing token" });
     }
 
     await verifyToken(token);
@@ -465,20 +487,16 @@ export default async function handler(req, res) {
     if (!patientId) {
       return res.status(400).json({ error: "Missing patientId" });
     }
-    if (!fileBuffer || !fileBuffer.length) {
-      return res.status(400).json({ error: "Missing file" });
-    }
 
     const raw = await extractTextFromBuffer(fileBuffer, filename, mimeType);
     const cleanText = (raw || "").replace(/\s+/g, " ").trim();
 
     if (!cleanText) {
-      const empty = makeEmpty();
-      empty.notes = "";
-      await updateFirestore(token, patientId, empty);
+      const emptyData = makeEmpty();
+      await updateFirestore(token, patientId, emptyData);
       return res.status(200).json({
         ok: true,
-        extracted: empty,
+        extracted: emptyData,
         warning: "No text extracted"
       });
     }
@@ -487,20 +505,24 @@ export default async function handler(req, res) {
 
     try {
       extracted = await extractWithFanar(cleanText);
-    } catch (e) {
+    } catch {
       extracted = makeEmpty();
     }
 
-    extracted.notes = buildNotesFromExtract(extracted);
+    extracted.notes = buildNotes(extracted);
 
     await updateFirestore(token, patientId, extracted);
 
-    return res.status(200).json({ ok: true, extracted });
+    return res.status(200).json({
+      ok: true,
+      extracted
+    });
+
   } catch (e) {
     console.error("SERVER ERROR:", e);
     return res.status(500).json({
       ok: false,
-      error: e.message || "Server Error"
+      error: e.message || "Server error"
     });
   }
 }

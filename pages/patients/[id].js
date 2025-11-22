@@ -7,11 +7,11 @@ import {
   Container, Stack, Typography, Paper, Grid, Chip, Button, Divider, Skeleton,
   Snackbar, Alert, Box, Avatar, Table, TableHead, TableRow, TableCell, TableBody,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton,
-  LinearProgress
+  LinearProgress, Tabs, Tab, Fade
 } from '@mui/material';
 import { alpha, darken } from '@mui/material/styles';
 import EditHealthInfoDialog from '@/components/patients/EditHealthInfoDialog';
-
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import DescriptionIcon from '@mui/icons-material/Description';
 import EventIcon from '@mui/icons-material/Event';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -39,6 +39,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 import AddLabReportDialog from '@/components/reports/AddLabReportDialog';
+import PatientForm from '@/components/patients/PatientForm';
 
 /* ---------------- utils ---------------- */
 function toDate(val) {
@@ -50,7 +51,7 @@ function toDate(val) {
   try { return new Date(val); } catch { return null; }
 }
 const pad = (n) => String(n).padStart(2, '0');
-const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 function apptDate(appt) {
   if (appt?.appointmentDate) return toDate(appt.appointmentDate);
@@ -97,8 +98,8 @@ function ReportInlineView({ report, isArabic, onClose }) {
   const isLab = String(report?.type || '').toLowerCase() === 'lab';
   const meds =
     !isLab &&
-    Array.isArray(report?.medicationsList) &&
-    report.medicationsList.some(m => Object.values(m || {}).some(v => String(v || '').trim()))
+      Array.isArray(report?.medicationsList) &&
+      report.medicationsList.some(m => Object.values(m || {}).some(v => String(v || '').trim()))
       ? report.medicationsList
       : null;
 
@@ -122,7 +123,7 @@ function ReportInlineView({ report, isArabic, onClose }) {
         <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
           <Stack direction="row" spacing={1} alignItems="center">
             <Chip
-              icon={isLab ? <ScienceIcon/> : <DescriptionIcon />}
+              icon={isLab ? <ScienceIcon /> : <DescriptionIcon />}
               color={isLab ? 'secondary' : 'primary'}
               variant="filled"
               label={isLab ? t('Lab Report', 'تقرير معملي') : t('Clinical Report', 'تقرير سريري')}
@@ -225,10 +226,29 @@ const StatChip = ({ icon, label }) => (
 
 const Labeled = ({ title, children }) => (
   <Box>
-    <Typography variant="caption" color="text.secondary">{title}</Typography>
-    <Box sx={{ mt: 0.25 }}>{children}</Box>
+    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ mb: 0.5, display: 'block' }}>{title}</Typography>
+    <Box>{children}</Box>
   </Box>
 );
+
+function CustomTabPanel(props) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`patient-tabpanel-${index}`}
+      aria-labelledby={`patient-tab-${index}`}
+      {...other}
+    >
+      {value === index && (
+        <Fade in>
+          <Box sx={{ py: 3 }}>{children}</Box>
+        </Fade>
+      )}
+    </div>
+  );
+}
 
 /* ---------------- page ---------------- */
 export default function PatientDetailsPage() {
@@ -251,21 +271,32 @@ export default function PatientDetailsPage() {
   const [apptLoading, setApptLoading] = React.useState(true);
   const [appts, setAppts] = React.useState([]);
 
-  // external lab_results
-  const [xLabLoading, setXLabLoading] = React.useState(true);
-  const [xLabResults, setXLabResults] = React.useState([]);
-  const [editHealthOpen, setEditHealthOpen] = React.useState(false);
-
-const [notesOpen, setNotesOpen] = React.useState(false);
-const [notesDraft, setNotesDraft] = React.useState('');
-const [savingNotes, setSavingNotes] = React.useState(false);
-const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'financial'
-
-
   // AI
   const [aiBusy, setAiBusy] = React.useState(false);
   const [aiText, setAiText] = React.useState('');
   const [aiErr, setAiErr] = React.useState('');
+
+  // external lab results
+  const [xLabLoading, setXLabLoading] = React.useState(true);
+  const [xLabResults, setXLabResults] = React.useState([]);
+
+  // health info edit
+  const [editHealthOpen, setEditHealthOpen] = React.useState(false);
+
+  // notes
+  const [notesOpen, setNotesOpen] = React.useState(false);
+  const [notesDraft, setNotesDraft] = React.useState('');
+  const [savingNotes, setSavingNotes] = React.useState(false);
+  const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'financial'
+
+  // edit patient dialog
+  const [editPatientOpen, setEditPatientOpen] = React.useState(false);
+  const [updatingPatient, setUpdatingPatient] = React.useState(false);
+
+  const [tabValue, setTabValue] = React.useState(0);
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+  };
 
   const label = (e, a) => (isArabic ? a : e);
 
@@ -293,7 +324,7 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
       }
     })();
   }, [id]);
-/* ---------- notes save ---------- */
+  /* ---------- notes save ---------- */
   const handleSaveNotes = async () => {
     if (!patient?.id) return;
     setSavingNotes(true);
@@ -428,7 +459,7 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
   }, [patient?.name]);
 
   const copy = async (txt) => {
-    try { await navigator.clipboard.writeText(String(txt || '')); setOkMsg(label('Copied', 'تم النسخ')); } catch {}
+    try { await navigator.clipboard.writeText(String(txt || '')); setOkMsg(label('Copied', 'تم النسخ')); } catch { }
   };
 
   const openNotes = () => {
@@ -543,40 +574,40 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
     const header = `
       <div class="header">
         <div>
-          <h1>${t('Patient Summary Report','تقرير موجز للمريض')}</h1>
-          <div class="muted">${t('Generated on','تم الإنشاء في')} ${today.toLocaleString()} ${docName ? `• ${t('by','بواسطة')} ${docName}` : ''}</div>
+          <h1>${t('Patient Summary Report', 'تقرير موجز للمريض')}</h1>
+          <div class="muted">${t('Generated on', 'تم الإنشاء في')} ${today.toLocaleString()} ${docName ? `• ${t('by', 'بواسطة')} ${docName}` : ''}</div>
         </div>
         <div>
           <span class="chip">ID: ${patient?.id || '-'}</span>
-          ${Number.isFinite(patient?.age) ? `<span class="chip">${t('Age','العمر')}: ${patient.age}</span>` : ''}
+          ${Number.isFinite(patient?.age) ? `<span class="chip">${t('Age', 'العمر')}: ${patient.age}</span>` : ''}
           ${patient?.gender ? `<span class="chip">${patient.gender}</span>` : ''}
           ${patient?.bloodType ? `<span class="chip">${patient.bloodType}</span>` : ''}
         </div>
       </div>
     `;
     const demographics = `
-      <h2>${t('Patient','المريض')}</h2>
+      <h2>${t('Patient', 'المريض')}</h2>
       <div class="grid">
-        <div><strong>${t('Name','الاسم')}:</strong> ${patient?.name || t('Unnamed','بدون اسم')}</div>
-        <div><strong>${t('Last visit','آخر زيارة')}:</strong> ${fmtNiceDate(patient?.lastVisit)}</div>
-        <div><strong>${t('Phone','الهاتف')}:</strong> ${patient?.phone || '—'}</div>
-        <div><strong>${t('Email','البريد')}:</strong> ${patient?.email || '—'}</div>
-        <div style="grid-column: 1 / -1;"><strong>${t('Address','العنوان')}:</strong> ${patient?.address || '—'}</div>
+        <div><strong>${t('Name', 'الاسم')}:</strong> ${patient?.name || t('Unnamed', 'بدون اسم')}</div>
+        <div><strong>${t('Last visit', 'آخر زيارة')}:</strong> ${fmtNiceDate(patient?.lastVisit)}</div>
+        <div><strong>${t('Phone', 'الهاتف')}:</strong> ${patient?.phone || '—'}</div>
+        <div><strong>${t('Email', 'البريد')}:</strong> ${patient?.email || '—'}</div>
+        <div style="grid-column: 1 / -1;"><strong>${t('Address', 'العنوان')}:</strong> ${patient?.address || '—'}</div>
       </div>
     `;
     const clinical = `
-      <h2>${t('Clinical profile','الملف السريري')}</h2>
+      <h2>${t('Clinical profile', 'الملف السريري')}</h2>
       <div class="grid">
-        <div><strong>${t('Marital status','الحالة الاجتماعية')}:</strong> ${patient?.maritalStatus || t('Unspecified','غير محدد')}</div>
-        <div><strong>${t('Blood type','فصيلة الدم')}:</strong> ${patient?.bloodType || '—'}</div>
-        <div style="grid-column: 1 / -1;"><strong>${t('Allergies','الحساسيات')}:</strong> ${splitCsv(patient?.allergies).join(', ') || '—'}</div>
-        <div style="grid-column: 1 / -1;"><strong>${t('Chronic conditions','الأمراض المزمنة')}:</strong> ${splitCsv(patient?.conditions).join(', ') || '—'}</div>
-        <div style="grid-column: 1 / -1;"><strong>${t('Current medications','الأدوية الحالية')}:</strong> ${splitCsv(patient?.medications).join(', ') || '—'}</div>
+        <div><strong>${t('Marital status', 'الحالة الاجتماعية')}:</strong> ${patient?.maritalStatus || t('Unspecified', 'غير محدد')}</div>
+        <div><strong>${t('Blood type', 'فصيلة الدم')}:</strong> ${patient?.bloodType || '—'}</div>
+        <div style="grid-column: 1 / -1;"><strong>${t('Allergies', 'الحساسيات')}:</strong> ${splitCsv(patient?.allergies).join(', ') || '—'}</div>
+        <div style="grid-column: 1 / -1;"><strong>${t('Chronic conditions', 'الأمراض المزمنة')}:</strong> ${splitCsv(patient?.conditions).join(', ') || '—'}</div>
+        <div style="grid-column: 1 / -1;"><strong>${t('Current medications', 'الأدوية الحالية')}:</strong> ${splitCsv(patient?.medications).join(', ') || '—'}</div>
       </div>
     `;
     const aiBlock = `
-      <h2>${t('AI short report','ملخص ذكي مختصر')}</h2>
-      <div class="box" style="white-space: pre-wrap;">${ai || t('No AI summary generated yet.','لا يوجد ملخص ذكي بعد.')}</div>
+      <h2>${t('AI short report', 'ملخص ذكي مختصر')}</h2>
+      <div class="box" style="white-space: pre-wrap;">${ai || t('No AI summary generated yet.', 'لا يوجد ملخص ذكي بعد.')}</div>
     `;
 
     const xlabRows = (xLabResults || []).map(l => `
@@ -595,8 +626,8 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
       return `
         <tr>
           <td>${fmtNiceDateTime(r?.date)}</td>
-          <td>${isLab ? t('Lab','معملي') : t('Clinic','عيادة')}</td>
-          <td>${r?.titleAr || r?.titleEn || r?.title || (isLab ? t('Lab Report','تقرير معملي') : t('Medical Report','تقرير طبي'))}</td>
+          <td>${isLab ? t('Lab', 'معملي') : t('Clinic', 'عيادة')}</td>
+          <td>${r?.titleAr || r?.titleEn || r?.title || (isLab ? t('Lab Report', 'تقرير معملي') : t('Medical Report', 'تقرير طبي'))}</td>
           <td>${r?.diagnosis || '—'}</td>
           <td>${fmtNiceDateTime(r?.followUp) || '—'}</td>
         </tr>
@@ -611,50 +642,50 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
     `).join('');
 
     const history = `
-      <h2>${t('History','السجل')}</h2>
-      <h3 style="margin-top:8px;">${t('External lab results','نتائج معامل خارجية')}</h3>
+      <h2>${t('History', 'السجل')}</h2>
+      <h3 style="margin-top:8px;">${t('External lab results', 'نتائج معامل خارجية')}</h3>
       <table>
         <thead>
           <tr>
-            <th>${t('Date','التاريخ')}</th>
-            <th>${t('Lab ID','معرف المعمل')}</th>
-            <th>${t('Result value','النتيجة')}</th>
-            <th>${t('Reference range','المعدل المرجعي')}</th>
-            <th>${t('Status','الحالة')}</th>
-            <th>${t('Tests','الاختبارات')}</th>
+            <th>${t('Date', 'التاريخ')}</th>
+            <th>${t('Lab ID', 'معرف المعمل')}</th>
+            <th>${t('Result value', 'النتيجة')}</th>
+            <th>${t('Reference range', 'المعدل المرجعي')}</th>
+            <th>${t('Status', 'الحالة')}</th>
+            <th>${t('Tests', 'الاختبارات')}</th>
           </tr>
         </thead>
-        <tbody>${xlabRows || `<tr><td colspan="6" class="muted">${t('No lab results','لا توجد نتائج معمل')}</td></tr>`}</tbody>
+        <tbody>${xlabRows || `<tr><td colspan="6" class="muted">${t('No lab results', 'لا توجد نتائج معمل')}</td></tr>`}</tbody>
       </table>
 
-      <h3 style="margin-top:12px;">${t('Reports','التقارير')}</h3>
+      <h3 style="margin-top:12px;">${t('Reports', 'التقارير')}</h3>
       <table>
         <thead>
           <tr>
-            <th>${t('Date','التاريخ')}</th>
-            <th>${t('Type','النوع')}</th>
-            <th>${t('Title','العنوان')}</th>
-            <th>${t('Diagnosis','التشخيص')}</th>
-            <th>${t('Follow-up','المتابعة')}</th>
+            <th>${t('Date', 'التاريخ')}</th>
+            <th>${t('Type', 'النوع')}</th>
+            <th>${t('Title', 'العنوان')}</th>
+            <th>${t('Diagnosis', 'التشخيص')}</th>
+            <th>${t('Follow-up', 'المتابعة')}</th>
           </tr>
         </thead>
-        <tbody>${reportsRows || `<tr><td colspan="5" class="muted">${t('No reports','لا توجد تقارير')}</td></tr>`}</tbody>
+        <tbody>${reportsRows || `<tr><td colspan="5" class="muted">${t('No reports', 'لا توجد تقارير')}</td></tr>`}</tbody>
       </table>
 
-      <h3 style="margin-top:12px;">${t('Appointments','المواعيد')}</h3>
+      <h3 style="margin-top:12px;">${t('Appointments', 'المواعيد')}</h3>
       <table>
         <thead>
           <tr>
-            <th>${t('Date/Time','الوقت/التاريخ')}</th>
-            <th>${t('Status','الحالة')}</th>
+            <th>${t('Date/Time', 'الوقت/التاريخ')}</th>
+            <th>${t('Status', 'الحالة')}</th>
           </tr>
         </thead>
-        <tbody>${apptRows || `<tr><td colspan="2" class="muted">${t('No appointments','لا توجد مواعيد')}</td></tr>`}</tbody>
+        <tbody>${apptRows || `<tr><td colspan="2" class="muted">${t('No appointments', 'لا توجد مواعيد')}</td></tr>`}</tbody>
       </table>
     `;
     const dirClass = lang === 'ar' ? 'rtl' : '';
     return `<!doctype html><html lang="${lang}">
-      <head><meta charset="utf-8" /><title>${t('Patient Report','تقرير المريض')}</title>${css}</head>
+      <head><meta charset="utf-8" /><title>${t('Patient Report', 'تقرير المريض')}</title>${css}</head>
       <body class="${dirClass}">
         ${header}
         ${demographics}
@@ -709,435 +740,862 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
             </Paper>
           ) : (
             <Stack spacing={2} sx={{ mt: 1 }}>
-              {/* Header */}
+
+              {/* Modern Header */}
               <Paper
+                elevation={0}
                 sx={{
-                  p: 2,
-                  borderRadius: 3,
+                  p: 3,
+                  borderRadius: 4,
                   border: (t) => `1px solid ${t.palette.divider}`,
-                  background: 'linear-gradient(135deg, rgba(25,118,210,.06), rgba(25,118,210,.01))',
+                  background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.05)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+                  position: 'relative',
+                  overflow: 'hidden'
                 }}
               >
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs="auto">
-                    <Avatar sx={{ width: 72, height: 72, bgcolor: 'primary.main', color: 'primary.contrastText', fontWeight: 900 }}>
+                {/* Decorative circle */}
+                <Box sx={{
+                  position: 'absolute', top: -40, right: isArabic ? 'auto' : -40, left: isArabic ? -40 : 'auto',
+                  width: 200, height: 200, borderRadius: '50%',
+                  bgcolor: (t) => alpha(t.palette.primary.main, 0.03),
+                  zIndex: 0
+                }} />
+
+                <Grid container spacing={3} alignItems="center" position="relative" zIndex={1}>
+                  <Grid item>
+                    <Avatar
+                      sx={{
+                        width: 100, height: 100,
+                        bgcolor: 'primary.main',
+                        color: 'primary.contrastText',
+                        fontSize: '2.5rem',
+                        fontWeight: 800,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+                      }}
+                    >
                       {initials}
                     </Avatar>
                   </Grid>
                   <Grid item xs>
-                    <Typography variant="h5" fontWeight={900} color="text.primary" sx={{ lineHeight: 1.15 }}>
-                      {patient.name || label('Unnamed', 'بدون اسم')}
-                    </Typography>
-                    <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5 }}>
-                      <StatChip icon={<AssignmentIcon />} label={`ID: ${patient.id}`} />
-                      {Number.isFinite(patient?.age) && <StatChip icon={<EventIcon />} label={`${label('Age','العمر')}: ${patient.age}`} />}
-                      {patient?.gender && <StatChip icon={<PersonIcon />} label={patient.gender} />}
-                      {patient?.bloodType && <StatChip icon={<BloodtypeIcon />} label={patient.bloodType} />}
+                    <Stack spacing={1}>
+                      <Box>
+                        <Typography variant="h4" fontWeight={900} color="text.primary" sx={{ lineHeight: 1.1 }}>
+                          {patient.name || label('Unnamed', 'بدون اسم')}
+                        </Typography>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, opacity: 0.8 }}>
+                          <AssignmentIcon fontSize="small" color="action" />
+                          <Typography variant="body2" fontWeight={600} color="text.secondary">
+                            ID: {patient.id}
+                          </Typography>
+                          <Button
+                            size="small"
+                            onClick={() => copy(patient.id)}
+                            sx={{ minWidth: 0, p: 0.5, color: 'text.secondary' }}
+                          >
+                            <ContentCopyIcon fontSize="inherit" />
+                          </Button>
+                        </Stack>
+                      </Box>
+
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                        {Number.isFinite(patient?.age) && (
+                          <Chip
+                            icon={<EventIcon fontSize="small" />}
+                            label={`${label('Age', 'العمر')}: ${patient.age}`}
+                            size="small"
+                            sx={{ fontWeight: 600, bgcolor: 'background.paper' }}
+                          />
+                        )}
+                        {patient?.gender && (
+                          <Chip
+                            icon={<PersonIcon fontSize="small" />}
+                            label={patient.gender}
+                            size="small"
+                            sx={{ fontWeight: 600, bgcolor: 'background.paper' }}
+                          />
+                        )}
+                        {patient?.bloodType && (
+                          <Chip
+                            icon={<BloodtypeIcon fontSize="small" />}
+                            label={patient.bloodType}
+                            size="small"
+                            color="error"
+                            variant="outlined"
+                            sx={{ fontWeight: 700 }}
+                          />
+                        )}
+                      </Stack>
                     </Stack>
                   </Grid>
                   <Grid item xs={12} md="auto">
-                    <Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
-                      <Button variant="outlined" size="small" startIcon={<ContentCopyIcon />} onClick={() => copy(patient.id)}>
-                        {label('Copy ID','نسخ المعرّف')}
-                      </Button>
-                      <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={printReport} disabled={aiBusy}>
-                        {label('Print Report','طباعة التقرير')}
+                    <Stack direction="row" spacing={1.5} justifyContent="flex-end" flexWrap="wrap">
+                      <Button
+                        variant="outlined"
+                        startIcon={<EditOutlinedIcon />}
+                        onClick={() => setEditPatientOpen(true)}
+                        sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                      >
+                        {label('Edit Patient', 'تعديل المريض')}
                       </Button>
                       <Button
-                        variant="contained" size="small"
+                        variant="outlined"
+                        startIcon={<PrintIcon />}
+                        onClick={printReport}
+                        disabled={aiBusy}
+                        sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                      >
+                        {label('Print Report', 'طباعة التقرير')}
+                      </Button>
+                      <Button
+                        variant="contained"
+                        startIcon={<AddCircleOutlineIcon />}
                         onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)'
+                        }}
                       >
                         {label('New Appointment', 'حجز موعد')}
                       </Button>
                     </Stack>
                   </Grid>
                 </Grid>
-
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-                  <Chip size="small" variant="outlined"
-                        label={`${label('Last visit','آخر زيارة')}: ${fmtNiceDate(patient.lastVisit)}`} sx={{ borderRadius: 1 }} />
-                  <Chip size="small" variant="outlined"
-                        label={`${label('Reports','التقارير')}: ${reports.length}`} sx={{ borderRadius: 1 }} icon={<DescriptionIcon />} />
-                  <Chip size="small" variant="outlined"
-                        label={`${label('Appointments','المواعيد')}: ${appts.length}`} sx={{ borderRadius: 1 }} icon={<LocalHospitalIcon />} />
-                </Stack>
               </Paper>
 
-              {/* AI Short Report */}
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}`, bgcolor: (t) => alpha(t.palette.background.paper, 0.98) }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between">
-                  <Typography variant="h6" fontWeight={900} color="text.primary">
-                    {label('AI Short Report', 'ملخص ذكي مختصر')}
-                  </Typography>
-                  <Stack direction="row" spacing={1}>
-                    <Button variant="outlined" size="small" startIcon={<PrintIcon />} onClick={printReport} disabled={aiBusy}>
-                      {label('Print','طباعة')}
-                    </Button>
-                    <Button
-                      variant="contained" size="small" startIcon={<AutoAwesomeIcon />}
-                      onClick={summarizeWithAI} disabled={aiBusy}
-                      sx={{ textTransform: 'none', fontWeight: 800, bgcolor: (t) => t.palette.primary.main, '&:hover': { bgcolor: (t) => darken(t.palette.primary.main, .07) } }}
+              {/* Tabs Navigation */}
+              <Paper sx={{ borderRadius: 3, border: (t) => `1px solid ${t.palette.divider}`, overflow: 'hidden' }}>
+                <Tabs
+                  value={tabValue}
+                  onChange={handleTabChange}
+                  variant="scrollable"
+                  scrollButtons="auto"
+                  sx={{
+                    bgcolor: 'background.paper',
+                    '& .MuiTab-root': {
+                      textTransform: 'none',
+                      fontWeight: 700,
+                      fontSize: '0.95rem',
+                      minHeight: 56,
+                      px: 3
+                    }
+                  }}
+                >
+                  <Tab label={label('Overview', 'نظرة عامة')} />
+                  <Tab label={label('Appointments', 'المواعيد')} icon={<LocalHospitalIcon fontSize="small" />} iconPosition="start" />
+                  <Tab label={label('Reports', 'التقارير')} icon={<DescriptionIcon fontSize="small" />} iconPosition="start" />
+                  <Tab label={label('Notes', 'الملاحظات')} icon={<EditOutlinedIcon fontSize="small" />} iconPosition="start" />
+                  <Tab label={label('External Labs', 'معامل خارجية')} icon={<ScienceIcon fontSize="small" />} iconPosition="start" />
+                </Tabs>
+                <Divider />
+
+                {/* TAB 1: OVERVIEW */}
+                <CustomTabPanel value={tabValue} index={0}>
+                  <Stack spacing={3}>
+                    {/* AI Summary */}
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        p: 3,
+                        borderRadius: 3,
+                        border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
+                        bgcolor: (t) => alpha(t.palette.primary.main, 0.02)
+                      }}
                     >
-                      {aiBusy ? label('Generating…','جارٍ التوليد…') : label('Summarize with AI','تلخيص بواسطة الذكاء الاصطناعي')}
-                    </Button>
-                  </Stack>
-                </Stack>
-                {aiBusy && <LinearProgress sx={{ mt: 1 }} />}
-                {!aiBusy && aiErr && <Typography color="error" sx={{ mt: 1 }}>{aiErr}</Typography>}
-                {!aiBusy && aiText && <Typography sx={{ mt: 1, whiteSpace: 'pre-wrap' }} color="text.primary">{aiText}</Typography>}
-                {!aiBusy && !aiText && !aiErr && (
-                  <Typography sx={{ mt: 1 }} color="text.secondary">
-                    {label('Click “Summarize with AI” to generate a concise, structured overview for quick review.',
-                           'اضغط «تلخيص بواسطة الذكاء الاصطناعي» لإنشاء نظرة عامة موجزة ومنظمة.')}
-                  </Typography>
-                )}
-              </Paper>
-
-              {/* Contact & Address */}
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}`, bgcolor: (t) => alpha(t.palette.background.paper, 0.97) }}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Labeled title={label('Phone','الهاتف')}>
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                        <Chip icon={<PhoneIcon />} label={patient?.phone || '—'} variant="outlined" />
-                        {patient?.phone && (
-                          <>
-                            <Button size="small" component={Link} href={`tel:${patient.phone}`} variant="outlined">{label('Call','اتصال')}</Button>
-                            <Button size="small" component={Link} href={`sms:${patient.phone}`} variant="outlined">SMS</Button>
-                          </>
-                        )}
-                      </Stack>
-                    </Labeled>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Labeled title="Email">
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                        <Chip icon={<EmailIcon />} label={patient?.email || '—'} variant="outlined" />
-                        {patient?.email && <Button size="small" component={Link} href={`mailto:${patient.email}`} variant="outlined">Email</Button>}
-                      </Stack>
-                    </Labeled>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Labeled title={label('Address','العنوان')}>
-                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                        <Chip icon={<PlaceIcon />} label={patient?.address || '—'} variant="outlined" sx={{ maxWidth: '100%' }} />
-                      </Stack>
-                    </Labeled>
-                  </Grid>
-                </Grid>
-              </Paper>
-
-              {/* Clinical profile */}
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}`, bgcolor: (t) => alpha(t.palette.background.paper, 0.98) }}>
-                {/* Medical File Intake — Full Medical Extraction */}
-<MedicalFileIntake
-  patientId={patient?.id}
-  patient={patient}
-  isArabic={isArabic}
-  onExtract={(extractedData) => {
-    setPatient((prev) => ({ ...prev, ...extractedData }));
-    setOkMsg(label('Medical information extracted successfully.', 'تم استخراج المعلومات الطبية بنجاح.'));
-  }}
-/>
-
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={4}>
-                    <Labeled title={label('Marital Status','الحالة الاجتماعية')}>
-                      <Chip label={patient?.maritalStatus || label('Unspecified','غير محدد')} variant="outlined" />
-                    </Labeled>
-                  </Grid>
-                  <Grid item xs={12} md={8}>
-                    <Labeled title={label('Allergies','الحساسيات')}>
-                      {splitCsv(patient?.allergies).length ? (
-                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                          {splitCsv(patient.allergies).map((a, i) => (<Chip key={i} label={a} color="warning" variant="outlined" size="small" />))}
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 2 }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <AutoAwesomeIcon color="primary" />
+                          <Typography variant="h6" fontWeight={800} color="primary.main">
+                            {label('AI Clinical Summary', 'الملخص السريري الذكي')}
+                          </Typography>
                         </Stack>
-                      ) : (<Typography color="text.secondary">—</Typography>)}
-                    </Labeled>
-                  </Grid>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<AutoAwesomeIcon />}
+                          onClick={summarizeWithAI}
+                          disabled={aiBusy}
+                          disableElevation
+                          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                        >
+                          {aiBusy ? label('Generating...', 'جارٍ التوليد...') : label('Generate Summary', 'توليد الملخص')}
+                        </Button>
+                      </Stack>
 
-                  <Grid item xs={12} md={6}>
-                    <Labeled title={label('Chronic Conditions','الأمراض المزمنة')}>
-                      {splitCsv(patient?.conditions).length ? (
-                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                          {splitCsv(patient.conditions).map((c, i) => (<Chip key={i} label={c} variant="outlined" size="small" />))}
-                        </Stack>
-                      ) : (<Typography color="text.secondary">—</Typography>)}
-                    </Labeled>
-                  </Grid>
+                      {aiBusy && <LinearProgress sx={{ borderRadius: 1 }} />}
+                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 2 }}>{aiErr}</Alert>}
+                      {!aiBusy && aiText && (
+                        <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }} color="text.primary">
+                          {aiText}
+                        </Typography>
+                      )}
+                      {!aiBusy && !aiText && !aiErr && (
+                        <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                          {label('Click "Generate Summary" to get a concise AI-powered overview of this patient\'s history and status.', 'اضغط على "توليد الملخص" للحصول على نظرة عامة موجزة مدعومة بالذكاء الاصطناعي.')}
+                        </Typography>
+                      )}
+                    </Paper>
 
-                  <Grid item xs={12} md={6}>
-                    <Labeled title={label('Current Medications','الأدوية الحالية')}>
-                      {splitCsv(patient?.medications).length ? (
-                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                          {splitCsv(patient.medications).map((m, i) => (<Chip key={i} label={m} variant="outlined" size="small" />))}
-                        </Stack>
-                      ) : (<Typography color="text.secondary">—</Typography>)}
-                    </Labeled>
-                  </Grid>
-                </Grid>
-              </Paper>
+                    {/* Quick Stats Cards */}
+                    <Grid container spacing={2}>
+                      <Grid item xs={6} sm={3}>
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 2,
+                            borderRadius: 3,
+                            border: (t) => `1px solid ${t.palette.divider}`,
+                            bgcolor: alpha('#1976d2', 0.05),
+                            textAlign: 'center'
+                          }}
+                        >
+                          <LocalHospitalIcon sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                          <Typography variant="h5" fontWeight={800} color="primary.main">
+                            {appts.filter(a => a.status === 'completed').length}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                            {label('Total Visits', 'إجمالي الزيارات')}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6} sm={3}>
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 2,
+                            borderRadius: 3,
+                            border: (t) => `1px solid ${t.palette.divider}`,
+                            bgcolor: alpha('#2e7d32', 0.05),
+                            textAlign: 'center'
+                          }}
+                        >
+                          <EventIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
+                          <Typography variant="h5" fontWeight={800} color="success.main">
+                            {patient.lastVisit ? Math.floor((new Date() - new Date(patient.lastVisit)) / (1000 * 60 * 60 * 24)) : '—'}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                            {label('Days Since Last', 'أيام منذ آخر زيارة')}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6} sm={3}>
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 2,
+                            borderRadius: 3,
+                            border: (t) => `1px solid ${t.palette.divider}`,
+                            bgcolor: alpha('#ed6c02', 0.05),
+                            textAlign: 'center'
+                          }}
+                        >
+                          <DescriptionIcon sx={{ fontSize: 32, color: 'warning.main', mb: 1 }} />
+                          <Typography variant="h5" fontWeight={800} color="warning.main">
+                            {reports.length}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                            {label('Reports', 'التقارير')}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                      <Grid item xs={6} sm={3}>
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 2,
+                            borderRadius: 3,
+                            border: (t) => `1px solid ${t.palette.divider}`,
+                            bgcolor: alpha('#9c27b0', 0.05),
+                            textAlign: 'center'
+                          }}
+                        >
+                          <ScienceIcon sx={{ fontSize: 32, color: 'secondary.main', mb: 1 }} />
+                          <Typography variant="h5" fontWeight={800} color="secondary.main">
+                            {appts.filter(a => a.status === 'scheduled' || a.status === 'pending').length}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                            {label('Upcoming', 'القادمة')}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    </Grid>
 
-              {/* External Lab Results */}
-              <Typography variant="h6" fontWeight={900} color="text.primary">
-                {label('External Lab Results', 'نتائج معامل خارجية')}
-              </Typography>
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
-                {xLabLoading ? (
-                  <Stack spacing={1.25}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={56} />)}</Stack>
-                ) : xLabResults.length === 0 ? (
-                  <Typography color="text.secondary">{label('No lab results found for this patient.', 'لا توجد نتائج معمل لهذا المريض.')}</Typography>
-                ) : (
-                  <Box sx={{ overflowX: 'auto' }}>
-                    <Table size="small" sx={{ minWidth: 720 }}>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>{label('Date','التاريخ')}</TableCell>
-                          <TableCell>{label('Lab ID','معرف المعمل')}</TableCell>
-                          <TableCell>{label('Status','الحالة')}</TableCell>
-                          <TableCell>{label('Result value','النتيجة')}</TableCell>
-                          <TableCell>{label('Reference range','المعدل المرجعي')}</TableCell>
-                          <TableCell>{label('Tests','الاختبارات')}</TableCell>
-                          <TableCell>{label('Notes','ملاحظات')}</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {xLabResults.map((l) => (
-                          <TableRow key={l.id}>
-                            <TableCell>{fmtNiceDateTime(l?.resultDate || l?.createdAt)}</TableCell>
-                            <TableCell>{l?.labId || '—'}</TableCell>
-                            <TableCell>{String(l?.status || '—')}</TableCell>
-                            <TableCell>{l?.resultValue || '—'}</TableCell>
-                            <TableCell>{l?.referenceRange || '—'}</TableCell>
-                            <TableCell>{Number.isFinite(l?.testCount) ? l.testCount : '—'}</TableCell>
-                            <TableCell>{l?.notes || '—'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Box>
-                )}
-              </Paper>
-
-              {/* History overview (compact) */}
-              <Typography variant="h6" fontWeight={900} color="text.primary">
-                {label('History Overview', 'نبذة عن التاريخ')}
-              </Typography>
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
-                <Stack spacing={1}>
-                  <Typography variant="subtitle2" fontWeight={800} color="text.primary">
-                    {label('Recent Reports', 'أحدث التقارير')}
-                  </Typography>
-                  {repLoading ? (
-                    <Skeleton variant="rounded" height={56} />
-                  ) : reports.length === 0 ? (
-                    <Typography color="text.secondary">{label('No reports yet.','لا توجد تقارير.')}</Typography>
-                  ) : (
-                    <Stack spacing={1}>
-                      {reports.slice(0, 5).map((r) => {
-                        const isLab = String(r?.type || '').toLowerCase() === 'lab';
-                        return (
-                          <Stack key={r.id} direction="row" spacing={1} alignItems="center">
-                            <Avatar sx={{ width: 28, height: 28, bgcolor: isLab ? 'secondary.light' : 'primary.light', color: isLab ? 'secondary.dark' : 'primary.dark' }}>
-                              {isLab ? <ScienceIcon fontSize="small" /> : <DescriptionIcon fontSize="small" />}
+                    {/* Vitals & Activity Row */}
+                    <Grid container spacing={3}>
+                      {/* Vitals Section */}
+                      <Grid item xs={12} md={6}>
+                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'error.light', color: 'error.dark' }}>
+                              <BloodtypeIcon fontSize="small" />
                             </Avatar>
-                            <Typography sx={{ minWidth: 140 }} color="text.secondary">{fmtNiceDateTime(r?.date)}</Typography>
-                            <Typography sx={{ flex: 1 }} noWrap color="text.primary">
-                              {r?.titleAr || r?.titleEn || r?.title || (isLab ? label('Lab Report','تقرير معملي') : label('Medical Report','تقرير طبي'))}
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Vitals & Metrics', 'المؤشرات الحيوية')}
                             </Typography>
                           </Stack>
+                          <Grid container spacing={2}>
+                            <Grid item xs={6}>
+                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  {label('Weight', 'الوزن')}
+                                </Typography>
+                                <Typography variant="h6" fontWeight={700}>
+                                  {patient.weight || '—'} {patient.weight && 'kg'}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={6}>
+                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  {label('Height', 'الطول')}
+                                </Typography>
+                                <Typography variant="h6" fontWeight={700}>
+                                  {patient.height || '—'} {patient.height && 'cm'}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={6}>
+                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  {label('Blood Pressure', 'ضغط الدم')}
+                                </Typography>
+                                <Typography variant="h6" fontWeight={700}>
+                                  {patient.bloodPressure || '—'}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={6}>
+                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                  {label('Temperature', 'درجة الحرارة')}
+                                </Typography>
+                                <Typography variant="h6" fontWeight={700}>
+                                  {patient.temperature || '—'} {patient.temperature && '°C'}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                          </Grid>
+                        </Paper>
+                      </Grid>
+
+                      {/* Activity Timeline */}
+                      <Grid item xs={12} md={6}>
+                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'info.light', color: 'info.dark' }}>
+                              <AssignmentIcon fontSize="small" />
+                            </Avatar>
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Recent Activity', 'النشاط الأخير')}
+                            </Typography>
+                          </Stack>
+                          <Stack spacing={1.5}>
+                            {/* Latest appointment */}
+                            {appts.length > 0 && (
+                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', mt: 0.5 }} />
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {label('Appointment', 'موعد')}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {fmtNiceDateTime(appts[0]?.date)} • {appts[0]?.status}
+                                  </Typography>
+                                </Box>
+                              </Stack>
+                            )}
+                            {/* Latest report */}
+                            {reports.length > 0 && (
+                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'secondary.main', mt: 0.5 }} />
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {label('Report Added', 'تقرير مضاف')}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {fmtNiceDateTime(reports[0]?.date)} • {reports[0]?.titleEn || reports[0]?.title || 'Report'}
+                                  </Typography>
+                                </Box>
+                              </Stack>
+                            )}
+                            {/* Notes updated */}
+                            {patient.notesUpdatedAt && (
+                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'warning.main', mt: 0.5 }} />
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {label('Notes Updated', 'تحديث الملاحظات')}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {fmtNiceDateTime(patient.notesUpdatedAt)} • {patient.notesUpdatedBy || 'Staff'}
+                                  </Typography>
+                                </Box>
+                              </Stack>
+                            )}
+                            {/* If no activity */}
+                            {!appts.length && !reports.length && !patient.notesUpdatedAt && (
+                              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                {label('No recent activity', 'لا يوجد نشاط حديث')}
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Paper>
+                      </Grid>
+                    </Grid>
+
+                    <Grid container spacing={3}>
+                      {/* Contact Info */}
+                      <Grid item xs={12} md={5}>
+                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
+                          <Typography variant="h6" fontWeight={800} gutterBottom>
+                            {label('Contact Information', 'معلومات الاتصال')}
+                          </Typography>
+                          <Stack spacing={2.5} sx={{ mt: 2 }}>
+                            <Stack direction="row" spacing={2} alignItems="flex-start">
+                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
+                                <PhoneIcon fontSize="small" />
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Phone', 'الهاتف')}</Typography>
+                                <Typography variant="body1" fontWeight={500}>{patient.phone || '—'}</Typography>
+                                {patient.phone && (
+                                  <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                                    <Button size="small" component={Link} href={`tel:${patient.phone}`} sx={{ minWidth: 0, p: 0 }}>{label('Call', 'اتصال')}</Button>
+                                    <Button size="small" component={Link} href={`sms:${patient.phone}`} sx={{ minWidth: 0, p: 0 }}>SMS</Button>
+                                  </Stack>
+                                )}
+                              </Box>
+                            </Stack>
+                            <Divider variant="inset" component="div" />
+                            <Stack direction="row" spacing={2} alignItems="flex-start">
+                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
+                                <EmailIcon fontSize="small" />
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Email', 'البريد')}</Typography>
+                                <Typography variant="body1" fontWeight={500}>{patient.email || '—'}</Typography>
+                                {patient.email && (
+                                  <Button size="small" component={Link} href={`mailto:${patient.email}`} sx={{ minWidth: 0, p: 0, mt: 0.5 }}>{label('Send Email', 'إرسال بريد')}</Button>
+                                )}
+                              </Box>
+                            </Stack>
+                            <Divider variant="inset" component="div" />
+                            <Stack direction="row" spacing={2} alignItems="flex-start">
+                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
+                                <PlaceIcon fontSize="small" />
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Address', 'العنوان')}</Typography>
+                                <Typography variant="body1" fontWeight={500}>{patient.address || '—'}</Typography>
+                              </Box>
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      </Grid>
+
+                      {/* Clinical Profile */}
+                      <Grid item xs={12} md={7}>
+                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Clinical Profile', 'الملف السريري')}
+                            </Typography>
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              startIcon={<EditOutlinedIcon />}
+                              onClick={() => setEditHealthOpen(true)}
+                              sx={{ borderRadius: 2 }}
+                            >
+                              {label('Edit', 'تعديل')}
+                            </Button>
+                          </Stack>
+
+                          <MedicalFileIntake
+                            patientId={patient?.id}
+                            patient={patient}
+                            isArabic={isArabic}
+                            onExtract={(extractedData) => {
+                              setPatient((prev) => ({ ...prev, ...extractedData }));
+                              setOkMsg(label('Medical information extracted successfully.', 'تم استخراج المعلومات الطبية بنجاح.'));
+                            }}
+                          />
+
+                          <Grid container spacing={3} sx={{ mt: 1 }}>
+                            <Grid item xs={12} sm={6}>
+                              <Labeled title={label('Marital Status', 'الحالة الاجتماعية')}>
+                                <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 500 }} />
+                              </Labeled>
+                            </Grid>
+                            <Grid item xs={12} sm={6}>
+                              <Labeled title={label('Last Visit', 'آخر زيارة')}>
+                                <Typography variant="body2" fontWeight={500}>{fmtNiceDate(patient.lastVisit)}</Typography>
+                              </Labeled>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Labeled title={label('Allergies', 'الحساسيات')}>
+                                {splitCsv(patient?.allergies).length ? (
+                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                    {splitCsv(patient.allergies).map((a, i) => (
+                                      <Chip key={i} label={a} color="error" variant="soft" size="small" sx={{ bgcolor: alpha('#f44336', 0.1), color: '#d32f2f', fontWeight: 600 }} />
+                                    ))}
+                                  </Stack>
+                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
+                              </Labeled>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Labeled title={label('Chronic Conditions', 'الأمراض المزمنة')}>
+                                {splitCsv(patient?.conditions).length ? (
+                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                    {splitCsv(patient.conditions).map((c, i) => (
+                                      <Chip key={i} label={c} color="warning" variant="soft" size="small" sx={{ bgcolor: alpha('#ff9800', 0.1), color: '#ed6c02', fontWeight: 600 }} />
+                                    ))}
+                                  </Stack>
+                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
+                              </Labeled>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Labeled title={label('Current Medications', 'الأدوية الحالية')}>
+                                {splitCsv(patient?.medications).length ? (
+                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                                    {splitCsv(patient.medications).map((m, i) => (
+                                      <Chip key={i} label={m} color="info" variant="soft" size="small" sx={{ bgcolor: alpha('#0288d1', 0.1), color: '#0288d1', fontWeight: 600 }} />
+                                    ))}
+                                  </Stack>
+                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
+                              </Labeled>
+                            </Grid>
+                          </Grid>
+
+                          <Box sx={{ mt: 3 }}>
+                            <HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
+                          </Box>
+                        </Paper>
+                      </Grid>
+                    </Grid>
+                  </Stack>
+                </CustomTabPanel>
+
+                {/* TAB 2: APPOINTMENTS */}
+                <CustomTabPanel value={tabValue} index={1}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+                    <Typography variant="h6" fontWeight={800}>
+                      {label('Appointment History', 'سجل المواعيد')}
+                    </Typography>
+                    <Button
+                      variant="contained"
+                      startIcon={<AddCircleOutlineIcon />}
+                      onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
+                      size="small"
+                    >
+                      {label('New Appointment', 'موعد جديد')}
+                    </Button>
+                  </Stack>
+
+                  {apptLoading ? (
+                    <Stack spacing={2}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} />)}</Stack>
+                  ) : appts.length === 0 ? (
+                    <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, bgcolor: 'background.default' }} variant="outlined">
+                      <LocalHospitalIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                      <Typography color="text.secondary">
+                        {label('No appointments found for this patient.', 'لا توجد مواعيد لهذا المريض.')}
+                      </Typography>
+                    </Paper>
+                  ) : (
+                    <Grid container spacing={2}>
+                      {appts.map((a) => (
+                        <Grid item xs={12} md={6} key={a.id}>
+                          <Paper
+                            variant="outlined"
+                            sx={{
+                              p: 2,
+                              borderRadius: 3,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 2,
+                              transition: 'all 0.2s',
+                              '&:hover': { borderColor: 'primary.main', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }
+                            }}
+                          >
+                            <Avatar
+                              variant="rounded"
+                              sx={{
+                                width: 56, height: 56,
+                                bgcolor: alpha(statusColor(a?.status) === 'success' ? '#2e7d32' : '#1976d2', 0.1),
+                                color: statusColor(a?.status) === 'success' ? 'success.main' : 'primary.main'
+                              }}
+                            >
+                              <EventIcon />
+                            </Avatar>
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="subtitle1" fontWeight={700}>
+                                {fmtApptFull(a)}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {a?.doctorName_en || a?.doctorName_ar || label('Doctor', 'طبيب')}
+                              </Typography>
+                            </Box>
+                            <Stack alignItems="flex-end" spacing={1}>
+                              <Chip
+                                label={String(a?.status || 'pending')}
+                                color={statusColor(a?.status)}
+                                size="small"
+                                variant="soft"
+                                sx={{ fontWeight: 700, borderRadius: 1 }}
+                              />
+                              <Button
+                                size="small"
+                                component={Link}
+                                href={`/appointments/${a.id}${isArabic ? '?lang=ar' : ''}`}
+                                endIcon={isArabic ? <ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} /> : <ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} />}
+                              >
+                                {label('Details', 'التفاصيل')}
+                              </Button>
+                            </Stack>
+                          </Paper>
+                        </Grid>
+                      ))}
+                    </Grid>
+                  )}
+                </CustomTabPanel>
+
+                {/* TAB 3: REPORTS */}
+                <CustomTabPanel value={tabValue} index={2}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+                    <Typography variant="h6" fontWeight={800}>
+                      {label('Medical & Lab Reports', 'التقارير الطبية والمعملية')}
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddCircleOutlineIcon />}
+                      onClick={() => setLabOpen(true)}
+                      size="small"
+                    >
+                      {label('Add Report', 'إضافة تقرير')}
+                    </Button>
+                  </Stack>
+
+                  {repLoading ? (
+                    <Stack spacing={2}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} />)}</Stack>
+                  ) : reports.length === 0 ? (
+                    <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, bgcolor: 'background.default' }} variant="outlined">
+                      <DescriptionIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                      <Typography color="text.secondary">
+                        {label('No reports recorded yet.', 'لا توجد تقارير مسجلة بعد.')}
+                      </Typography>
+                    </Paper>
+                  ) : (
+                    <Stack spacing={2}>
+                      {reports.map((r) => {
+                        const isLab = String(r?.type || '').toLowerCase() === 'lab';
+                        return (
+                          <Paper
+                            key={r.id}
+                            variant="outlined"
+                            sx={{
+                              p: 2,
+                              borderRadius: 3,
+                              display: 'flex',
+                              flexDirection: { xs: 'column', sm: 'row' },
+                              alignItems: { xs: 'flex-start', sm: 'center' },
+                              gap: 2,
+                              '&:hover': { borderColor: 'primary.main' }
+                            }}
+                          >
+                            <Avatar
+                              sx={{
+                                width: 48, height: 48,
+                                bgcolor: isLab ? alpha('#9c27b0', 0.1) : alpha('#1976d2', 0.1),
+                                color: isLab ? 'secondary.main' : 'primary.main'
+                              }}
+                            >
+                              {isLab ? <ScienceIcon /> : <DescriptionIcon />}
+                            </Avatar>
+
+                            <Box sx={{ flex: 1 }}>
+                              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                                <Typography variant="subtitle1" fontWeight={800}>
+                                  {r?.titleAr || r?.titleEn || r?.title || (isLab ? label('Lab Report', 'تقرير معملي') : label('Medical Report', 'تقرير طبي'))}
+                                </Typography>
+                                <Chip
+                                  label={isLab ? label('Lab', 'معمل') : label('Clinic', 'عيادة')}
+                                  size="small"
+                                  variant="outlined"
+                                  color={isLab ? 'secondary' : 'primary'}
+                                  sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
+                                />
+                              </Stack>
+                              <Typography variant="body2" color="text.secondary">
+                                {fmtNiceDateTime(r?.date)} • {isLab ? (r?.labName || label('External Lab', 'معمل خارجي')) : (r?.diagnosis || label('No diagnosis', 'لا يوجد تشخيص'))}
+                              </Typography>
+                            </Box>
+
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              {r?.followUp && (
+                                <Chip
+                                  icon={<EventIcon fontSize="small" />}
+                                  label={fmtNiceDate(r.followUp)}
+                                  size="small"
+                                  color="warning"
+                                  variant="soft"
+                                />
+                              )}
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => setViewReport(r)}
+                              >
+                                {label('View', 'عرض')}
+                              </Button>
+                              {r?.appointmentId && (
+                                <IconButton
+                                  size="small"
+                                  component={Link}
+                                  href={`/appointments/${r.appointmentId}${isArabic ? '?lang=ar' : ''}`}
+                                  title={label('Go to appointment', 'الذهاب للموعد')}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                              )}
+                            </Stack>
+                          </Paper>
                         );
                       })}
                     </Stack>
                   )}
+                </CustomTabPanel>
 
-                  <Divider sx={{ my: 1 }} />
-<Stack direction="row" alignItems="center" justifyContent="space-between">
-  <Typography variant="subtitle2" fontWeight={800} color="text.primary">
-  </Typography>
-  <Button
-    variant="outlined"
-    size="small"
-    startIcon={<EditOutlinedIcon />}
-    onClick={() => setEditHealthOpen(true)}
-  >
-    {label('Edit', 'تعديل')}
-  </Button>
-</Stack>
-
-<HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
-                  <Divider sx={{ my: 1 }} />
-
-                  <Typography variant="subtitle2" fontWeight={800} color="text.primary">
-                    {label('Recent Appointments', 'أحدث المواعيد')}
-                  </Typography>
-                  {apptLoading ? (
-                    <Skeleton variant="rounded" height={56} />
-                  ) : appts.length === 0 ? (
-                    <Typography color="text.secondary">{label('No appointments yet.','لا توجد مواعيد.')}</Typography>
-                  ) : (
-                    <Stack spacing={1}>
-                      {appts.slice(0, 5).map((a) => (
-                        <Stack key={a.id} direction="row" spacing={1} alignItems="center">
-                          <Avatar sx={{ width: 28, height: 28, bgcolor: 'secondary.light', color: 'secondary.dark' }}>
-                            <LocalHospitalIcon fontSize="small" />
-                          </Avatar>
-                          <Typography sx={{ minWidth: 140 }} color="text.secondary">{fmtApptFull(a)}</Typography>
-                          <Chip size="small" variant="outlined" icon={<TagIcon />} label={String(a?.status || 'pending')} />
-                        </Stack>
-                      ))}
-                    </Stack>
-                  )}
-                </Stack>
-              </Paper>
-
-{/* Medical Notes */}
-<Stack direction="row" alignItems="center" justifyContent="space-between">
-  <Typography variant="h6" fontWeight={900} color="text.primary">
-    {label('Medical Notes', 'ملاحظات طبية')}
-  </Typography>
-  {canEditNotes && (
-    <Button
-      onClick={() => {
-        setNotesType('medical');
-        setNotesDraft(patient?.notes || '');
-        setNotesOpen(true);
-      }}
-      startIcon={<EditOutlinedIcon />}
-      variant="outlined"
-      size="small"
-    >
-      {patient?.notes
-        ? label('Edit Notes', 'تعديل الملاحظات')
-        : label('Add Notes', 'إضافة ملاحظات')}
-    </Button>
-  )}
-</Stack>
-
-
-        <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
-  <Typography variant="body1" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
-    {patient.notes || label('No notes yet.', 'لا توجد ملاحظات.')}
-  </Typography>
-
-  {patient?.notesUpdatedAt && (
-    <Typography
-      variant="caption"
-      color="text.secondary"
-      sx={{ mt: 1, display: 'block', textAlign: isArabic ? 'right' : 'left' }}
-    >
-      {label('Last updated on', 'آخر تعديل في')}: {fmtNiceDateTime(patient.notesUpdatedAt)}
-      {patient?.notesUpdatedBy && ` (${patient.notesUpdatedBy})`}
-    </Typography>
-  )}
-</Paper>
-
-
-              {/* Doctor reports (full) */}
-              <Stack direction="row" alignItems="center" justifyContent="space-between">
-                <Typography variant="h6" fontWeight={900} color="text.primary">
-                  {label('Reports by this doctor', 'تقارير هذا الطبيب')}
-                </Typography>
-                <Button onClick={() => setLabOpen(true)} startIcon={<AddCircleOutlineIcon />} variant="outlined" size="small">
-                  {label('Add Lab Report', 'إضافة تقرير معملي')}
-                </Button>
-              </Stack>
-
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
-                {repLoading ? (
-                  <Stack spacing={1.25}>{[...Array(4)].map((_, i) => <Skeleton key={i} variant="rounded" height={72} />)}</Stack>
-                ) : reports.length === 0 ? (
-                  <Typography color="text.secondary">
-                    {label('No reports yet for this patient by this doctor.', 'لا توجد تقارير لهذا المريض من هذا الطبيب.')}
-                  </Typography>
-                ) : (
-                  <Stack spacing={1}>
-                    {reports.map((r) => {
-                      const isLab = String(r?.type || '').toLowerCase() === 'lab';
-                      return (
-                        <Paper key={r.id} variant="outlined"
-                               sx={{ p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          <Avatar sx={{ bgcolor: isLab ? 'secondary.light' : 'primary.light', color: isLab ? 'secondary.dark' : 'primary.dark' }}>
-                            {isLab ? <ScienceIcon /> : <DescriptionIcon />}
-                          </Avatar>
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <Typography fontWeight={900} color="text.primary" noWrap
-                                          title={r?.titleAr || r?.titleEn || r?.title || ''}>
-                                {r?.titleAr || r?.titleEn || r?.title || (isLab ? label('Lab Report', 'تقرير معملي') : label('Medical Report', 'تقرير طبي'))}
-                              </Typography>
-                              <Chip size="small" label={isLab ? label('Lab', 'معملي') : label('Clinic', 'عيادة')}
-                                    variant="outlined" sx={{ borderRadius: 1 }} />
-                            </Stack>
-                            <Typography variant="body2" color="text.secondary" noWrap>
-                              {fmtNiceDateTime(r?.date)} • {isLab ? (r?.labName || label('External lab', 'معمل خارجي')) : (r?.diagnosis || label('No diagnosis', 'لا يوجد تشخيص'))}
+                {/* TAB 4: NOTES */}
+                <CustomTabPanel value={tabValue} index={3}>
+                  <Grid container spacing={3}>
+                    {/* Medical Notes */}
+                    <Grid item xs={12} md={6}>
+                      <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.light', color: 'primary.dark' }}>
+                              <AssignmentIcon fontSize="small" />
+                            </Avatar>
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Medical Notes', 'ملاحظات طبية')}
                             </Typography>
-                          </Box>
-                          {r?.followUp && (
-                            <Chip size="small" icon={<EventIcon />} label={`${label('Follow-up', 'متابعة')}: ${fmtNiceDateTime(r.followUp)}`} sx={{ mr: 1 }} variant="outlined" />
+                          </Stack>
+                          {canEditNotes && (
+                            <IconButton
+                              onClick={() => {
+                                setNotesType('medical');
+                                setNotesDraft(patient?.notes || '');
+                                setNotesOpen(true);
+                              }}
+                              color="primary"
+                            >
+                              <EditOutlinedIcon />
+                            </IconButton>
                           )}
-                          {r?.appointmentId && (
-                            <Button size="small" component={Link} href={`/appointments/${r.appointmentId}${isArabic ? '?lang=ar' : ''}`}
-                                    startIcon={<VisibilityIcon />} sx={{ fontWeight: 800 }}>
-                              {label('Open Appointment', 'فتح الموعد')}
-                            </Button>
-                          )}
-                          <Button size="small" variant="text" onClick={() => setViewReport(r)} sx={{ fontWeight: 800 }}>
-                            {label('View', 'عرض')}
-                          </Button>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                )}
-              </Paper>
-
-              {/* Appointments list */}
-              <Typography variant="h6" fontWeight={900} color="text.primary" sx={{ mt: 1 }}>
-                {label('Appointments with this doctor', 'المواعيد مع هذا الطبيب')}
-              </Typography>
-              <Paper sx={{ p: 2, borderRadius: 2, border: (t) => `1px solid ${t.palette.divider}` }}>
-                {apptLoading ? (
-                  <Stack spacing={1.25}>{[...Array(4)].map((_, i) => <Skeleton key={i} variant="rounded" height={72} />)}</Stack>
-                ) : appts.length === 0 ? (
-                  <Typography color="text.secondary">
-                    {label('No appointments yet between this doctor and patient.', 'لا توجد مواعيد بين هذا الطبيب والمريض.')}
-                  </Typography>
-                ) : (
-                  <Stack spacing={1}>
-                    {appts.map((a) => (
-                      <Paper key={a.id} variant="outlined"
-                             sx={{ p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                        <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.dark' }}>
-                          <LocalHospitalIcon />
-                        </Avatar>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography fontWeight={900} color="text.primary" noWrap>{fmtApptFull(a)}</Typography>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {(a?.doctorName_en || a?.doctorName_ar || a?.doctorId || a?.doctorUID || '')}
+                        </Stack>
+                        <Divider sx={{ mb: 2 }} />
+                        <Box sx={{ flex: 1, minHeight: 100 }}>
+                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: patient?.notes ? 'text.primary' : 'text.secondary' }}>
+                            {patient?.notes || label('No medical notes added.', 'لا توجد ملاحظات طبية.')}
                           </Typography>
                         </Box>
-                        <Chip size="small" icon={<TagIcon />} label={String(a?.status || 'pending')} color={statusColor(a?.status)} variant="outlined" />
-                        <Button size="small" component={Link} href={`/appointments/${a.id}${isArabic ? '?lang=ar' : ''}`}
-                                startIcon={<VisibilityIcon />} sx={{ fontWeight: 800 }}>
-                          {label('Open', 'فتح')}
-                        </Button>
+                        {patient?.notesUpdatedAt && (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                            {label('Updated:', 'تحديث:')} {fmtNiceDateTime(patient.notesUpdatedAt)} {patient.notesUpdatedBy && `by ${patient.notesUpdatedBy}`}
+                          </Typography>
+                        )}
                       </Paper>
-                    ))}
-                  </Stack>
-                )}
-              </Paper>
+                    </Grid>
 
-              <Divider />
-              <Stack direction="row" spacing={1}>
-                <Button variant="outlined" component={Link} href={`/patients${isArabic ? '?lang=ar' : ''}`}>
-                  {label('Back', 'رجوع')}
-                </Button>
-                <Button variant="contained"
-                        onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}>
-                  {label('New Appointment', 'حجز موعد')}
-                </Button>
-              </Stack>
+                    {/* Financial Notes */}
+                    <Grid item xs={12} md={6}>
+                      <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                          <Stack direction="row" spacing={1} alignItems="center">
+                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'success.light', color: 'success.dark' }}>
+                              <AttachMoneyIcon fontSize="small" />
+                            </Avatar>
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Financial Notes', 'ملاحظات مالية')}
+                            </Typography>
+                          </Stack>
+                          <IconButton
+                            onClick={() => {
+                              setNotesType('financial');
+                              setNotesDraft(patient?.financialNotes || '');
+                              setNotesOpen(true);
+                            }}
+                            color="success"
+                          >
+                            <EditOutlinedIcon />
+                          </IconButton>
+                        </Stack>
+                        <Divider sx={{ mb: 2 }} />
+                        <Box sx={{ flex: 1, minHeight: 100 }}>
+                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: patient?.financialNotes ? 'text.primary' : 'text.secondary' }}>
+                            {patient?.financialNotes || label('No financial notes added.', 'لا توجد ملاحظات مالية.')}
+                          </Typography>
+                        </Box>
+                        {patient?.financialNotesUpdatedAt && (
+                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                            {label('Updated:', 'تحديث:')} {fmtNiceDateTime(patient.financialNotesUpdatedAt)}
+                          </Typography>
+                        )}
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </CustomTabPanel>
+
+                {/* TAB 5: EXTERNAL LABS */}
+                <CustomTabPanel value={tabValue} index={4}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
+                    <Typography variant="h6" fontWeight={800}>
+                      {label('External Lab Integration', 'ربط المعامل الخارجية')}
+                    </Typography>
+                  </Stack>
+
+                  <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
+                    {xLabLoading ? (
+                      <Box sx={{ p: 3 }}><LinearProgress /></Box>
+                    ) : xLabResults.length === 0 ? (
+                      <Box sx={{ p: 5, textAlign: 'center' }}>
+                        <ScienceIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+                        <Typography color="text.secondary">
+                          {label('No external lab results found linked to this patient.', 'لا توجد نتائج معامل خارجية مرتبطة بهذا المريض.')}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Table size="medium">
+                        <TableHead sx={{ bgcolor: 'action.hover' }}>
+                          <TableRow>
+                            <TableCell><strong>{label('Date', 'التاريخ')}</strong></TableCell>
+                            <TableCell><strong>{label('Lab', 'المعمل')}</strong></TableCell>
+                            <TableCell><strong>{label('Status', 'الحالة')}</strong></TableCell>
+                            <TableCell><strong>{label('Result', 'النتيجة')}</strong></TableCell>
+                            <TableCell><strong>{label('Tests', 'الاختبارات')}</strong></TableCell>
+                            <TableCell><strong>{label('Notes', 'ملاحظات')}</strong></TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {xLabResults.map((l) => (
+                            <TableRow key={l.id} hover>
+                              <TableCell>{fmtNiceDateTime(l?.resultDate || l?.createdAt)}</TableCell>
+                              <TableCell>{l?.labId || '—'}</TableCell>
+                              <TableCell>
+                                <Chip label={l?.status || '—'} size="small" variant="outlined" />
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{l?.resultValue || '—'}</TableCell>
+                              <TableCell>{Number.isFinite(l?.testCount) ? l.testCount : '—'}</TableCell>
+                              <TableCell sx={{ color: 'text.secondary', maxWidth: 200 }} noWrap title={l?.notes}>{l?.notes || '—'}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </Paper>
+                </CustomTabPanel>
+              </Paper>
             </Stack>
           )}
 
@@ -1151,188 +1609,214 @@ const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'fin
             isArabic={isArabic}
             onSaved={() => { setLabOpen(false); fetchReports(); }}
           />
-       <Stack spacing={2} sx={{ mt: 2 }}>
 
-{/* 💰 Financial Notes Section */}
-<Stack direction="row" alignItems="center" justifyContent="space-between">
-  <Typography variant="h6" fontWeight={900} color="text.primary">
-    {label('Financial Notes', 'ملاحظات مالية')}
-  </Typography>
-  <Button
-    onClick={() => {
-      setNotesType('financial');
-      setNotesDraft(patient?.financialNotes || '');
-      setNotesOpen(true);
-    }}
-    startIcon={<EditOutlinedIcon />}
-    variant="outlined"
-    size="small"
-  >
-    {patient?.financialNotes
-      ? label('Edit Notes', 'تعديل الملاحظات')
-      : label('Add Notes', 'إضافة ملاحظات')}
-  </Button>
-</Stack>
+          <Dialog
+            open={notesOpen}
+            onClose={() => !savingNotes && setNotesOpen(false)}
+            fullWidth
+            maxWidth="sm"
+          >
+            <DialogTitle
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              <Typography fontWeight={900}>
+                {notesType === 'medical'
+                  ? label('Medical Notes', 'ملاحظات طبية')
+                  : label('Patient Financial Notes', 'ملاحظات المريض المالية')}
+              </Typography>
+              <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
+                <CloseRoundedIcon />
+              </IconButton>
+            </DialogTitle>
 
+            <DialogContent dividers>
+              <TextField
+                autoFocus
+                fullWidth
+                multiline
+                minRows={6}
+                value={notesDraft}
+                onChange={(e) => setNotesDraft(e.target.value)}
+                placeholder={
+                  notesType === 'medical'
+                    ? label('Type medical notes here…', 'اكتب الملاحظات الطبية هنا…')
+                    : label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')
+                }
+              />
+              <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
+                {label(
+                  'Only authorized staff can edit these notes. Saved with timestamp and author.',
+                  'يمكن فقط للموظفين المعتمدين تعديل هذه الملاحظات. يتم حفظها مع الوقت والكاتب.'
+                )}
+              </Typography>
+            </DialogContent>
 
-<Paper
-  sx={{
-    p: 2,
-    borderRadius: 2,
-    border: (t) => `1px solid ${t.palette.divider}`,
-    bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
-  }}
->
-  <Typography variant="body1" color="text.primary" sx={{ whiteSpace: 'pre-wrap' }}>
-    {patient?.financialNotes || label('No notes yet.', 'لا توجد ملاحظات.')}
-  </Typography>
+            <DialogActions>
+              <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
+                {label('Cancel', 'إلغاء')}
+              </Button>
+              <Button
+                onClick={async () => {
+                  if (!patient?.id) return;
+                  setSavingNotes(true);
+                  try {
+                    const ref = doc(db, 'patients', patient.id);
+                    const updatedAt = new Date();
+                    const updatedBy = user?.uid || user?.email || 'unknown';
 
-  {patient?.financialNotesUpdatedAt && (
-    <Typography
-      variant="caption"
-      color="text.secondary"
-      sx={{ mt: 1, display: 'block', textAlign: isArabic ? 'right' : 'left' }}
-    >
-      {label('Last updated on', 'آخر تعديل في')}:{' '}
-      {fmtNiceDateTime(patient.financialNotesUpdatedAt)}
-      {patient?.financialNotesUpdatedBy && ` (${patient.financialNotesUpdatedBy})`}
-    </Typography>
-  )}
-</Paper>
+                    if (notesType === 'medical') {
+                      await updateDoc(ref, {
+                        notes: notesDraft,
+                        notesUpdatedAt: updatedAt,
+                        notesUpdatedBy: updatedBy,
+                      });
 
-<Dialog
-  open={notesOpen}
-  onClose={() => !savingNotes && setNotesOpen(false)}
-  fullWidth
-  maxWidth="sm"
->
-  <DialogTitle
-    sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-  >
-    <Typography fontWeight={900}>
-      {notesType === 'medical'
-        ? label('Medical Notes', 'ملاحظات طبية')
-        : label('Patient Financial Notes', 'ملاحظات المريض المالية')}
-    </Typography>
-    <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
-      <CloseRoundedIcon />
-    </IconButton>
-  </DialogTitle>
+                      setPatient((prev) => ({
+                        ...prev,
+                        notes: notesDraft,
+                        notesUpdatedAt: updatedAt,
+                        notesUpdatedBy: updatedBy,
+                      }));
+                    } else {
+                      await updateDoc(ref, {
+                        financialNotes: notesDraft,
+                        financialNotesUpdatedAt: updatedAt,
+                        financialNotesUpdatedBy: updatedBy,
+                      });
 
-  <DialogContent dividers>
-    <TextField
-      autoFocus
-      fullWidth
-      multiline
-      minRows={6}
-      value={notesDraft}
-      onChange={(e) => setNotesDraft(e.target.value)}
-      placeholder={
-        notesType === 'medical'
-          ? label('Type medical notes here…', 'اكتب الملاحظات الطبية هنا…')
-          : label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')
-      }
-    />
-    <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
-      {label(
-        'Only authorized staff can edit these notes. Saved with timestamp and author.',
-        'يمكن فقط للموظفين المعتمدين تعديل هذه الملاحظات. يتم حفظها مع الوقت والكاتب.'
-      )}
-    </Typography>
-  </DialogContent>
+                      setPatient((prev) => ({
+                        ...prev,
+                        financialNotes: notesDraft,
+                        financialNotesUpdatedAt: updatedAt,
+                        financialNotesUpdatedBy: updatedBy,
+                      }));
+                    }
 
-  <DialogActions>
-    <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
-      {label('Cancel', 'إلغاء')}
-    </Button>
-    <Button
-      onClick={async () => {
-        if (!patient?.id) return;
-        setSavingNotes(true);
-        try {
-          const ref = doc(db, 'patients', patient.id);
-          const updatedAt = new Date();
-          const updatedBy = user?.uid || user?.email || 'unknown';
-
-          if (notesType === 'medical') {
-            await updateDoc(ref, {
-              notes: notesDraft,
-              notesUpdatedAt: updatedAt,
-              notesUpdatedBy: updatedBy,
-            });
-
-            setPatient((prev) => ({
-              ...prev,
-              notes: notesDraft,
-              notesUpdatedAt: updatedAt,
-              notesUpdatedBy: updatedBy,
-            }));
-          } else {
-            await updateDoc(ref, {
-              financialNotes: notesDraft,
-              financialNotesUpdatedAt: updatedAt,
-              financialNotesUpdatedBy: updatedBy,
-            });
-
-            setPatient((prev) => ({
-              ...prev,
-              financialNotes: notesDraft,
-              financialNotesUpdatedAt: updatedAt,
-              financialNotesUpdatedBy: updatedBy,
-            }));
-          }
-
-          setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات بنجاح.'));
-          setNotesOpen(false);
-        } catch (e) {
-          console.error(e);
-          setError(label('Failed to save notes.', 'تعذر حفظ الملاحظات.'));
-        } finally {
-          setSavingNotes(false);
-        }
-      }}
-      variant="contained"
-      disabled={savingNotes}
-    >
-      {savingNotes
-        ? label('Saving…', 'جارٍ الحفظ…')
-        : label('Save Notes', 'حفظ الملاحظات')}
-    </Button>
-  </DialogActions>
-</Dialog>
-
-  <EditHealthInfoDialog
-  open={editHealthOpen}
-  onClose={() => setEditHealthOpen(false)}
-  patient={patient}
-  t={(en, ar) => label(en, ar)}     // reuse your label helper
-  isArabic={isArabic}
-  onSave={(updated) => {
-    setPatient((p) => ({ ...p, ...updated }));
-    setOkMsg(label('Health information updated', 'تم تحديث المعلومات الصحية'));
-  }}
-/>
-
-              <Snackbar
-                open={Boolean(error)}
-                autoHideDuration={4000}
-                onClose={() => setError('')}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                    setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات بنجاح.'));
+                    setNotesOpen(false);
+                  } catch (e) {
+                    console.error(e);
+                    setError(label('Failed to save notes.', 'تعذر حفظ الملاحظات.'));
+                  } finally {
+                    setSavingNotes(false);
+                  }
+                }}
+                variant="contained"
+                disabled={savingNotes}
               >
-                <Alert severity="error" onClose={() => setError('')}>{error}</Alert>
-              </Snackbar>
+                {savingNotes
+                  ? label('Saving…', 'جارٍ الحفظ…')
+                  : label('Save Notes', 'حفظ الملاحظات')}
+              </Button>
+            </DialogActions>
+          </Dialog>
 
-              <Snackbar
-                open={Boolean(okMsg)}
-                autoHideDuration={2500}
-                onClose={() => setOkMsg('')}
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-              >
-                <Alert severity="success" onClose={() => setOkMsg('')}>{okMsg}</Alert>
-              </Snackbar>
-            </Stack>
+          <EditHealthInfoDialog
+            open={editHealthOpen}
+            onClose={() => setEditHealthOpen(false)}
+            patient={patient}
+            t={(en, ar) => label(en, ar)}
+            isArabic={isArabic}
+            onSave={(updated) => {
+              setPatient((p) => ({ ...p, ...updated }));
+              setOkMsg(label('Health information updated', 'تم تحديث المعلومات الصحية'));
+            }}
+          />
+
+          {/* Edit Patient Dialog */}
+          <Dialog
+            open={editPatientOpen}
+            onClose={() => !updatingPatient && setEditPatientOpen(false)}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Typography fontWeight={900}>
+                {label('Edit Patient Information', 'تعديل معلومات المريض')}
+              </Typography>
+              <IconButton onClick={() => !updatingPatient && setEditPatientOpen(false)} disabled={updatingPatient}>
+                <CloseRoundedIcon />
+              </IconButton>
+            </DialogTitle>
+            <DialogContent dividers>
+              <PatientForm
+                isArabic={isArabic}
+                initialValues={{
+                  name: patient?.name || '',
+                  age: patient?.age || '',
+                  gender: patient?.gender || '',
+                  bloodType: patient?.bloodType || '',
+                  phone: patient?.phone || '',
+                  email: patient?.email || '',
+                  address: patient?.address || '',
+                  allergies: patient?.allergies || '',
+                  conditions: patient?.conditions || '',
+                  medications: patient?.medications || '',
+                  maritalStatus: patient?.maritalStatus || '',
+                  lastVisit: patient?.lastVisit || ''
+                }}
+                onSubmit={async (values, { setSubmitting }) => {
+                  if (!patient?.id) return;
+                  setUpdatingPatient(true);
+                  try {
+                    const ref = doc(db, 'patients', patient.id);
+                    const updateData = {
+                      name: values.name.trim(),
+                      age: values.age ? Number(values.age) : null,
+                      gender: values.gender || null,
+                      bloodType: values.bloodType || null,
+                      phone: values.phone || null,
+                      email: values.email || null,
+                      address: values.address || null,
+                      allergies: values.allergies || null,
+                      conditions: values.conditions || null,
+                      medications: values.medications || null,
+                      maritalStatus: values.maritalStatus || null,
+                      lastVisit: values.lastVisit || null,
+                      updatedAt: new Date(),
+                    };
+
+                    await updateDoc(ref, updateData);
+
+                    setPatient((prev) => ({
+                      ...prev,
+                      ...updateData
+                    }));
+
+                    setOkMsg(label('Patient updated successfully', 'تم تحديث بيانات المريض بنجاح'));
+                    setEditPatientOpen(false);
+                  } catch (e) {
+                    console.error(e);
+                    setError(label('Failed to update patient', 'فشل تحديث بيانات المريض'));
+                  } finally {
+                    setUpdatingPatient(false);
+                    setSubmitting(false);
+                  }
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+
+
+          <Snackbar
+            open={Boolean(error)}
+            autoHideDuration={4000}
+            onClose={() => setError('')}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert severity="error" onClose={() => setError('')}>{error}</Alert>
+          </Snackbar>
+
+          <Snackbar
+            open={Boolean(okMsg)}
+            autoHideDuration={2500}
+            onClose={() => setOkMsg('')}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert severity="success" onClose={() => setOkMsg('')}>{okMsg}</Alert>
+          </Snackbar>
         </Container>
       </AppLayout>
-    </Protected>
+    </Protected >
   );
 }
