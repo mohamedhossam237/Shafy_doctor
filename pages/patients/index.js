@@ -90,7 +90,7 @@ export default function PatientsIndexPage() {
       setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
       setLoading(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, isArabic]);
 
   /* ------------------------------------------------------------ */
   /* 🔍 Filter by search text                                    */

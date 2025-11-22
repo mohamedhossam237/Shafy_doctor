@@ -87,7 +87,7 @@ export default function VitalsSection({ t, form = {}, setForm }) {
       const bmi = (weight / ((height / 100) ** 2)).toFixed(1);
       setForm((prev) => ({ ...prev, vitalsBMI: bmi }));
     }
-  }, [form.vitalsWEIGHT, form.vitalsHEIGHT]);
+  }, [form.vitalsWEIGHT, form.vitalsHEIGHT, setForm]);
 
   return (
     <SectionWrapper

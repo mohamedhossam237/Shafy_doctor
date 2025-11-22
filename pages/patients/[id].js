@@ -30,6 +30,7 @@ import PersonIcon from '@mui/icons-material/Person';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PrintIcon from '@mui/icons-material/Print';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HealthInfoSection from '@/components/patients/HealthInfoSection';
 import MedicalFileIntake from '@/components/patients/MedicalFileIntake';
 
@@ -323,7 +324,7 @@ export default function PatientDetailsPage() {
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [id, label]);
   /* ---------- notes save ---------- */
   const handleSaveNotes = async () => {
     if (!patient?.id) return;
