@@ -5,6 +5,7 @@ import * as React from "react";
 import { useRouter } from "next/router";
 import {
   Container,
+  Box,
   Stack,
   Typography,
   Paper,
@@ -19,6 +20,9 @@ import {
   FormControlLabel,
   Checkbox,
   InputAdornment,
+  Grid,
+  Chip,
+  IconButton,
 } from "@mui/material";
 
 import Protected from "@/components/Protected";
@@ -36,6 +40,14 @@ import {
   serverTimestamp,
   doc,
 } from "firebase/firestore";
+
+import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
+import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
+import EventAvailableIcon from "@mui/icons-material/EventAvailable";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
+import MonetizationOnIcon from "@mui/icons-material/MonetizationOn";
+import NoteAltIcon from "@mui/icons-material/NoteAlt";
 
 /* ---------------- helpers ---------------- */
 const pad = (n) => String(n).padStart(2, "0");

@@ -6,21 +6,17 @@ import Link from 'next/link';
 import {
   Container, Stack, Typography, Paper, Grid, Chip, Button, Divider, Skeleton,
   Snackbar, Alert, Box, Avatar, Table, TableHead, TableRow, TableCell, TableBody,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton,
-  LinearProgress, Tabs, Tab, Fade
+  TextField, IconButton, LinearProgress, Tabs, Tab, Fade, Drawer, Switch, FormControlLabel, MenuItem
 } from '@mui/material';
-import { alpha, darken } from '@mui/material/styles';
-import EditHealthInfoDialog from '@/components/patients/EditHealthInfoDialog';
+import { alpha } from '@mui/material/styles';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import DescriptionIcon from '@mui/icons-material/Description';
 import EventIcon from '@mui/icons-material/Event';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import TagIcon from '@mui/icons-material/Tag';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import ScienceIcon from '@mui/icons-material/Science';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
-import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import PhoneIcon from '@mui/icons-material/Phone';
 import EmailIcon from '@mui/icons-material/Email';
 import PlaceIcon from '@mui/icons-material/Place';
@@ -40,7 +36,6 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 import AddLabReportDialog from '@/components/reports/AddLabReportDialog';
-import PatientForm from '@/components/patients/PatientForm';
 
 /* ---------------- utils ---------------- */
 function toDate(val) {
@@ -53,6 +48,11 @@ function toDate(val) {
 }
 const pad = (n) => String(n).padStart(2, '0');
 const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const toLocalDateTimeInput = (val) => {
+  const dt = toDate(val);
+  if (!dt) return '';
+  return `${toYMD(dt)}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+};
 
 function apptDate(appt) {
   if (appt?.appointmentDate) return toDate(appt.appointmentDate);
@@ -281,18 +281,10 @@ export default function PatientDetailsPage() {
   const [xLabLoading, setXLabLoading] = React.useState(true);
   const [xLabResults, setXLabResults] = React.useState([]);
 
-  // health info edit
-  const [editHealthOpen, setEditHealthOpen] = React.useState(false);
-
-  // notes
-  const [notesOpen, setNotesOpen] = React.useState(false);
-  const [notesDraft, setNotesDraft] = React.useState('');
-  const [savingNotes, setSavingNotes] = React.useState(false);
-  const [notesType, setNotesType] = React.useState('medical'); // 'medical' | 'financial'
-
-  // edit patient dialog
-  const [editPatientOpen, setEditPatientOpen] = React.useState(false);
-  const [updatingPatient, setUpdatingPatient] = React.useState(false);
+  // unified profile editor
+  const [editAllOpen, setEditAllOpen] = React.useState(false);
+  const [editAllValues, setEditAllValues] = React.useState(null);
+  const [savingAll, setSavingAll] = React.useState(false);
 
   const [tabValue, setTabValue] = React.useState(0);
   const handleTabChange = (event, newValue) => {
@@ -307,56 +299,121 @@ export default function PatientDetailsPage() {
     user?.claims?.role === 'doctor' ||
     true;
 
+  const totalAppointments = React.useMemo(() => appts.length, [appts]);
+  const totalReports = React.useMemo(() => reports.length, [reports]);
+  const nextAppointment = React.useMemo(() => {
+    const upcoming = appts
+      .map((a) => ({ ...a, _d: apptDate(a) }))
+      .filter((a) => a._d && a._d.getTime() >= Date.now())
+      .sort((a, b) => a._d - b._d);
+    return upcoming[0] || null;
+  }, [appts]);
+  const latestReport = React.useMemo(() => {
+    const sorted = [...reports].sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
+    return sorted[0] || null;
+  }, [reports]);
+
+  const buildEditAllValues = React.useCallback(() => ({
+    name: patient?.name || '',
+    age: Number.isFinite(patient?.age) ? patient.age : '',
+    gender: patient?.gender || '',
+    bloodType: patient?.bloodType || '',
+    phone: patient?.phone || '',
+    email: patient?.email || '',
+    address: patient?.address || '',
+    allergies: patient?.allergies || '',
+    conditions: patient?.conditions || '',
+    medications: patient?.medications || '',
+    maritalStatus: patient?.maritalStatus || '',
+    lastVisit: toLocalDateTimeInput(patient?.lastVisit),
+    notes: patient?.notes || '',
+    financialNotes: patient?.financialNotes || '',
+    isDiabetic: !!patient?.isDiabetic,
+    hadSurgeries: !!patient?.hadSurgeries,
+    isSmoker: !!patient?.isSmoker,
+    drinksAlcohol: !!patient?.drinksAlcohol,
+    familyHistory: !!patient?.familyHistory,
+    isPregnant: !!patient?.isPregnant,
+  }), [patient]);
+
+  const openEditAll = React.useCallback(() => {
+    if (!patient) return;
+    setEditAllValues(buildEditAllValues());
+    setEditAllOpen(true);
+  }, [patient, buildEditAllValues]);
+
+  const handleSaveProfile = async () => {
+    if (!patient?.id || !editAllValues) return;
+    setSavingAll(true);
+    try {
+      const ref = doc(db, 'patients', patient.id);
+      const ageVal = Number(editAllValues.age);
+      const updateData = {
+        name: editAllValues.name.trim(),
+        age: Number.isFinite(ageVal) ? ageVal : null,
+        gender: editAllValues.gender || null,
+        bloodType: editAllValues.bloodType || null,
+        phone: editAllValues.phone || null,
+        email: editAllValues.email || null,
+        address: editAllValues.address || null,
+        allergies: editAllValues.allergies || null,
+        conditions: editAllValues.conditions || null,
+        medications: editAllValues.medications || null,
+        maritalStatus: editAllValues.maritalStatus || null,
+        lastVisit: editAllValues.lastVisit || null,
+        notes: editAllValues.notes || '',
+        financialNotes: editAllValues.financialNotes || '',
+        isDiabetic: !!editAllValues.isDiabetic,
+        hadSurgeries: !!editAllValues.hadSurgeries,
+        isSmoker: !!editAllValues.isSmoker,
+        drinksAlcohol: !!editAllValues.drinksAlcohol,
+        familyHistory: !!editAllValues.familyHistory,
+        isPregnant: !!editAllValues.isPregnant,
+        updatedAt: new Date(),
+        updatedBy: user?.uid || user?.email || 'doctor',
+      };
+
+      await updateDoc(ref, updateData);
+      setPatient((prev) => ({ ...prev, ...updateData }));
+      setOkMsg(label('Profile updated', 'تم تحديث الملف بنجاح'));
+      setEditAllOpen(false);
+    } catch (e) {
+      console.error(e);
+      setError(label('Failed to update profile', 'تعذر تحديث الملف'));
+    } finally {
+      setSavingAll(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (editAllOpen && patient) {
+      setEditAllValues(buildEditAllValues());
+    }
+  }, [patient, editAllOpen, buildEditAllValues]);
+
+  const handleEditInput = (key) => (e) => setEditAllValues((prev) => ({ ...(prev || {}), [key]: e.target.value }));
+  const handleEditToggle = (key) => (e) => setEditAllValues((prev) => ({ ...(prev || {}), [key]: e.target.checked }));
+
   // load patient
   React.useEffect(() => {
     if (!id) return;
+    let active = true;
     (async () => {
       setLoading(true);
       setError('');
       try {
         const snap = await getDoc(doc(db, 'patients', String(id)));
         if (!snap.exists()) throw new Error('not-found');
-        setPatient({ id: snap.id, ...snap.data() });
+        if (active) setPatient({ id: snap.id, ...snap.data() });
       } catch (e) {
         console.error(e);
-        setError(label('Failed to load patient', 'تعذر تحميل المريض'));
+        if (active) setError(isArabic ? 'تعذر تحميل المريض' : 'Failed to load patient');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     })();
-  }, [id, label]);
-  /* ---------- notes save ---------- */
-  const handleSaveNotes = async () => {
-    if (!patient?.id) return;
-    setSavingNotes(true);
-    try {
-      const ref = doc(db, 'patients', patient.id);
-      const updatedAt = new Date();
-      const updatedBy = user?.uid || user?.email || 'unknown';
-
-      await updateDoc(ref, {
-        notes: notesDraft,
-        notesUpdatedAt: updatedAt,
-        notesUpdatedBy: updatedBy,
-      });
-
-      setPatient((prev) => ({
-        ...prev,
-        notes: notesDraft,
-        notesUpdatedAt: updatedAt,
-        notesUpdatedBy: updatedBy,
-      }));
-
-      setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات بنجاح.'));
-      setNotesOpen(false);
-    } catch (e) {
-      console.error(e);
-      setError(label('Failed to save notes.', 'تعذر حفظ الملاحظات.'));
-    } finally {
-      setSavingNotes(false);
-    }
-  };
-
+    return () => { active = false; };
+  }, [id, isArabic]);
   // doctor reports for this patient
   const fetchReports = React.useCallback(async () => {
     if (!user || !id) return;
@@ -461,11 +518,6 @@ export default function PatientDetailsPage() {
 
   const copy = async (txt) => {
     try { await navigator.clipboard.writeText(String(txt || '')); setOkMsg(label('Copied', 'تم النسخ')); } catch { }
-  };
-
-  const openNotes = () => {
-    setNotesDraft(patient?.notes || '');
-    setNotesOpen(true);
   };
 
   // ---- AI summary ----
@@ -833,10 +885,10 @@ export default function PatientDetailsPage() {
                       <Button
                         variant="outlined"
                         startIcon={<EditOutlinedIcon />}
-                        onClick={() => setEditPatientOpen(true)}
+                        onClick={openEditAll}
                         sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
                       >
-                        {label('Edit Patient', 'تعديل المريض')}
+                        {label('Edit Profile', 'تعديل الملف')}
                       </Button>
                       <Button
                         variant="outlined"
@@ -861,6 +913,59 @@ export default function PatientDetailsPage() {
                         {label('New Appointment', 'حجز موعد')}
                       </Button>
                     </Stack>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 2.5,
+                  borderRadius: 3,
+                  background: (t) => `linear-gradient(115deg, ${alpha(t.palette.primary.light, 0.12)} 0%, ${t.palette.background.paper} 70%)`,
+                  border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
+                }}
+              >
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
+                      <Typography variant="overline" color="text.secondary">{label('Appointments', 'المواعيد')}</Typography>
+                      <Typography variant="h5" fontWeight={900}>{totalAppointments}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {label('Total visits recorded', 'إجمالي الزيارات المسجلة')}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
+                      <Typography variant="overline" color="text.secondary">{label('Reports', 'التقارير')}</Typography>
+                      <Typography variant="h5" fontWeight={900}>{totalReports}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {label('Clinical & lab reports', 'التقارير الطبية والمعملية')}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
+                      <Typography variant="overline" color="text.secondary">{label('Next Appointment', 'الموعد القادم')}</Typography>
+                      <Typography variant="h6" fontWeight={800}>
+                        {nextAppointment ? fmtNiceDateTime(nextAppointment._d || nextAppointment.date) : label('No upcoming', 'لا يوجد موعد قادم')}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {nextAppointment?.time || ''}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
+                      <Typography variant="overline" color="text.secondary">{label('Latest Report', 'أحدث تقرير')}</Typography>
+                      <Typography variant="h6" fontWeight={800}>
+                        {latestReport?.diagnosis || latestReport?.titleEn || latestReport?.titleAr || label('Not yet added', 'لم يُضف بعد')}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {latestReport?.date ? fmtNiceDateTime(latestReport.date) : ''}
+                      </Typography>
+                    </Paper>
                   </Grid>
                 </Grid>
               </Paper>
@@ -1206,7 +1311,7 @@ export default function PatientDetailsPage() {
                               variant="outlined"
                               size="small"
                               startIcon={<EditOutlinedIcon />}
-                              onClick={() => setEditHealthOpen(true)}
+                              onClick={openEditAll}
                               sx={{ borderRadius: 2 }}
                             >
                               {label('Edit', 'تعديل')}
@@ -1484,11 +1589,7 @@ export default function PatientDetailsPage() {
                           </Stack>
                           {canEditNotes && (
                             <IconButton
-                              onClick={() => {
-                                setNotesType('medical');
-                                setNotesDraft(patient?.notes || '');
-                                setNotesOpen(true);
-                              }}
+                              onClick={openEditAll}
                               color="primary"
                             >
                               <EditOutlinedIcon />
@@ -1522,11 +1623,7 @@ export default function PatientDetailsPage() {
                             </Typography>
                           </Stack>
                           <IconButton
-                            onClick={() => {
-                              setNotesType('financial');
-                              setNotesDraft(patient?.financialNotes || '');
-                              setNotesOpen(true);
-                            }}
+                            onClick={openEditAll}
                             color="success"
                           >
                             <EditOutlinedIcon />
@@ -1600,9 +1697,6 @@ export default function PatientDetailsPage() {
             </Stack>
           )}
 
-          {/* View report (read-only) */}
-          <ReportInlineView report={viewReport} isArabic={isArabic} onClose={() => setViewReport(null)} />
-
           {/* Add Lab Report dialog */}
           <AddLabReportDialog
             open={labOpen}
@@ -1611,192 +1705,265 @@ export default function PatientDetailsPage() {
             onSaved={() => { setLabOpen(false); fetchReports(); }}
           />
 
-          <Dialog
-            open={notesOpen}
-            onClose={() => !savingNotes && setNotesOpen(false)}
-            fullWidth
-            maxWidth="sm"
+          {/* Unified profile editor */}
+          <Drawer
+            anchor="right"
+            open={editAllOpen}
+            onClose={() => !savingAll && setEditAllOpen(false)}
+            PaperProps={{
+              sx: {
+                width: { xs: '100%', sm: 420, md: 520 },
+                p: 3,
+                pt: 2.5,
+                borderRadius: { xs: 0, sm: '18px 0 0 18px' },
+                bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
+              },
+            }}
           >
-            <DialogTitle
-              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-            >
-              <Typography fontWeight={900}>
-                {notesType === 'medical'
-                  ? label('Medical Notes', 'ملاحظات طبية')
-                  : label('Patient Financial Notes', 'ملاحظات المريض المالية')}
-              </Typography>
-              <IconButton onClick={() => !savingNotes && setNotesOpen(false)} disabled={savingNotes}>
-                <CloseRoundedIcon />
-              </IconButton>
-            </DialogTitle>
-
-            <DialogContent dividers>
-              <TextField
-                autoFocus
-                fullWidth
-                multiline
-                minRows={6}
-                value={notesDraft}
-                onChange={(e) => setNotesDraft(e.target.value)}
-                placeholder={
-                  notesType === 'medical'
-                    ? label('Type medical notes here…', 'اكتب الملاحظات الطبية هنا…')
-                    : label('Type financial notes here…', 'اكتب الملاحظات المالية هنا…')
-                }
-              />
-              <Typography variant="caption" sx={{ mt: 1, display: 'block' }} color="text.secondary">
+            <Stack spacing={2} sx={{ height: '100%' }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="h6" fontWeight={900}>
+                  {label('Update Patient Profile', 'تحديث ملف المريض')}
+                </Typography>
+                <Button onClick={() => setEditAllOpen(false)} size="small" disabled={savingAll}>
+                  {label('Close', 'إغلاق')}
+                </Button>
+              </Stack>
+              <Typography variant="body2" color="text.secondary">
                 {label(
-                  'Only authorized staff can edit these notes. Saved with timestamp and author.',
-                  'يمكن فقط للموظفين المعتمدين تعديل هذه الملاحظات. يتم حفظها مع الوقت والكاتب.'
+                  'Edit demographics, contact, clinical flags, and notes from a single place.',
+                  'حدّث البيانات الديموغرافية والتواصل والأعلام الصحية والملاحظات من مكان واحد.'
                 )}
               </Typography>
-            </DialogContent>
+              <Divider />
 
-            <DialogActions>
-              <Button onClick={() => setNotesOpen(false)} disabled={savingNotes}>
-                {label('Cancel', 'إلغاء')}
-              </Button>
-              <Button
-                onClick={async () => {
-                  if (!patient?.id) return;
-                  setSavingNotes(true);
-                  try {
-                    const ref = doc(db, 'patients', patient.id);
-                    const updatedAt = new Date();
-                    const updatedBy = user?.uid || user?.email || 'unknown';
+              {editAllValues ? (
+                <Stack spacing={2} sx={{ overflowY: 'auto', pr: 0.5, flex: 1 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
+                      {label('Basics & Contact', 'البيانات الأساسية والتواصل')}
+                    </Typography>
+                    <Grid container spacing={1.5}>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label={label('Full Name', 'الاسم الكامل')}
+                          value={editAllValues.name}
+                          onChange={handleEditInput('name')}
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={6}>
+                        <TextField
+                          fullWidth
+                          label={label('Age', 'العمر')}
+                          type="number"
+                          value={editAllValues.age}
+                          onChange={handleEditInput('age')}
+                        />
+                      </Grid>
+                      <Grid item xs={6}>
+                        <TextField
+                          fullWidth
+                          select
+                          label={label('Gender', 'النوع')}
+                          value={editAllValues.gender}
+                          onChange={handleEditInput('gender')}
+                        >
+                          <MenuItem value="male">{label('Male', 'ذكر')}</MenuItem>
+                          <MenuItem value="female">{label('Female', 'أنثى')}</MenuItem>
+                          <MenuItem value="other">{label('Other', 'أخرى')}</MenuItem>
+                        </TextField>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <TextField
+                          fullWidth
+                          select
+                          label={label('Blood Type', 'فصيلة الدم')}
+                          value={editAllValues.bloodType}
+                          onChange={handleEditInput('bloodType')}
+                        >
+                          {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => (
+                            <MenuItem key={b} value={b}>{b}</MenuItem>
+                          ))}
+                        </TextField>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <TextField
+                          fullWidth
+                          select
+                          label={label('Marital Status', 'الحالة الاجتماعية')}
+                          value={editAllValues.maritalStatus}
+                          onChange={handleEditInput('maritalStatus')}
+                        >
+                          <MenuItem value="single">{label('Single', 'أعزب')}</MenuItem>
+                          <MenuItem value="married">{label('Married', 'متزوج')}</MenuItem>
+                          <MenuItem value="divorced">{label('Divorced', 'مطلق')}</MenuItem>
+                          <MenuItem value="widowed">{label('Widowed', 'أرمل')}</MenuItem>
+                        </TextField>
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label={label('Phone', 'الهاتف')}
+                          value={editAllValues.phone}
+                          onChange={handleEditInput('phone')}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label={label('Email', 'البريد الإلكتروني')}
+                          type="email"
+                          value={editAllValues.email}
+                          onChange={handleEditInput('email')}
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label={label('Address', 'العنوان')}
+                          multiline
+                          minRows={2}
+                          value={editAllValues.address}
+                          onChange={handleEditInput('address')}
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          type="datetime-local"
+                          label={label('Last Visit', 'آخر زيارة')}
+                          value={editAllValues.lastVisit}
+                          onChange={handleEditInput('lastVisit')}
+                          InputLabelProps={{ shrink: true }}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Paper>
 
-                    if (notesType === 'medical') {
-                      await updateDoc(ref, {
-                        notes: notesDraft,
-                        notesUpdatedAt: updatedAt,
-                        notesUpdatedBy: updatedBy,
-                      });
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
+                      {label('Medical Background', 'الخلفية الطبية')}
+                    </Typography>
+                    <Grid container spacing={1.5}>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          label={label('Allergies', 'الحساسية')}
+                          value={editAllValues.allergies}
+                          onChange={handleEditInput('allergies')}
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          label={label('Chronic Conditions', 'الأمراض المزمنة')}
+                          value={editAllValues.conditions}
+                          onChange={handleEditInput('conditions')}
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          label={label('Current Medications', 'الأدوية الحالية')}
+                          value={editAllValues.medications}
+                          onChange={handleEditInput('medications')}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Paper>
 
-                      setPatient((prev) => ({
-                        ...prev,
-                        notes: notesDraft,
-                        notesUpdatedAt: updatedAt,
-                        notesUpdatedBy: updatedBy,
-                      }));
-                    } else {
-                      await updateDoc(ref, {
-                        financialNotes: notesDraft,
-                        financialNotesUpdatedAt: updatedAt,
-                        financialNotesUpdatedBy: updatedBy,
-                      });
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
+                      {label('Health Flags', 'الأعلام الصحية')}
+                    </Typography>
+                    <Stack spacing={1}>
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.isDiabetic} onChange={handleEditToggle('isDiabetic')} />}
+                        label={label('Diabetic', 'مريض سكري')}
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.hadSurgeries} onChange={handleEditToggle('hadSurgeries')} />}
+                        label={label('Past Surgeries', 'عمليات جراحية سابقة')}
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.isSmoker} onChange={handleEditToggle('isSmoker')} />}
+                        label={label('Smoker', 'مدخن')}
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.drinksAlcohol} onChange={handleEditToggle('drinksAlcohol')} />}
+                        label={label('Alcohol Intake', 'يتناول الكحول')}
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.familyHistory} onChange={handleEditToggle('familyHistory')} />}
+                        label={label('Family History', 'تاريخ عائلي مشابه')}
+                      />
+                      <FormControlLabel
+                        control={<Switch checked={!!editAllValues.isPregnant} onChange={handleEditToggle('isPregnant')} />}
+                        label={label('Pregnant', 'حامل')}
+                      />
+                    </Stack>
+                  </Paper>
 
-                      setPatient((prev) => ({
-                        ...prev,
-                        financialNotes: notesDraft,
-                        financialNotesUpdatedAt: updatedAt,
-                        financialNotesUpdatedBy: updatedBy,
-                      }));
-                    }
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
+                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
+                      {label('Notes', 'الملاحظات')}
+                    </Typography>
+                    <Grid container spacing={1.5}>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={3}
+                          label={label('Medical Notes', 'ملاحظات طبية')}
+                          value={editAllValues.notes}
+                          onChange={handleEditInput('notes')}
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={3}
+                          label={label('Financial Notes', 'ملاحظات مالية')}
+                          value={editAllValues.financialNotes}
+                          onChange={handleEditInput('financialNotes')}
+                        />
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                </Stack>
+              ) : (
+                <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+                  <Typography color="text.secondary">{label('Loading profile…', 'جاري تحميل الملف…')}</Typography>
+                </Box>
+              )}
 
-                    setOkMsg(label('Notes saved successfully.', 'تم حفظ الملاحظات بنجاح.'));
-                    setNotesOpen(false);
-                  } catch (e) {
-                    console.error(e);
-                    setError(label('Failed to save notes.', 'تعذر حفظ الملاحظات.'));
-                  } finally {
-                    setSavingNotes(false);
-                  }
-                }}
-                variant="contained"
-                disabled={savingNotes}
-              >
-                {savingNotes
-                  ? label('Saving…', 'جارٍ الحفظ…')
-                  : label('Save Notes', 'حفظ الملاحظات')}
-              </Button>
-            </DialogActions>
-          </Dialog>
+              <Stack direction="row" spacing={1} justifyContent="flex-end">
+                <Button onClick={() => setEditAllOpen(false)} disabled={savingAll}>
+                  {label('Cancel', 'إلغاء')}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleSaveProfile}
+                  disabled={savingAll}
+                  sx={{ textTransform: 'none' }}
+                >
+                  {savingAll ? label('Saving…', 'جارٍ الحفظ…') : label('Save Profile', 'حفظ الملف')}
+                </Button>
+              </Stack>
+            </Stack>
+          </Drawer>
 
-          <EditHealthInfoDialog
-            open={editHealthOpen}
-            onClose={() => setEditHealthOpen(false)}
-            patient={patient}
-            t={(en, ar) => label(en, ar)}
-            isArabic={isArabic}
-            onSave={(updated) => {
-              setPatient((p) => ({ ...p, ...updated }));
-              setOkMsg(label('Health information updated', 'تم تحديث المعلومات الصحية'));
-            }}
-          />
-
-          {/* Edit Patient Dialog */}
-          <Dialog
-            open={editPatientOpen}
-            onClose={() => !updatingPatient && setEditPatientOpen(false)}
-            maxWidth="md"
-            fullWidth
-          >
-            <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Typography fontWeight={900}>
-                {label('Edit Patient Information', 'تعديل معلومات المريض')}
-              </Typography>
-              <IconButton onClick={() => !updatingPatient && setEditPatientOpen(false)} disabled={updatingPatient}>
-                <CloseRoundedIcon />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent dividers>
-              <PatientForm
-                isArabic={isArabic}
-                initialValues={{
-                  name: patient?.name || '',
-                  age: patient?.age || '',
-                  gender: patient?.gender || '',
-                  bloodType: patient?.bloodType || '',
-                  phone: patient?.phone || '',
-                  email: patient?.email || '',
-                  address: patient?.address || '',
-                  allergies: patient?.allergies || '',
-                  conditions: patient?.conditions || '',
-                  medications: patient?.medications || '',
-                  maritalStatus: patient?.maritalStatus || '',
-                  lastVisit: patient?.lastVisit || ''
-                }}
-                onSubmit={async (values, { setSubmitting }) => {
-                  if (!patient?.id) return;
-                  setUpdatingPatient(true);
-                  try {
-                    const ref = doc(db, 'patients', patient.id);
-                    const updateData = {
-                      name: values.name.trim(),
-                      age: values.age ? Number(values.age) : null,
-                      gender: values.gender || null,
-                      bloodType: values.bloodType || null,
-                      phone: values.phone || null,
-                      email: values.email || null,
-                      address: values.address || null,
-                      allergies: values.allergies || null,
-                      conditions: values.conditions || null,
-                      medications: values.medications || null,
-                      maritalStatus: values.maritalStatus || null,
-                      lastVisit: values.lastVisit || null,
-                      updatedAt: new Date(),
-                    };
-
-                    await updateDoc(ref, updateData);
-
-                    setPatient((prev) => ({
-                      ...prev,
-                      ...updateData
-                    }));
-
-                    setOkMsg(label('Patient updated successfully', 'تم تحديث بيانات المريض بنجاح'));
-                    setEditPatientOpen(false);
-                  } catch (e) {
-                    console.error(e);
-                    setError(label('Failed to update patient', 'فشل تحديث بيانات المريض'));
-                  } finally {
-                    setUpdatingPatient(false);
-                    setSubmitting(false);
-                  }
-                }}
-              />
-            </DialogContent>
-          </Dialog>
+          {/* View report (read-only) */}
+          <ReportInlineView report={viewReport} isArabic={isArabic} onClose={() => setViewReport(null)} />
 
 
           <Snackbar
