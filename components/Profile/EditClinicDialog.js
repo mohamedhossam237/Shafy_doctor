@@ -17,6 +17,15 @@ export default function EditClinicDialog({ open, onClose, isArabic = false, clin
     whatsapp: clinic?.whatsapp || '',
     mapUrl: clinic?.mapUrl || '',
   });
+  const normalizeWhatsApp = React.useCallback((val) => {
+    if (!val) return '';
+    const raw = String(val).trim();
+    if (raw.startsWith('+')) return raw;
+    const digits = raw.replace(/\D+/g, '');
+    if (!digits) return '';
+    // Default to Egypt code (+2) when user omits country prefix
+    return digits.startsWith('2') ? `+${digits}` : `+2${digits}`;
+  }, []);
 
   React.useEffect(() => {
     setForm({
@@ -34,7 +43,8 @@ export default function EditClinicDialog({ open, onClose, isArabic = false, clin
 
   const onSave = async () => {
     if (!user?.uid) throw new Error('Not signed in');
-    await updateDoc(doc(db, 'doctors', user.uid), { clinic: form });
+    const whatsapp = normalizeWhatsApp(form.whatsapp);
+    await updateDoc(doc(db, 'doctors', user.uid), { clinic: { ...form, whatsapp } });
     onSaved?.();
   };
 
