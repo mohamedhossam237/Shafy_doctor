@@ -286,6 +286,27 @@ export default function PatientDetailsPage() {
   const [editAllValues, setEditAllValues] = React.useState(null);
   const [savingAll, setSavingAll] = React.useState(false);
 
+  // inline editing states
+  const [editMode, setEditMode] = React.useState({
+    contact: false,
+    clinical: false,
+    vitals: false
+  });
+  const [tempValues, setTempValues] = React.useState({
+    phone: '',
+    email: '',
+    address: '',
+    maritalStatus: '',
+    allergies: [],
+    conditions: [],
+    medications: [],
+    weight: '',
+    height: '',
+    bloodPressure: '',
+    temperature: ''
+  });
+  const [savingSection, setSavingSection] = React.useState('');
+
   const [tabValue, setTabValue] = React.useState(0);
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
@@ -385,22 +406,109 @@ export default function PatientDetailsPage() {
     }
   };
 
-  React.useEffect(() => {
-    if (editAllOpen && patient) {
-      setEditAllValues(buildEditAllValues());
+  const handleEditInput = (field) => (e) => {
+    setEditAllValues((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleEditToggle = (field) => (e) => {
+    setEditAllValues((prev) => ({ ...prev, [field]: e.target.checked }));
+  };
+
+  // Inline editing handlers
+  const handleEditModeToggle = (section) => {
+    if (editMode[section]) {
+      // Cancel edit
+      setEditMode((prev) => ({ ...prev, [section]: false }));
+    } else {
+      // Start edit - populate temp values
+      setTempValues((prev) => ({
+        ...prev,
+        phone: patient?.phone || '',
+        email: patient?.email || '',
+        address: patient?.address || '',
+        maritalStatus: patient?.maritalStatus || '',
+        allergies: splitCsv(patient?.allergies),
+        conditions: splitCsv(patient?.conditions),
+        medications: splitCsv(patient?.medications),
+        weight: patient?.weight || '',
+        height: patient?.height || '',
+        bloodPressure: patient?.bloodPressure || '',
+        temperature: patient?.temperature || ''
+      }));
+      setEditMode((prev) => ({ ...prev, [section]: true }));
     }
-  }, [patient, editAllOpen, buildEditAllValues]);
+  };
 
-  const handleEditInput = (key) => (e) => setEditAllValues((prev) => ({ ...(prev || {}), [key]: e.target.value }));
-  const handleEditToggle = (key) => (e) => setEditAllValues((prev) => ({ ...(prev || {}), [key]: e.target.checked }));
+  const handleTempChange = (field) => (e) => {
+    setTempValues((prev) => ({ ...prev, [field]: e.target.value }));
+  };
 
-  // load patient
+  const handleAddChip = (field, value) => {
+    if (!value) return;
+    setTempValues((prev) => ({
+      ...prev,
+      [field]: [...(prev[field] || []), value]
+    }));
+  };
+
+  const handleRemoveChip = (field, index) => {
+    setTempValues((prev) => ({
+      ...prev,
+      [field]: (prev[field] || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleSaveSection = async (section) => {
+    if (!patient?.id) return;
+    setSavingSection(section);
+    try {
+      const ref = doc(db, 'patients', patient.id);
+      let updateData = {};
+
+      if (section === 'contact') {
+        updateData = {
+          phone: tempValues.phone,
+          email: tempValues.email,
+          address: tempValues.address
+        };
+      } else if (section === 'clinical') {
+        updateData = {
+          maritalStatus: tempValues.maritalStatus,
+          allergies: tempValues.allergies.join(','),
+          conditions: tempValues.conditions.join(','),
+          medications: tempValues.medications.join(',')
+        };
+      } else if (section === 'vitals') {
+        updateData = {
+          weight: tempValues.weight,
+          height: tempValues.height,
+          bloodPressure: tempValues.bloodPressure,
+          temperature: tempValues.temperature
+        };
+      }
+
+      updateData.updatedAt = new Date();
+      updateData.updatedBy = user?.uid || user?.email || 'doctor';
+
+      await updateDoc(ref, updateData);
+      setPatient((prev) => ({ ...prev, ...updateData }));
+      setEditMode((prev) => ({ ...prev, [section]: false }));
+      setOkMsg(label('Section updated', 'تم تحديث القسم بنجاح'));
+    } catch (e) {
+      console.error(e);
+      setError(label('Failed to update', 'تعذر التحديث'));
+    } finally {
+      setSavingSection('');
+    }
+  };
+
+  const handleCancelEdit = (section) => {
+    setEditMode((prev) => ({ ...prev, [section]: false }));
+  };
+
   React.useEffect(() => {
-    if (!id) return;
     let active = true;
-    (async () => {
-      setLoading(true);
-      setError('');
+    const fetchPatient = async () => {
       try {
         const snap = await getDoc(doc(db, 'patients', String(id)));
         if (!snap.exists()) throw new Error('not-found');
@@ -411,7 +519,8 @@ export default function PatientDetailsPage() {
       } finally {
         if (active) setLoading(false);
       }
-    })();
+    };
+    fetchPatient();
     return () => { active = false; };
   }, [id, isArabic]);
   // doctor reports for this patient
@@ -1004,183 +1113,250 @@ export default function PatientDetailsPage() {
                       elevation={0}
                       sx={{
                         p: 3,
-                        borderRadius: 3,
+                        borderRadius: 4,
                         border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
-                        bgcolor: (t) => alpha(t.palette.primary.main, 0.02)
+                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.08)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+                        position: 'relative',
+                        overflow: 'hidden',
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          boxShadow: (t) => `0 12px 32px -4px ${alpha(t.palette.primary.main, 0.15)}`,
+                          borderColor: 'primary.main'
+                        }
                       }}
                     >
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 2 }}>
-                        <Stack direction="row" spacing={1.5} alignItems="center">
-                          <AutoAwesomeIcon color="primary" />
-                          <Typography variant="h6" fontWeight={800} color="primary.main">
-                            {label('AI Clinical Summary', 'الملخص السريري الذكي')}
-                          </Typography>
+                      <Box sx={{
+                        position: 'absolute', top: -40, right: -40, width: 150, height: 150,
+                        borderRadius: '50%', bgcolor: (t) => alpha(t.palette.primary.main, 0.05), zIndex: 0
+                      }} />
+
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 2, position: 'relative', zIndex: 1 }}>
+                        <Stack direction="row" spacing={2} alignItems="center">
+                          <Avatar sx={{ bgcolor: 'primary.main', boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)' }}>
+                            <AutoAwesomeIcon color="inherit" />
+                          </Avatar>
+                          <Box>
+                            <Typography variant="h6" fontWeight={800} color="text.primary">
+                              {label('AI Clinical Summary', 'الملخص السريري الذكي')}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" fontWeight={500}>
+                              {label('Powered by Shafy AI', 'مدعوم بواسطة شافي AI')}
+                            </Typography>
+                          </Box>
                         </Stack>
                         <Button
                           variant="contained"
-                          size="small"
-                          startIcon={<AutoAwesomeIcon />}
+                          size="medium"
+                          startIcon={aiBusy ? <Box sx={{ width: 20, height: 20 }} /> : <AutoAwesomeIcon />}
                           onClick={summarizeWithAI}
                           disabled={aiBusy}
-                          disableElevation
-                          sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                          sx={{
+                            borderRadius: 2.5,
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            px: 3,
+                            background: (t) => `linear-gradient(45deg, ${t.palette.primary.main}, ${t.palette.primary.dark})`,
+                            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                          }}
                         >
-                          {aiBusy ? label('Generating...', 'جارٍ التوليد...') : label('Generate Summary', 'توليد الملخص')}
+                          {aiBusy ? <LinearProgress sx={{ width: 100, height: 6, borderRadius: 1 }} color="inherit" /> : label('Generate Summary', 'توليد الملخص')}
                         </Button>
                       </Stack>
 
-                      {aiBusy && <LinearProgress sx={{ borderRadius: 1 }} />}
-                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 2 }}>{aiErr}</Alert>}
-                      {!aiBusy && aiText && (
-                        <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }} color="text.primary">
-                          {aiText}
-                        </Typography>
-                      )}
-                      {!aiBusy && !aiText && !aiErr && (
-                        <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                          {label('Click "Generate Summary" to get a concise AI-powered overview of this patient\'s history and status.', 'اضغط على "توليد الملخص" للحصول على نظرة عامة موجزة مدعومة بالذكاء الاصطناعي.')}
-                        </Typography>
-                      )}
+                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 2, mb: 2 }}>{aiErr}</Alert>}
+
+                      <Paper
+                        elevation={0}
+                        sx={{
+                          p: 2.5,
+                          borderRadius: 3,
+                          bgcolor: 'rgba(255,255,255,0.6)',
+                          backdropFilter: 'blur(10px)',
+                          border: '1px solid rgba(255,255,255,0.5)',
+                          minHeight: 100,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: !aiText ? 'center' : 'flex-start'
+                        }}
+                      >
+                        {aiBusy ? (
+                          <Stack spacing={1.5} width="100%">
+                            <Skeleton variant="text" width="90%" height={24} />
+                            <Skeleton variant="text" width="80%" height={24} />
+                            <Skeleton variant="text" width="95%" height={24} />
+                          </Stack>
+                        ) : aiText ? (
+                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }} color="text.primary">
+                            {aiText}
+                          </Typography>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center' }}>
+                            {label('Click "Generate Summary" to get a concise AI-powered overview of this patient\'s history and status.', 'اضغط على "توليد الملخص" للحصول على نظرة عامة موجزة مدعومة بالذكاء الاصطناعي.')}
+                          </Typography>
+                        )}
+                      </Paper>
                     </Paper>
 
                     {/* Quick Stats Cards */}
                     <Grid container spacing={2}>
-                      <Grid item xs={6} sm={3}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            border: (t) => `1px solid ${t.palette.divider}`,
-                            bgcolor: alpha('#1976d2', 0.05),
-                            textAlign: 'center'
-                          }}
-                        >
-                          <LocalHospitalIcon sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
-                          <Typography variant="h5" fontWeight={800} color="primary.main">
-                            {appts.filter(a => a.status === 'completed').length}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                            {label('Total Visits', 'إجمالي الزيارات')}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6} sm={3}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            border: (t) => `1px solid ${t.palette.divider}`,
-                            bgcolor: alpha('#2e7d32', 0.05),
-                            textAlign: 'center'
-                          }}
-                        >
-                          <EventIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
-                          <Typography variant="h5" fontWeight={800} color="success.main">
-                            {patient.lastVisit ? Math.floor((new Date() - new Date(patient.lastVisit)) / (1000 * 60 * 60 * 24)) : '—'}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                            {label('Days Since Last', 'أيام منذ آخر زيارة')}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6} sm={3}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            border: (t) => `1px solid ${t.palette.divider}`,
-                            bgcolor: alpha('#ed6c02', 0.05),
-                            textAlign: 'center'
-                          }}
-                        >
-                          <DescriptionIcon sx={{ fontSize: 32, color: 'warning.main', mb: 1 }} />
-                          <Typography variant="h5" fontWeight={800} color="warning.main">
-                            {reports.length}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                            {label('Reports', 'التقارير')}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6} sm={3}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 2,
-                            borderRadius: 3,
-                            border: (t) => `1px solid ${t.palette.divider}`,
-                            bgcolor: alpha('#9c27b0', 0.05),
-                            textAlign: 'center'
-                          }}
-                        >
-                          <ScienceIcon sx={{ fontSize: 32, color: 'secondary.main', mb: 1 }} />
-                          <Typography variant="h5" fontWeight={800} color="secondary.main">
-                            {appts.filter(a => a.status === 'scheduled' || a.status === 'pending').length}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                            {label('Upcoming', 'القادمة')}
-                          </Typography>
-                        </Paper>
-                      </Grid>
+                      {[
+                        {
+                          icon: <LocalHospitalIcon sx={{ fontSize: 28, color: 'white' }} />,
+                          count: appts.filter(a => a.status === 'completed').length,
+                          label: label('Total Visits', 'إجمالي الزيارات'),
+                          color: '#2196f3',
+                          gradient: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)'
+                        },
+                        {
+                          icon: <EventIcon sx={{ fontSize: 28, color: 'white' }} />,
+                          count: patient.lastVisit ? Math.floor((new Date() - new Date(patient.lastVisit)) / (1000 * 60 * 60 * 24)) : '—',
+                          label: label('Days Since Last', 'أيام منذ آخر زيارة'),
+                          color: '#4caf50',
+                          gradient: 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)'
+                        },
+                        {
+                          icon: <DescriptionIcon sx={{ fontSize: 28, color: 'white' }} />,
+                          count: reports.length,
+                          label: label('Reports', 'التقارير'),
+                          color: '#ff9800',
+                          gradient: 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)'
+                        },
+                        {
+                          icon: <ScienceIcon sx={{ fontSize: 28, color: 'white' }} />,
+                          count: appts.filter(a => a.status === 'scheduled' || a.status === 'pending').length,
+                          label: label('Upcoming', 'القادمة'),
+                          color: '#9c27b0',
+                          gradient: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)'
+                        }
+                      ].map((stat, i) => (
+                        <Grid item xs={6} sm={3} key={i}>
+                          <Paper
+                            elevation={0}
+                            sx={{
+                              p: 2.5,
+                              borderRadius: 3,
+                              position: 'relative',
+                              overflow: 'hidden',
+                              border: '1px solid rgba(0,0,0,0.08)',
+                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                              '&:hover': {
+                                transform: 'translateY(-4px)',
+                                boxShadow: `0 12px 24px -4px ${alpha(stat.color, 0.25)}`,
+                                borderColor: alpha(stat.color, 0.3)
+                              }
+                            }}
+                          >
+                            <Stack spacing={2} alignItems="center">
+                              <Avatar
+                                variant="rounded"
+                                sx={{
+                                  width: 56, height: 56,
+                                  background: stat.gradient,
+                                  boxShadow: `0 8px 16px -4px ${alpha(stat.color, 0.4)}`,
+                                  borderRadius: 2.5
+                                }}
+                              >
+                                {stat.icon}
+                              </Avatar>
+                              <Box textAlign="center">
+                                <Typography variant="h4" fontWeight={900} sx={{ color: stat.color, lineHeight: 1 }}>
+                                  {stat.count}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ mt: 0.5, display: 'block', opacity: 0.8 }}>
+                                  {stat.label}
+                                </Typography>
+                              </Box>
+                            </Stack>
+                          </Paper>
+                        </Grid>
+                      ))}
                     </Grid>
 
                     {/* Vitals & Activity Row */}
                     <Grid container spacing={3}>
                       {/* Vitals Section */}
                       <Grid item xs={12} md={6}>
-                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'error.light', color: 'error.dark' }}>
-                              <BloodtypeIcon fontSize="small" />
-                            </Avatar>
-                            <Typography variant="h6" fontWeight={800}>
-                              {label('Vitals & Metrics', 'المؤشرات الحيوية')}
-                            </Typography>
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            p: 3,
+                            borderRadius: 3,
+                            height: '100%',
+                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.primary.main, 0.02)} 100%)`,
+                            border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.1)}`,
+                            position: 'relative',
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
+                            <Stack direction="row" alignItems="center" spacing={1.5}>
+                              <Avatar sx={{ width: 40, height: 40, bgcolor: 'error.light', color: 'error.dark', boxShadow: '0 4px 12px rgba(211, 47, 47, 0.2)' }}>
+                                <BloodtypeIcon />
+                              </Avatar>
+                              <Typography variant="h6" fontWeight={800}>
+                                {label('Vitals & Metrics', 'المؤشرات الحيوية')}
+                              </Typography>
+                            </Stack>
+                            {!editMode.vitals ? (
+                              <IconButton onClick={() => handleEditModeToggle('vitals')} size="small" sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            ) : (
+                              <Stack direction="row" spacing={1}>
+                                <Button size="small" onClick={() => handleCancelEdit('vitals')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                                <Button size="small" variant="contained" onClick={() => handleSaveSection('vitals')} disabled={savingSection === 'vitals'}>
+                                  {label('Save', 'حفظ')}
+                                </Button>
+                              </Stack>
+                            )}
                           </Stack>
+
                           <Grid container spacing={2}>
-                            <Grid item xs={6}>
-                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                  {label('Weight', 'الوزن')}
-                                </Typography>
-                                <Typography variant="h6" fontWeight={700}>
-                                  {patient.weight || '—'} {patient.weight && 'kg'}
-                                </Typography>
-                              </Box>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                  {label('Height', 'الطول')}
-                                </Typography>
-                                <Typography variant="h6" fontWeight={700}>
-                                  {patient.height || '—'} {patient.height && 'cm'}
-                                </Typography>
-                              </Box>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                  {label('Blood Pressure', 'ضغط الدم')}
-                                </Typography>
-                                <Typography variant="h6" fontWeight={700}>
-                                  {patient.bloodPressure || '—'}
-                                </Typography>
-                              </Box>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Box sx={{ p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
-                                <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                  {label('Temperature', 'درجة الحرارة')}
-                                </Typography>
-                                <Typography variant="h6" fontWeight={700}>
-                                  {patient.temperature || '—'} {patient.temperature && '°C'}
-                                </Typography>
-                              </Box>
-                            </Grid>
+                            {[
+                              { key: 'weight', label: label('Weight', 'الوزن'), unit: 'kg', icon: '⚖️', color: '#1976d2' },
+                              { key: 'height', label: label('Height', 'الطول'), unit: 'cm', icon: '📏', color: '#2e7d32' },
+                              { key: 'bloodPressure', label: label('Blood Pressure', 'ضغط الدم'), unit: '', icon: '❤️', color: '#d32f2f' },
+                              { key: 'temperature', label: label('Temperature', 'درجة الحرارة'), unit: '°C', icon: '🌡️', color: '#ed6c02' }
+                            ].map((item) => (
+                              <Grid item xs={6} key={item.key}>
+                                <Box
+                                  sx={{
+                                    p: 2,
+                                    borderRadius: 2.5,
+                                    bgcolor: (t) => alpha(item.color, 0.08),
+                                    border: (t) => `1px solid ${alpha(item.color, 0.1)}`,
+                                    transition: 'all 0.2s',
+                                    '&:hover': {
+                                      bgcolor: (t) => alpha(item.color, 0.12),
+                                      transform: 'translateY(-2px)'
+                                    }
+                                  }}
+                                >
+                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                    <span>{item.icon}</span> {item.label}
+                                  </Typography>
+
+                                  {editMode.vitals ? (
+                                    <TextField
+                                      fullWidth
+                                      variant="standard"
+                                      value={tempValues[item.key]}
+                                      onChange={handleTempChange(item.key)}
+                                      placeholder="—"
+                                      InputProps={{
+                                        disableUnderline: true,
+                                        sx: { fontSize: '1.1rem', fontWeight: 700, color: item.color }
+                                      }}
+                                    />
+                                  ) : (
+                                    <Typography variant="h6" fontWeight={800} sx={{ color: item.color }}>
+                                      {patient[item.key] || '—'}
+                                      {patient[item.key] && item.unit && <Typography component="span" variant="caption" sx={{ opacity: 0.7, ml: 0.5 }}>{item.unit}</Typography>}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </Grid>
+                            ))}
                           </Grid>
                         </Paper>
                       </Grid>
@@ -1253,85 +1429,173 @@ export default function PatientDetailsPage() {
                     <Grid container spacing={3}>
                       {/* Contact Info */}
                       <Grid item xs={12} md={5}>
-                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-                          <Typography variant="h6" fontWeight={800} gutterBottom>
-                            {label('Contact Information', 'معلومات الاتصال')}
-                          </Typography>
-                          <Stack spacing={2.5} sx={{ mt: 2 }}>
-                            <Stack direction="row" spacing={2} alignItems="flex-start">
-                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
-                                <PhoneIcon fontSize="small" />
-                              </Avatar>
-                              <Box>
-                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Phone', 'الهاتف')}</Typography>
-                                <Typography variant="body1" fontWeight={500}>{patient.phone || '—'}</Typography>
-                                {patient.phone && (
-                                  <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                                    <Button size="small" component={Link} href={`tel:${patient.phone}`} sx={{ minWidth: 0, p: 0 }}>{label('Call', 'اتصال')}</Button>
-                                    <Button size="small" component={Link} href={`sms:${patient.phone}`} sx={{ minWidth: 0, p: 0 }}>SMS</Button>
-                                  </Stack>
-                                )}
-                              </Box>
-                            </Stack>
-                            <Divider variant="inset" component="div" />
-                            <Stack direction="row" spacing={2} alignItems="flex-start">
-                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
-                                <EmailIcon fontSize="small" />
-                              </Avatar>
-                              <Box>
-                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Email', 'البريد')}</Typography>
-                                <Typography variant="body1" fontWeight={500}>{patient.email || '—'}</Typography>
-                                {patient.email && (
-                                  <Button size="small" component={Link} href={`mailto:${patient.email}`} sx={{ minWidth: 0, p: 0, mt: 0.5 }}>{label('Send Email', 'إرسال بريد')}</Button>
-                                )}
-                              </Box>
-                            </Stack>
-                            <Divider variant="inset" component="div" />
-                            <Stack direction="row" spacing={2} alignItems="flex-start">
-                              <Avatar sx={{ width: 32, height: 32, bgcolor: 'action.hover', color: 'text.secondary' }}>
-                                <PlaceIcon fontSize="small" />
-                              </Avatar>
-                              <Box>
-                                <Typography variant="body2" color="text.secondary" fontWeight={600}>{label('Address', 'العنوان')}</Typography>
-                                <Typography variant="body1" fontWeight={500}>{patient.address || '—'}</Typography>
-                              </Box>
-                            </Stack>
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            p: 3,
+                            borderRadius: 3,
+                            height: '100%',
+                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.info.main, 0.03)} 100%)`,
+                            border: (t) => `1px solid ${alpha(t.palette.info.main, 0.1)}`,
+                          }}
+                        >
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
+                            <Typography variant="h6" fontWeight={800}>
+                              {label('Contact Information', 'معلومات الاتصال')}
+                            </Typography>
+                            {!editMode.contact ? (
+                              <IconButton onClick={() => handleEditModeToggle('contact')} size="small" sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            ) : (
+                              <Stack direction="row" spacing={1}>
+                                <Button size="small" onClick={() => handleCancelEdit('contact')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                                <Button size="small" variant="contained" onClick={() => handleSaveSection('contact')} disabled={savingSection === 'contact'}>
+                                  {label('Save', 'حفظ')}
+                                </Button>
+                              </Stack>
+                            )}
+                          </Stack>
+
+                          <Stack spacing={3}>
+                            {[
+                              { key: 'phone', label: label('Phone', 'الهاتف'), icon: <PhoneIcon fontSize="small" />, type: 'tel' },
+                              { key: 'email', label: label('Email', 'البريد'), icon: <EmailIcon fontSize="small" />, type: 'email' },
+                              { key: 'address', label: label('Address', 'العنوان'), icon: <PlaceIcon fontSize="small" />, type: 'text' }
+                            ].map((item) => (
+                              <Stack key={item.key} direction="row" spacing={2} alignItems="flex-start">
+                                <Avatar sx={{ width: 36, height: 36, bgcolor: 'action.hover', color: 'text.secondary' }}>
+                                  {item.icon}
+                                </Avatar>
+                                <Box sx={{ flex: 1 }}>
+                                  <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ mb: 0.5 }}>
+                                    {item.label}
+                                  </Typography>
+
+                                  {editMode.contact ? (
+                                    <TextField
+                                      fullWidth
+                                      size="small"
+                                      value={tempValues[item.key]}
+                                      onChange={handleTempChange(item.key)}
+                                      placeholder={item.label}
+                                      variant="outlined"
+                                      sx={{ mt: 0.5 }}
+                                    />
+                                  ) : (
+                                    <Stack direction="row" alignItems="center" spacing={1}>
+                                      <Typography variant="body1" fontWeight={500}>
+                                        {patient[item.key] || '—'}
+                                      </Typography>
+                                      {patient[item.key] && (
+                                        <IconButton size="small" onClick={() => copy(patient[item.key])} sx={{ opacity: 0.5, p: 0.5 }}>
+                                          <ContentCopyIcon sx={{ fontSize: 14 }} />
+                                        </IconButton>
+                                      )}
+                                    </Stack>
+                                  )}
+
+                                  {!editMode.contact && patient[item.key] && (
+                                    <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                                      {item.key === 'phone' && (
+                                        <>
+                                          <Button size="small" variant="outlined" startIcon={<PhoneIcon />} component={Link} href={`tel:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                            {label('Call', 'اتصال')}
+                                          </Button>
+                                          <Button size="small" variant="outlined" component={Link} href={`sms:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                            SMS
+                                          </Button>
+                                        </>
+                                      )}
+                                      {item.key === 'email' && (
+                                        <Button size="small" variant="outlined" startIcon={<EmailIcon />} component={Link} href={`mailto:${patient.email}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                          {label('Email', 'إرسال')}
+                                        </Button>
+                                      )}
+                                    </Stack>
+                                  )}
+                                </Box>
+                              </Stack>
+                            ))}
                           </Stack>
                         </Paper>
                       </Grid>
 
                       {/* Clinical Profile */}
                       <Grid item xs={12} md={7}>
-                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            p: 3,
+                            borderRadius: 3,
+                            height: '100%',
+                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.secondary.main, 0.03)} 100%)`,
+                            border: (t) => `1px solid ${alpha(t.palette.secondary.main, 0.1)}`,
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
                             <Typography variant="h6" fontWeight={800}>
                               {label('Clinical Profile', 'الملف السريري')}
                             </Typography>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              startIcon={<EditOutlinedIcon />}
-                              onClick={openEditAll}
-                              sx={{ borderRadius: 2 }}
-                            >
-                              {label('Edit', 'تعديل')}
-                            </Button>
+                            {!editMode.clinical ? (
+                              <IconButton onClick={() => handleEditModeToggle('clinical')} size="small" sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon fontSize="small" />
+                              </IconButton>
+                            ) : (
+                              <Stack direction="row" spacing={1}>
+                                <Button size="small" onClick={() => handleCancelEdit('clinical')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                                <Button size="small" variant="contained" onClick={() => handleSaveSection('clinical')} disabled={savingSection === 'clinical'}>
+                                  {label('Save', 'حفظ')}
+                                </Button>
+                              </Stack>
+                            )}
                           </Stack>
 
                           <MedicalFileIntake
                             patientId={patient?.id}
                             patient={patient}
                             isArabic={isArabic}
-                            onExtract={(extractedData) => {
-                              setPatient((prev) => ({ ...prev, ...extractedData }));
-                              setOkMsg(label('Medical information extracted successfully.', 'تم استخراج المعلومات الطبية بنجاح.'));
+                            onExtract={async (extractedData) => {
+                              if (!patient?.id) return;
+                              try {
+                                const ref = doc(db, 'patients', patient.id);
+                                const updateData = {
+                                  ...extractedData,
+                                  updatedAt: new Date(),
+                                  updatedBy: user?.uid || user?.email || 'doctor'
+                                };
+
+                                await updateDoc(ref, updateData);
+                                setPatient((prev) => ({ ...prev, ...updateData }));
+                                setOkMsg(label('Medical information extracted and saved.', 'تم استخراج وحفظ المعلومات الطبية.'));
+                              } catch (e) {
+                                console.error(e);
+                                setError(label('Failed to save extracted data.', 'فشل حفظ البيانات المستخرجة.'));
+                              }
                             }}
                           />
 
                           <Grid container spacing={3} sx={{ mt: 1 }}>
                             <Grid item xs={12} sm={6}>
                               <Labeled title={label('Marital Status', 'الحالة الاجتماعية')}>
-                                <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 500 }} />
+                                {editMode.clinical ? (
+                                  <TextField
+                                    select
+                                    fullWidth
+                                    size="small"
+                                    value={tempValues.maritalStatus}
+                                    onChange={handleTempChange('maritalStatus')}
+                                    SelectProps={{ native: true }}
+                                  >
+                                    <option value="">{label('Select...', 'اختر...')}</option>
+                                    <option value="Single">{label('Single', 'أعزب/عزباء')}</option>
+                                    <option value="Married">{label('Married', 'متزوج/ة')}</option>
+                                    <option value="Divorced">{label('Divorced', 'مطلق/ة')}</option>
+                                    <option value="Widowed">{label('Widowed', 'أرمل/ة')}</option>
+                                  </TextField>
+                                ) : (
+                                  <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 500 }} />
+                                )}
                               </Labeled>
                             </Grid>
                             <Grid item xs={12} sm={6}>
@@ -1339,39 +1603,62 @@ export default function PatientDetailsPage() {
                                 <Typography variant="body2" fontWeight={500}>{fmtNiceDate(patient.lastVisit)}</Typography>
                               </Labeled>
                             </Grid>
-                            <Grid item xs={12}>
-                              <Labeled title={label('Allergies', 'الحساسيات')}>
-                                {splitCsv(patient?.allergies).length ? (
-                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                                    {splitCsv(patient.allergies).map((a, i) => (
-                                      <Chip key={i} label={a} color="error" variant="soft" size="small" sx={{ bgcolor: alpha('#f44336', 0.1), color: '#d32f2f', fontWeight: 600 }} />
+
+                            {[
+                              { key: 'allergies', label: label('Allergies', 'الحساسيات'), color: 'error', bg: '#f44336' },
+                              { key: 'conditions', label: label('Chronic Conditions', 'الأمراض المزمنة'), color: 'warning', bg: '#ff9800' },
+                              { key: 'medications', label: label('Current Medications', 'الأدوية الحالية'), color: 'info', bg: '#0288d1' }
+                            ].map((section) => (
+                              <Grid item xs={12} key={section.key}>
+                                <Labeled title={section.label}>
+                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+                                    {(editMode.clinical ? tempValues[section.key] : splitCsv(patient?.[section.key])).map((item, i) => (
+                                      <Chip
+                                        key={i}
+                                        label={item}
+                                        color={section.color}
+                                        variant="soft"
+                                        size="small"
+                                        onDelete={editMode.clinical ? () => handleRemoveChip(section.key, i) : undefined}
+                                        sx={{
+                                          bgcolor: alpha(section.bg, 0.1),
+                                          color: section.bg,
+                                          fontWeight: 600,
+                                          borderRadius: 1.5
+                                        }}
+                                      />
                                     ))}
+                                    {editMode.clinical && (
+                                      <Box component="form"
+                                        onSubmit={(e) => {
+                                          e.preventDefault();
+                                          const val = e.target.elements.newChip.value;
+                                          handleAddChip(section.key, val);
+                                          e.target.reset();
+                                        }}
+                                        sx={{ display: 'inline-flex' }}
+                                      >
+                                        <TextField
+                                          name="newChip"
+                                          placeholder="+"
+                                          size="small"
+                                          sx={{
+                                            width: 80,
+                                            '& .MuiInputBase-root': { borderRadius: 2, fontSize: '0.8rem', height: 24, padding: 0 }
+                                          }}
+                                          InputProps={{
+                                            sx: { px: 1 }
+                                          }}
+                                        />
+                                      </Box>
+                                    )}
+                                    {!editMode.clinical && !splitCsv(patient?.[section.key]).length && (
+                                      <Typography variant="body2" color="text.secondary">—</Typography>
+                                    )}
                                   </Stack>
-                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
-                              </Labeled>
-                            </Grid>
-                            <Grid item xs={12}>
-                              <Labeled title={label('Chronic Conditions', 'الأمراض المزمنة')}>
-                                {splitCsv(patient?.conditions).length ? (
-                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                                    {splitCsv(patient.conditions).map((c, i) => (
-                                      <Chip key={i} label={c} color="warning" variant="soft" size="small" sx={{ bgcolor: alpha('#ff9800', 0.1), color: '#ed6c02', fontWeight: 600 }} />
-                                    ))}
-                                  </Stack>
-                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
-                              </Labeled>
-                            </Grid>
-                            <Grid item xs={12}>
-                              <Labeled title={label('Current Medications', 'الأدوية الحالية')}>
-                                {splitCsv(patient?.medications).length ? (
-                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                                    {splitCsv(patient.medications).map((m, i) => (
-                                      <Chip key={i} label={m} color="info" variant="soft" size="small" sx={{ bgcolor: alpha('#0288d1', 0.1), color: '#0288d1', fontWeight: 600 }} />
-                                    ))}
-                                  </Stack>
-                                ) : <Typography variant="body2" color="text.secondary">—</Typography>}
-                              </Labeled>
-                            </Grid>
+                                </Labeled>
+                              </Grid>
+                            ))}
                           </Grid>
 
                           <Box sx={{ mt: 3 }}>

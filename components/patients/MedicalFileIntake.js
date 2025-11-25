@@ -16,6 +16,16 @@ import {
   Paper,
   Box,
   IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Checkbox,
+  TextField,
+  FormControlLabel,
+  Switch
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
@@ -41,6 +51,11 @@ export default function MedicalFileIntake({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [warning, setWarning] = useState("");
+
+  // Review State
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [extractedData, setExtractedData] = useState(null);
+  const [reviewSelection, setReviewSelection] = useState({});
 
   const t = (en, ar) => (isArabic ? ar : en);
 
@@ -89,45 +104,75 @@ export default function MedicalFileIntake({
 
       const extracted = data.extracted || {};
 
-      // تجهيز البيانات لتحديث patient في الصفحة
-      const mergedForPatient = {
-        // Arrays
-        allergies: extracted.allergies || patient?.allergies || [],
-        conditions: extracted.conditions || patient?.conditions || [],
-        medications: extracted.medications || patient?.medications || [],
+      // Prepare for review
+      setExtractedData(extracted);
 
-        // Demographics
-        maritalStatus: extracted.maritalStatus || patient?.maritalStatus || "",
-        bloodType: extracted.bloodType || patient?.bloodType || "",
-        gender: extracted.gender || patient?.gender || "",
-        age: extracted.age || patient?.age || "",
+      // Default selection: select all non-empty extracted fields
+      const initialSelection = {};
+      Object.keys(extracted).forEach(key => {
+        const val = extracted[key];
+        if (Array.isArray(val)) {
+          initialSelection[key] = val.length > 0;
+        } else {
+          initialSelection[key] = !!val;
+        }
+      });
+      setReviewSelection(initialSelection);
 
-        // Notes (مسموح تكون mixed)
-        notes: extracted.notes || patient?.notes || "",
-      };
-
-      if (typeof onExtract === "function") {
-        onExtract(mergedForPatient);
-      }
-
-      if (data.warning) {
-        setWarning(data.warning);
-      }
-
-      setSuccess(
-        t(
-          "Medical information extracted and profile updated.",
-          "تم استخراج المعلومات الطبية وتحديث الملف الشخصي للمريض."
-        )
-      );
-      setOpen(false);
+      setOpen(false); // Close upload dialog
+      setReviewOpen(true); // Open review dialog
       setFile(null);
+      setLoading(false);
+
     } catch (e) {
       console.error(e);
       setError(e.message || t("Upload failed", "فشل رفع الملف"));
-    } finally {
       setLoading(false);
     }
+  };
+
+  const handleSaveReview = () => {
+    if (!extractedData) return;
+
+    const mergedForPatient = { ...patient }; // Start with existing
+
+    // Helper to merge or replace
+    const applyField = (key) => {
+      if (!reviewSelection[key]) return; // Skip if not selected
+
+      const newVal = extractedData[key];
+      const oldVal = patient?.[key];
+
+      if (Array.isArray(newVal)) {
+        // Merge arrays (unique)
+        const combined = new Set([
+          ...(Array.isArray(oldVal) ? oldVal : (typeof oldVal === 'string' ? oldVal.split(',') : [])),
+          ...newVal
+        ]);
+        mergedForPatient[key] = Array.from(combined).filter(Boolean);
+      } else {
+        // Replace single value
+        mergedForPatient[key] = newVal;
+      }
+    };
+
+    // Apply all potential fields
+    [
+      'allergies', 'conditions', 'medications',
+      'maritalStatus', 'bloodType', 'gender', 'age',
+      'weight', 'height', 'bloodPressure', 'temperature',
+      'phone', 'email', 'address',
+      'isSmoker', 'drinksAlcohol',
+      'notes'
+    ].forEach(applyField);
+
+    if (typeof onExtract === "function") {
+      onExtract(mergedForPatient);
+    }
+
+    setSuccess(t("Profile updated successfully.", "تم تحديث الملف بنجاح."));
+    setReviewOpen(false);
+    setExtractedData(null);
   };
 
   return (
@@ -136,13 +181,17 @@ export default function MedicalFileIntake({
       <Button
         variant="contained"
         sx={{
-          borderRadius: 2,
-          px: 2.5,
-          py: 1,
-          fontWeight: 700,
-          background: "linear-gradient(135deg, #5D4042, #8c5a5c)",
+          borderRadius: 3,
+          px: 3,
+          py: 1.2,
+          fontWeight: 800,
+          background: (t) => `linear-gradient(135deg, ${t.palette.info.main}, ${t.palette.info.dark})`,
+          boxShadow: '0 4px 12px rgba(1, 135, 134, 0.3)',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           "&:hover": {
-            background: "linear-gradient(135deg, #4f3436, #7a4d4f)",
+            transform: 'translateY(-2px)',
+            boxShadow: '0 6px 16px rgba(1, 135, 134, 0.4)',
+            background: (t) => `linear-gradient(135deg, ${t.palette.info.dark}, ${t.palette.info.main})`,
           },
         }}
         startIcon={<CloudUploadIcon />}
@@ -161,7 +210,8 @@ export default function MedicalFileIntake({
           sx: {
             borderRadius: 4,
             p: 1,
-            background: "linear-gradient(135deg, #ffffff, #faf7f7)",
+            background: (t) => `linear-gradient(135deg, ${t.palette.background.paper} 0%, ${t.palette.grey[50]} 100%)`,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
           },
         }}
       >
@@ -186,23 +236,26 @@ export default function MedicalFileIntake({
             <Paper
               variant="outlined"
               sx={{
-                p: 3,
+                p: 4,
                 borderRadius: 3,
                 textAlign: "center",
-                border: "2px dashed #bfbfbf",
-                transition: "0.2s",
+                border: (t) => `3px dashed ${t.palette.info.light}`,
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                 cursor: "pointer",
+                background: (t) => `linear-gradient(135deg, ${t.palette.background.default} 0%, ${t.palette.grey[50]} 100%)`,
                 "&:hover": {
-                  borderColor: "#5D4042",
-                  backgroundColor: "#fdf8f7",
+                  borderColor: (t) => t.palette.info.main,
+                  backgroundColor: (t) => t.palette.info.light + '10',
+                  transform: 'scale(1.02)',
+                  boxShadow: (t) => `0 4px 16px ${t.palette.info.main}30`,
                 },
               }}
               onClick={() =>
                 document.getElementById("medical-file-input")?.click()
               }
             >
-              <UploadFileIcon sx={{ fontSize: 38, color: "#5D4042" }} />
-              <Typography sx={{ mt: 1, fontWeight: 600 }}>
+              <UploadFileIcon sx={{ fontSize: 48, color: "info.main", mb: 1 }} />
+              <Typography sx={{ mt: 1, fontWeight: 700, fontSize: '1.05rem' }}>
                 {t(
                   "Click to select a medical file",
                   "اضغط لاختيار ملف طبي"
@@ -255,13 +308,17 @@ export default function MedicalFileIntake({
             disabled={!file || loading}
             onClick={handleUpload}
             sx={{
-              px: 3,
-              py: 1,
+              px: 3.5,
+              py: 1.2,
               borderRadius: 3,
-              fontWeight: 800,
-              background: "linear-gradient(135deg, #5D4042, #8c5a5c)",
+              fontWeight: 900,
+              background: (t) => `linear-gradient(135deg, ${t.palette.info.main}, ${t.palette.info.dark})`,
+              boxShadow: '0 4px 12px rgba(1, 135, 134, 0.3)',
+              transition: 'all 0.3s ease',
               "&:hover": {
-                background: "linear-gradient(135deg, #4f3436, #7a4d4f)",
+                transform: 'translateY(-2px)',
+                boxShadow: '0 6px 16px rgba(1, 135, 134, 0.4)',
+                background: (t) => `linear-gradient(135deg, ${t.palette.info.dark}, ${t.palette.info.main})`,
               },
             }}
           >
@@ -306,6 +363,120 @@ export default function MedicalFileIntake({
           {error}
         </Alert>
       </Snackbar>
+
+      {/* REVIEW DIALOG */}
+      <Dialog
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 3 } }}
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          {t("Review Extracted Data", "مراجعة البيانات المستخرجة")}
+        </DialogTitle>
+        <DialogContent dividers>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={Object.values(reviewSelection).every(Boolean)}
+                      indeterminate={Object.values(reviewSelection).some(Boolean) && !Object.values(reviewSelection).every(Boolean)}
+                      onChange={(e) => {
+                        const all = {};
+                        if (extractedData) {
+                          Object.keys(extractedData).forEach(k => all[k] = e.target.checked);
+                          setReviewSelection(all);
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell><strong>{t("Field", "الحقل")}</strong></TableCell>
+                  <TableCell><strong>{t("Current Value", "القيمة الحالية")}</strong></TableCell>
+                  <TableCell><strong>{t("Extracted Value", "القيمة المستخرجة")}</strong></TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {[
+                  { key: 'age', label: t('Age', 'العمر') },
+                  { key: 'gender', label: t('Gender', 'الجنس') },
+                  { key: 'weight', label: t('Weight', 'الوزن') },
+                  { key: 'height', label: t('Height', 'الطول') },
+                  { key: 'bloodPressure', label: t('Blood Pressure', 'ضغط الدم') },
+                  { key: 'temperature', label: t('Temperature', 'درجة الحرارة') },
+                  { key: 'phone', label: t('Phone', 'الهاتف') },
+                  { key: 'email', label: t('Email', 'البريد') },
+                  { key: 'address', label: t('Address', 'العنوان') },
+                  { key: 'maritalStatus', label: t('Marital Status', 'الحالة الاجتماعية') },
+                  { key: 'bloodType', label: t('Blood Type', 'فصيلة الدم') },
+                  { key: 'allergies', label: t('Allergies', 'الحساسيات') },
+                  { key: 'conditions', label: t('Conditions', 'الأمراض المزمنة') },
+                  { key: 'medications', label: t('Medications', 'الأدوية') },
+                  { key: 'diagnosis', label: t('Diagnosis', 'التشخيص') },
+                  { key: 'findings', label: t('Findings', 'الموجودات السريرية') },
+                  { key: 'labResults', label: t('Lab Results', 'نتائج التحاليل') },
+                  { key: 'procedures', label: t('Procedures', 'الإجراءات') },
+                  { key: 'notes', label: t('Notes', 'ملاحظات') },
+                ].map((field) => {
+                  const newVal = extractedData?.[field.key];
+                  if (!newVal || (Array.isArray(newVal) && newVal.length === 0)) return null;
+
+                  const oldVal = patient?.[field.key];
+
+                  let displayNew = String(newVal);
+                  if (Array.isArray(newVal)) {
+                    if (field.key === 'labResults') {
+                      displayNew = newVal.map(l => `${l.test || ''} ${l.value || ''} ${l.unit || ''} ${l.flag || ''}`.trim()).join('\n');
+                    } else {
+                      displayNew = newVal.join(', ');
+                    }
+                  }
+
+                  const displayOld = Array.isArray(oldVal) ? oldVal.join(', ') : (oldVal || '—');
+
+                  return (
+                    <TableRow key={field.key} hover>
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          checked={!!reviewSelection[field.key]}
+                          onChange={(e) => setReviewSelection(prev => ({ ...prev, [field.key]: e.target.checked }))}
+                        />
+                      </TableCell>
+                      <TableCell>{field.label}</TableCell>
+                      <TableCell sx={{ color: 'text.secondary', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayOld}>
+                        {displayOld}
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          fullWidth
+                          multiline
+                          size="small"
+                          variant="standard"
+                          value={displayNew}
+                          InputProps={{ disableUnderline: true }}
+                          onChange={(e) => {
+                            if (!Array.isArray(newVal)) {
+                              setExtractedData(prev => ({ ...prev, [field.key]: e.target.value }));
+                            }
+                          }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setReviewOpen(false)} color="inherit">{t("Cancel", "إلغاء")}</Button>
+          <Button onClick={handleSaveReview} variant="contained" disableElevation>
+            {t("Save Changes", "حفظ التغييرات")}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }

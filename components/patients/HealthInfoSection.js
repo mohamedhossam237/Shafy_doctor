@@ -17,7 +17,7 @@ import {
  * HealthInfoSection – Enhanced version (matches EditHealthInfoDialog)
  * Each question appears as a clean, single-row card with hover effect.
  */
-export default function HealthInfoSection({ form = {}, setForm = () => {}, t, isArabic }) {
+export default function HealthInfoSection({ form = {}, setForm = () => { }, t, isArabic }) {
   const theme = useTheme();
 
   // 🌍 Translation helper
@@ -53,17 +53,29 @@ export default function HealthInfoSection({ form = {}, setForm = () => {}, t, is
   return (
     <Box sx={{ mt: 3 }}>
       {/* 🩺 Title */}
-      <Typography
-        variant="h6"
-        fontWeight={900}
-        sx={{
-          mb: 2,
-          textAlign: isArabic ? 'right' : 'left',
-          color: theme.palette.text.primary,
-        }}
-      >
-        {translate('Health Assessment', 'تقييم الحالة الصحية')}
-      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
+        <Box
+          sx={{
+            p: 1,
+            borderRadius: 2,
+            background: (t) => `linear-gradient(135deg, ${t.palette.success.main}, ${t.palette.success.dark})`,
+            display: 'flex',
+            boxShadow: (t) => `0 4px 12px rgba(46, 125, 50, 0.3)`,
+          }}
+        >
+          <Typography sx={{ color: 'white', fontSize: 24, fontWeight: 900 }}>🩺</Typography>
+        </Box>
+        <Typography
+          variant="h6"
+          fontWeight={900}
+          sx={{
+            textAlign: isArabic ? 'right' : 'left',
+            color: theme.palette.text.primary,
+          }}
+        >
+          {translate('Health Assessment', 'تقييم الحالة الصحية')}
+        </Typography>
+      </Stack>
 
       {/* 📋 Card container */}
       <Paper
@@ -71,9 +83,13 @@ export default function HealthInfoSection({ form = {}, setForm = () => {}, t, is
         sx={{
           p: { xs: 2, sm: 2.5 },
           borderRadius: 4,
-          bgcolor: theme.palette.background.paper,
-          boxShadow: theme.shadows[2],
-          borderColor: theme.palette.divider,
+          background: (t) => `linear-gradient(135deg, ${t.palette.background.paper} 0%, ${t.palette.grey[50]} 100%)`,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+          border: (t) => `1px solid ${t.palette.divider}`,
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          }
         }}
       >
         <Stack spacing={2.2}>
@@ -85,13 +101,14 @@ export default function HealthInfoSection({ form = {}, setForm = () => {}, t, is
                 p: { xs: 1.5, sm: 2 },
                 borderRadius: 3,
                 boxShadow: 'none',
-                bgcolor: (th) => th.palette.background.default,
-                border: (th) => `1px solid ${th.palette.divider}`,
-                transition: '0.25s ease',
+                background: (th) => `linear-gradient(135deg, ${th.palette.background.default} 0%, ${th.palette.grey[50]} 100%)`,
+                border: (th) => `2px solid ${th.palette.divider}`,
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                 '&:hover': {
-                  borderColor: theme.palette.primary.main,
-                  boxShadow: theme.shadows[3],
-                  transform: 'translateY(-2px)',
+                  borderColor: theme.palette.success.main,
+                  boxShadow: `0 4px 12px rgba(46, 125, 50, 0.2)`,
+                  transform: 'translateY(-3px) scale(1.01)',
+                  background: (th) => th.palette.background.paper,
                 },
                 direction: isArabic ? 'rtl' : 'ltr',
               }}
