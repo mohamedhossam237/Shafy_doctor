@@ -86,6 +86,41 @@ const toRangeStringFromHoursDay = (dayObj) => {
   const end = dayObj.end || "17:00";
   return `${start}-${end}`;
 };
+const deriveDurationMinutes = (sourceObj) => {
+  const pick = (...vals) => {
+    for (const v of vals) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+  };
+  // doctor root fields
+  const root = pick(
+    sourceObj?.appointmentDuration,
+    sourceObj?.slotMinutes,
+    sourceObj?.slot_duration,
+    sourceObj?.durationMinutes,
+    sourceObj?.duration
+  );
+  if (root) return root;
+  // working hours object may carry appointmentDuration
+  const wh =
+    sourceObj?.working_hours ||
+    sourceObj?.workingHours ||
+    sourceObj?.clinic?.working_hours ||
+    sourceObj?.clinic?.workingHours;
+  if (wh && typeof wh === "object") {
+    const whDur = pick(
+      wh.appointmentDuration,
+      wh.slotMinutes,
+      wh.slot_duration,
+      wh.durationMinutes,
+      wh.duration
+    );
+    if (whDur) return whDur;
+  }
+  return 30; // sensible default
+};
 const normalizeHoursFromAny = (sourceObj) => {
   if (!sourceObj || typeof sourceObj !== "object") {
     return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
@@ -132,6 +167,7 @@ export default function NewAppointmentPage() {
   const [clinics, setClinics] = React.useState([]);
   const [selectedClinicId, setSelectedClinicId] = React.useState("");
   const [hours, setHours] = React.useState(null);
+  const [slotMinutes, setSlotMinutes] = React.useState(30);
 
   /* appointment form */
   const [dateStr, setDateStr] = React.useState(toYMD(new Date()));
@@ -162,6 +198,7 @@ export default function NewAppointmentPage() {
         setClinics(d.clinics || []);
         if (d.clinics?.length === 1) setSelectedClinicId(d.clinics[0].id);
         setHours(normalizeHoursFromAny(d));
+        setSlotMinutes(deriveDurationMinutes(d));
         setTotalAmount(Number(d.checkupPrice || 0));
       } catch (err) {
         console.error(err);
@@ -194,7 +231,8 @@ export default function NewAppointmentPage() {
         const d = new Date(dateStr + "T00:00:00");
         const weekday = weekdayKey(d);
         const ranges = parseDayRanges(hours?.[weekday]);
-        let slots = buildSlotsForRanges(ranges, 30);
+        const step = Number(slotMinutes) > 0 ? Number(slotMinutes) : 30;
+        let slots = buildSlotsForRanges(ranges, step);
 
         // Fetch booked appointments for doctor on that date
         const qRef = query(
