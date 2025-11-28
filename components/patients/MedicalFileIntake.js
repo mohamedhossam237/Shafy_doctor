@@ -24,12 +24,14 @@ import {
   TableRow,
   Checkbox,
   TextField,
-  FormControlLabel,
-  Switch
+  alpha,
+  useTheme
 } from "@mui/material";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { styled } from "@mui/material/styles";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -44,6 +46,7 @@ export default function MedicalFileIntake({
   onExtract,
 }) {
   const { user } = useAuth();
+  const theme = useTheme();
 
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState(null);
@@ -183,24 +186,26 @@ export default function MedicalFileIntake({
         sx={{
           borderRadius: 3,
           px: 3,
-          py: 1.2,
+          py: 1.5,
           fontWeight: 800,
-          background: (t) => `linear-gradient(135deg, ${t.palette.info.main}, ${t.palette.info.dark})`,
-          boxShadow: '0 4px 12px rgba(1, 135, 134, 0.3)',
+          background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
+          boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`,
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          textTransform: 'none',
+          fontSize: '0.95rem',
           "&:hover": {
             transform: 'translateY(-2px)',
-            boxShadow: '0 6px 16px rgba(1, 135, 134, 0.4)',
-            background: (t) => `linear-gradient(135deg, ${t.palette.info.dark}, ${t.palette.info.main})`,
+            boxShadow: (t) => `0 12px 24px -4px ${alpha(t.palette.secondary.main, 0.5)}`,
+            background: (t) => `linear-gradient(135deg, ${t.palette.secondary.dark}, ${t.palette.secondary.main})`,
           },
         }}
-        startIcon={<CloudUploadIcon />}
+        startIcon={<AutoAwesomeIcon />}
         onClick={() => setOpen(true)}
       >
-        {t("Upload Medical File", "رفع ملف طبي")}
+        {t("AI Medical Extraction", "استخراج البيانات الطبية")}
       </Button>
 
-      {/* POPUP */}
+      {/* UPLOAD POPUP */}
       <Dialog
         open={open}
         onClose={() => !loading && setOpen(false)}
@@ -211,7 +216,8 @@ export default function MedicalFileIntake({
             borderRadius: 4,
             p: 1,
             background: (t) => `linear-gradient(135deg, ${t.palette.background.paper} 0%, ${t.palette.grey[50]} 100%)`,
-            boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+            boxShadow: '0 24px 48px rgba(0,0,0,0.2)',
+            border: (t) => `1px solid ${t.palette.divider}`,
           },
         }}
       >
@@ -224,46 +230,95 @@ export default function MedicalFileIntake({
             pb: 1,
           }}
         >
-          {t("Upload Medical File", "رفع ملف طبي")}
-          <IconButton onClick={() => setOpen(false)} disabled={loading}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Box sx={{
+              p: 1, borderRadius: 2,
+              bgcolor: (t) => alpha(t.palette.secondary.main, 0.1),
+              color: 'secondary.main'
+            }}>
+              <CloudUploadIcon />
+            </Box>
+            <Box>
+              <Typography variant="h6" fontWeight={800} lineHeight={1.2}>
+                {t("Upload Medical File", "رفع ملف طبي")}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" fontWeight={500}>
+                {t("AI will analyze and extract data", "سيقوم الذكاء الاصطناعي بتحليل واستخراج البيانات")}
+              </Typography>
+            </Box>
+          </Stack>
+          <IconButton onClick={() => setOpen(false)} disabled={loading} sx={{ bgcolor: 'action.hover' }}>
             <CloseRoundedIcon />
           </IconButton>
         </DialogTitle>
 
-        <DialogContent dividers sx={{ borderRadius: 3 }}>
-          <Stack spacing={2}>
+        <DialogContent dividers sx={{ borderRadius: 3, border: 'none' }}>
+          <Stack spacing={3} sx={{ py: 1 }}>
             {/* DROPZONE */}
             <Paper
               variant="outlined"
               sx={{
-                p: 4,
-                borderRadius: 3,
+                p: 5,
+                borderRadius: 4,
                 textAlign: "center",
-                border: (t) => `3px dashed ${t.palette.info.light}`,
+                border: (t) => `2px dashed ${file ? t.palette.success.main : t.palette.secondary.light}`,
+                bgcolor: (t) => file ? alpha(t.palette.success.main, 0.04) : alpha(t.palette.secondary.main, 0.04),
                 transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                 cursor: "pointer",
-                background: (t) => `linear-gradient(135deg, ${t.palette.background.default} 0%, ${t.palette.grey[50]} 100%)`,
+                position: 'relative',
+                overflow: 'hidden',
                 "&:hover": {
-                  borderColor: (t) => t.palette.info.main,
-                  backgroundColor: (t) => t.palette.info.light + '10',
-                  transform: 'scale(1.02)',
-                  boxShadow: (t) => `0 4px 16px ${t.palette.info.main}30`,
+                  borderColor: (t) => file ? t.palette.success.dark : t.palette.secondary.main,
+                  bgcolor: (t) => file ? alpha(t.palette.success.main, 0.08) : alpha(t.palette.secondary.main, 0.08),
+                  transform: 'scale(1.01)',
                 },
               }}
               onClick={() =>
                 document.getElementById("medical-file-input")?.click()
               }
             >
-              <UploadFileIcon sx={{ fontSize: 48, color: "info.main", mb: 1 }} />
-              <Typography sx={{ mt: 1, fontWeight: 700, fontSize: '1.05rem' }}>
-                {t(
-                  "Click to select a medical file",
-                  "اضغط لاختيار ملف طبي"
-                )}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                PDF, Word, DOCX, TXT
-              </Typography>
+              {file ? (
+                <Stack alignItems="center" spacing={1}>
+                  <Box sx={{
+                    width: 64, height: 64, borderRadius: '50%',
+                    bgcolor: 'success.main', color: 'white',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 8px 16px rgba(46, 125, 50, 0.2)'
+                  }}>
+                    <CheckCircleIcon sx={{ fontSize: 32 }} />
+                  </Box>
+                  <Typography variant="h6" fontWeight={800} color="text.primary">
+                    {file.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {(file.size / 1024 / 1024).toFixed(2)} MB
+                  </Typography>
+                  <Button size="small" color="error" onClick={(e) => {
+                    e.stopPropagation();
+                    setFile(null);
+                  }}>
+                    {t("Remove", "إزالة")}
+                  </Button>
+                </Stack>
+              ) : (
+                <>
+                  <Box sx={{
+                    width: 80, height: 80, borderRadius: '50%',
+                    bgcolor: 'background.paper', color: 'secondary.main',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    mx: 'auto', mb: 2,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.08)'
+                  }}>
+                    <UploadFileIcon sx={{ fontSize: 40 }} />
+                  </Box>
+                  <Typography variant="h6" fontWeight={800} gutterBottom>
+                    {t("Click to select a file", "اضغط لاختيار ملف")}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 300, mx: 'auto' }}>
+                    {t("Supports PDF, Word, DOCX, TXT. Max size 10MB.", "يدعم PDF, Word, DOCX, TXT. الحد الأقصى 10 ميجابايت.")}
+                  </Typography>
+                </>
+              )}
 
               <HiddenInput
                 id="medical-file-input"
@@ -272,33 +327,19 @@ export default function MedicalFileIntake({
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
             </Paper>
-
-            {/* PREVIEW */}
-            {file && (
-              <Box
-                sx={{
-                  p: 2,
-                  borderRadius: 2,
-                  bgcolor: "#f7f3f3",
-                  border: "1px solid #e0dddd",
-                }}
-              >
-                <Typography sx={{ fontWeight: 700 }}>
-                  {t("Selected file:", "الملف المختار:")}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {file.name}
-                </Typography>
-              </Box>
-            )}
           </Stack>
         </DialogContent>
 
-        <DialogActions sx={{ p: 2 }}>
+        <DialogActions sx={{ p: 3, pt: 1 }}>
           <Button
             onClick={() => setOpen(false)}
             disabled={loading}
-            sx={{ textTransform: "none" }}
+            sx={{
+              textTransform: "none",
+              fontWeight: 700,
+              color: 'text.secondary',
+              borderRadius: 2
+            }}
           >
             {t("Cancel", "إلغاء")}
           </Button>
@@ -308,24 +349,25 @@ export default function MedicalFileIntake({
             disabled={!file || loading}
             onClick={handleUpload}
             sx={{
-              px: 3.5,
+              px: 4,
               py: 1.2,
-              borderRadius: 3,
-              fontWeight: 900,
-              background: (t) => `linear-gradient(135deg, ${t.palette.info.main}, ${t.palette.info.dark})`,
-              boxShadow: '0 4px 12px rgba(1, 135, 134, 0.3)',
-              transition: 'all 0.3s ease',
+              borderRadius: 2.5,
+              fontWeight: 800,
+              textTransform: 'none',
+              background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
+              boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`,
               "&:hover": {
-                transform: 'translateY(-2px)',
-                boxShadow: '0 6px 16px rgba(1, 135, 134, 0.4)',
-                background: (t) => `linear-gradient(135deg, ${t.palette.info.dark}, ${t.palette.info.main})`,
+                boxShadow: (t) => `0 12px 24px -4px ${alpha(t.palette.secondary.main, 0.5)}`,
               },
             }}
           >
             {loading ? (
-              <CircularProgress size={22} color="inherit" />
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={20} color="inherit" />
+                <span>{t("Processing...", "جاري المعالجة...")}</span>
+              </Stack>
             ) : (
-              t("Upload", "رفع")
+              t("Analyze & Extract", "تحليل واستخراج")
             )}
           </Button>
         </DialogActions>
@@ -336,19 +378,21 @@ export default function MedicalFileIntake({
         open={!!success}
         autoHideDuration={3500}
         onClose={() => setSuccess("")}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity="success" variant="filled">
+        <Alert severity="success" variant="filled" sx={{ borderRadius: 3, fontWeight: 600 }}>
           {success}
         </Alert>
       </Snackbar>
 
-      {/* WARNING (مثلاً AI وقع واشتغل fallback) */}
+      {/* WARNING */}
       <Snackbar
         open={!!warning}
         autoHideDuration={5000}
         onClose={() => setWarning("")}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity="warning" variant="filled">
+        <Alert severity="warning" variant="filled" sx={{ borderRadius: 3, fontWeight: 600 }}>
           {warning}
         </Alert>
       </Snackbar>
@@ -358,8 +402,9 @@ export default function MedicalFileIntake({
         open={!!error}
         autoHideDuration={4000}
         onClose={() => setError("")}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity="error" variant="filled">
+        <Alert severity="error" variant="filled" sx={{ borderRadius: 3, fontWeight: 600 }}>
           {error}
         </Alert>
       </Snackbar>
@@ -370,17 +415,31 @@ export default function MedicalFileIntake({
         onClose={() => setReviewOpen(false)}
         maxWidth="md"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3 } }}
+        PaperProps={{ sx: { borderRadius: 4 } }}
       >
-        <DialogTitle sx={{ fontWeight: 800 }}>
-          {t("Review Extracted Data", "مراجعة البيانات المستخرجة")}
+        <DialogTitle sx={{
+          fontWeight: 900,
+          background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.05)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+          pb: 2
+        }}>
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <AutoAwesomeIcon color="primary" />
+            <Box>
+              <Typography variant="h6" fontWeight={900}>
+                {t("Review Extracted Data", "مراجعة البيانات المستخرجة")}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {t("Select the fields you want to update in the patient profile", "اختر الحقول التي تريد تحديثها في ملف المريض")}
+              </Typography>
+            </Box>
+          </Stack>
         </DialogTitle>
-        <DialogContent dividers>
-          <TableContainer>
-            <Table size="small">
+        <DialogContent dividers sx={{ p: 0 }}>
+          <TableContainer sx={{ maxHeight: '60vh' }}>
+            <Table stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" sx={{ bgcolor: 'background.paper' }}>
                     <Checkbox
                       checked={Object.values(reviewSelection).every(Boolean)}
                       indeterminate={Object.values(reviewSelection).some(Boolean) && !Object.values(reviewSelection).every(Boolean)}
@@ -393,9 +452,9 @@ export default function MedicalFileIntake({
                       }}
                     />
                   </TableCell>
-                  <TableCell><strong>{t("Field", "الحقل")}</strong></TableCell>
-                  <TableCell><strong>{t("Current Value", "القيمة الحالية")}</strong></TableCell>
-                  <TableCell><strong>{t("Extracted Value", "القيمة المستخرجة")}</strong></TableCell>
+                  <TableCell sx={{ bgcolor: 'background.paper', fontWeight: 800 }}>{t("Field", "الحقل")}</TableCell>
+                  <TableCell sx={{ bgcolor: 'background.paper', fontWeight: 800 }}>{t("Current Value", "القيمة الحالية")}</TableCell>
+                  <TableCell sx={{ bgcolor: 'background.paper', fontWeight: 800 }}>{t("Extracted Value", "القيمة المستخرجة")}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -435,17 +494,26 @@ export default function MedicalFileIntake({
                   }
 
                   const displayOld = Array.isArray(oldVal) ? oldVal.join(', ') : (oldVal || '—');
+                  const isSelected = !!reviewSelection[field.key];
 
                   return (
-                    <TableRow key={field.key} hover>
+                    <TableRow
+                      key={field.key}
+                      hover
+                      selected={isSelected}
+                      sx={{
+                        '&.Mui-selected': { bgcolor: (t) => alpha(t.palette.primary.main, 0.08) },
+                        '&.Mui-selected:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.12) }
+                      }}
+                    >
                       <TableCell padding="checkbox">
                         <Checkbox
-                          checked={!!reviewSelection[field.key]}
+                          checked={isSelected}
                           onChange={(e) => setReviewSelection(prev => ({ ...prev, [field.key]: e.target.checked }))}
                         />
                       </TableCell>
-                      <TableCell>{field.label}</TableCell>
-                      <TableCell sx={{ color: 'text.secondary', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayOld}>
+                      <TableCell sx={{ fontWeight: 600, color: 'text.secondary' }}>{field.label}</TableCell>
+                      <TableCell sx={{ color: 'text.disabled', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={displayOld}>
                         {displayOld}
                       </TableCell>
                       <TableCell>
@@ -455,7 +523,10 @@ export default function MedicalFileIntake({
                           size="small"
                           variant="standard"
                           value={displayNew}
-                          InputProps={{ disableUnderline: true }}
+                          InputProps={{
+                            disableUnderline: true,
+                            sx: { fontWeight: 600, color: 'text.primary' }
+                          }}
                           onChange={(e) => {
                             if (!Array.isArray(newVal)) {
                               setExtractedData(prev => ({ ...prev, [field.key]: e.target.value }));
@@ -470,9 +541,25 @@ export default function MedicalFileIntake({
             </Table>
           </TableContainer>
         </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setReviewOpen(false)} color="inherit">{t("Cancel", "إلغاء")}</Button>
-          <Button onClick={handleSaveReview} variant="contained" disableElevation>
+        <DialogActions sx={{ p: 3, bgcolor: 'background.default' }}>
+          <Button
+            onClick={() => setReviewOpen(false)}
+            color="inherit"
+            sx={{ fontWeight: 700, borderRadius: 2 }}
+          >
+            {t("Cancel", "إلغاء")}
+          </Button>
+          <Button
+            onClick={handleSaveReview}
+            variant="contained"
+            disableElevation
+            sx={{
+              fontWeight: 800,
+              borderRadius: 2.5,
+              px: 4,
+              boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+            }}
+          >
             {t("Save Changes", "حفظ التغييرات")}
           </Button>
         </DialogActions>

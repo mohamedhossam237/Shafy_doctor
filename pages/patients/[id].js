@@ -921,23 +921,30 @@ export default function PatientDetailsPage() {
           ) : (
             <Stack spacing={2} sx={{ mt: 1 }}>
 
-              {/* Modern Header */}
+              {/* Modern Hero Section */}
               <Paper
                 elevation={0}
                 sx={{
-                  p: 3,
-                  borderRadius: 4,
-                  border: (t) => `1px solid ${t.palette.divider}`,
-                  background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.05)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+                  p: { xs: 3, md: 4 },
+                  borderRadius: 5,
                   position: 'relative',
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  background: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
+                  color: 'primary.contrastText',
+                  boxShadow: (t) => `0 20px 40px -10px ${alpha(t.palette.primary.main, 0.4)}`,
                 }}
               >
-                {/* Decorative circle */}
+                {/* Decorative Elements */}
                 <Box sx={{
-                  position: 'absolute', top: -40, right: isArabic ? 'auto' : -40, left: isArabic ? -40 : 'auto',
+                  position: 'absolute', top: -100, right: -100,
+                  width: 400, height: 400, borderRadius: '50%',
+                  background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%)',
+                  zIndex: 0
+                }} />
+                <Box sx={{
+                  position: 'absolute', bottom: -50, left: -50,
                   width: 200, height: 200, borderRadius: '50%',
-                  bgcolor: (t) => alpha(t.palette.primary.main, 0.03),
+                  background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%)',
                   zIndex: 0
                 }} />
 
@@ -945,12 +952,14 @@ export default function PatientDetailsPage() {
                   <Grid item>
                     <Avatar
                       sx={{
-                        width: 100, height: 100,
-                        bgcolor: 'primary.main',
-                        color: 'primary.contrastText',
-                        fontSize: '2.5rem',
+                        width: { xs: 100, md: 120 },
+                        height: { xs: 100, md: 120 },
+                        bgcolor: 'background.paper',
+                        color: 'primary.main',
+                        fontSize: '3rem',
                         fontWeight: 800,
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                        border: '4px solid rgba(255,255,255,0.2)'
                       }}
                     >
                       {initials}
@@ -959,82 +968,135 @@ export default function PatientDetailsPage() {
                   <Grid item xs>
                     <Stack spacing={1}>
                       <Box>
-                        <Typography variant="h4" fontWeight={900} color="text.primary" sx={{ lineHeight: 1.1 }}>
+                        <Typography variant="h3" fontWeight={900} sx={{ lineHeight: 1.1, mb: 0.5 }}>
                           {patient.name || label('Unnamed', 'بدون اسم')}
                         </Typography>
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, opacity: 0.8 }}>
-                          <AssignmentIcon fontSize="small" color="action" />
-                          <Typography variant="body2" fontWeight={600} color="text.secondary">
-                            ID: {patient.id}
-                          </Typography>
-                          <Button
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.9 }}>
+                          <Chip
+                            label={`ID: ${patient.id}`}
                             size="small"
+                            sx={{
+                              bgcolor: 'rgba(255,255,255,0.15)',
+                              color: 'inherit',
+                              fontWeight: 600,
+                              backdropFilter: 'blur(4px)'
+                            }}
                             onClick={() => copy(patient.id)}
-                            sx={{ minWidth: 0, p: 0.5, color: 'text.secondary' }}
-                          >
-                            <ContentCopyIcon fontSize="inherit" />
-                          </Button>
+                            icon={<ContentCopyIcon style={{ color: 'white', fontSize: 14 }} />}
+                          />
                         </Stack>
                       </Box>
 
-                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
                         {Number.isFinite(patient?.age) && (
                           <Chip
-                            icon={<EventIcon fontSize="small" />}
+                            icon={<EventIcon style={{ color: 'white' }} fontSize="small" />}
                             label={`${label('Age', 'العمر')}: ${patient.age}`}
-                            size="small"
-                            sx={{ fontWeight: 600, bgcolor: 'background.paper' }}
+                            sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
                           />
                         )}
                         {patient?.gender && (
                           <Chip
-                            icon={<PersonIcon fontSize="small" />}
+                            icon={<PersonIcon style={{ color: 'white' }} fontSize="small" />}
                             label={patient.gender}
-                            size="small"
-                            sx={{ fontWeight: 600, bgcolor: 'background.paper' }}
+                            sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
                           />
                         )}
                         {patient?.bloodType && (
                           <Chip
-                            icon={<BloodtypeIcon fontSize="small" />}
+                            icon={<BloodtypeIcon style={{ color: '#ffcdd2' }} fontSize="small" />}
                             label={patient.bloodType}
-                            size="small"
-                            color="error"
-                            variant="outlined"
-                            sx={{ fontWeight: 700 }}
+                            sx={{ bgcolor: 'rgba(211, 47, 47, 0.2)', color: '#ffcdd2', border: '1px solid rgba(211, 47, 47, 0.3)', fontWeight: 700 }}
                           />
                         )}
                       </Stack>
                     </Stack>
                   </Grid>
                   <Grid item xs={12} md="auto">
-                    <Stack direction="row" spacing={1.5} justifyContent="flex-end" flexWrap="wrap">
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
                       <Button
                         variant="outlined"
+                        size="large"
                         startIcon={<EditOutlinedIcon />}
                         onClick={openEditAll}
-                        sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                        sx={{
+                          borderRadius: 3,
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          fontSize: '1rem',
+                          px: 3,
+                          py: 1.5,
+                          borderColor: 'rgba(255,255,255,0.4)',
+                          color: 'white',
+                          backdropFilter: 'blur(10px)',
+                          bgcolor: 'rgba(255,255,255,0.1)',
+                          border: '2px solid rgba(255,255,255,0.3)',
+                          '&:hover': {
+                            bgcolor: 'rgba(255,255,255,0.2)',
+                            borderColor: 'rgba(255,255,255,0.6)',
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 8px 20px rgba(0,0,0,0.15)'
+                          },
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                        }}
                       >
                         {label('Edit Profile', 'تعديل الملف')}
                       </Button>
                       <Button
                         variant="outlined"
+                        size="large"
                         startIcon={<PrintIcon />}
                         onClick={printReport}
                         disabled={aiBusy}
-                        sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 700 }}
+                        sx={{
+                          borderRadius: 3,
+                          textTransform: 'none',
+                          fontWeight: 700,
+                          fontSize: '1rem',
+                          px: 3,
+                          py: 1.5,
+                          borderColor: 'rgba(255,255,255,0.4)',
+                          color: 'white',
+                          backdropFilter: 'blur(10px)',
+                          bgcolor: 'rgba(255,255,255,0.1)',
+                          border: '2px solid rgba(255,255,255,0.3)',
+                          '&:hover': {
+                            bgcolor: 'rgba(255,255,255,0.2)',
+                            borderColor: 'rgba(255,255,255,0.6)',
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 8px 20px rgba(0,0,0,0.15)'
+                          },
+                          '&.Mui-disabled': {
+                            borderColor: 'rgba(255,255,255,0.2)',
+                            color: 'rgba(255,255,255,0.4)'
+                          },
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                        }}
                       >
                         {label('Print Report', 'طباعة التقرير')}
                       </Button>
                       <Button
                         variant="contained"
+                        size="large"
                         startIcon={<AddCircleOutlineIcon />}
                         onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
                         sx={{
-                          borderRadius: 2,
+                          borderRadius: 3,
                           textTransform: 'none',
-                          fontWeight: 700,
-                          boxShadow: '0 4px 12px rgba(25, 118, 210, 0.2)'
+                          fontWeight: 800,
+                          fontSize: '1.05rem',
+                          px: 4,
+                          py: 1.5,
+                          bgcolor: 'white',
+                          color: 'primary.main',
+                          boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+                          border: '2px solid white',
+                          '&:hover': {
+                            bgcolor: 'grey.50',
+                            transform: 'translateY(-3px)',
+                            boxShadow: '0 12px 32px rgba(0,0,0,0.3)'
+                          },
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                         }}
                       >
                         {label('New Appointment', 'حجز موعد')}
@@ -1044,74 +1106,120 @@ export default function PatientDetailsPage() {
                 </Grid>
               </Paper>
 
-              <Paper
-                variant="outlined"
-                sx={{
-                  p: 2.5,
-                  borderRadius: 3,
-                  background: (t) => `linear-gradient(115deg, ${alpha(t.palette.primary.light, 0.12)} 0%, ${t.palette.background.paper} 70%)`,
-                  border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
-                }}
-              >
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6} md={3}>
-                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                      <Typography variant="overline" color="text.secondary">{label('Appointments', 'المواعيد')}</Typography>
-                      <Typography variant="h5" fontWeight={900}>{totalAppointments}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {label('Total visits recorded', 'إجمالي الزيارات المسجلة')}
-                      </Typography>
+
+              {/* Glassmorphic Stats Cards */}
+              <Grid container spacing={3}>
+                {[
+                  {
+                    icon: <LocalHospitalIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    count: totalAppointments,
+                    label: label('Total Visits', 'إجمالي الزيارات'),
+                    sub: label('Recorded appointments', 'مواعيد مسجلة'),
+                    color: '#2196f3',
+                    gradient: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)'
+                  },
+                  {
+                    icon: <DescriptionIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    count: totalReports,
+                    label: label('Medical Reports', 'التقارير الطبية'),
+                    sub: label('Clinical & Lab', 'سريرية ومعملية'),
+                    color: '#7b1fa2',
+                    gradient: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)'
+                  },
+                  {
+                    icon: <EventIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    count: nextAppointment ? fmtNiceDateTime(nextAppointment._d || nextAppointment.date) : label('None', 'لا يوجد'),
+                    label: label('Next Visit', 'الزيارة القادمة'),
+                    sub: nextAppointment?.time || label('No upcoming', 'لا يوجد قادم'),
+                    color: '#2e7d32',
+                    gradient: 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)'
+                  },
+                  {
+                    icon: <ScienceIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    count: latestReport ? (latestReport?.diagnosis || latestReport?.titleEn || latestReport?.titleAr || label('Report', 'تقرير')) : '—',
+                    label: label('Latest Report', 'أحدث تقرير'),
+                    sub: latestReport?.date ? fmtNiceDateTime(latestReport.date) : label('No reports', 'لا توجد تقارير'),
+                    color: '#ed6c02',
+                    gradient: 'linear-gradient(135deg, #ff9800 0%, #ed6c02 100%)'
+                  }
+                ].map((stat, i) => (
+                  <Grid item xs={12} sm={6} md={3} key={i}>
+                    <Paper
+                      elevation={0}
+                      sx={{
+                        p: 3,
+                        borderRadius: 4,
+                        height: '100%',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 0.8)} 0%, ${alpha(t.palette.background.paper, 0.4)} 100%)`,
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255,255,255,0.3)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.05)',
+                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                        '&:hover': {
+                          transform: 'translateY(-5px)',
+                          boxShadow: `0 12px 40px -8px ${alpha(stat.color, 0.3)}`,
+                          borderColor: alpha(stat.color, 0.4)
+                        }
+                      }}
+                    >
+                      <Box sx={{
+                        position: 'absolute', top: -20, right: -20,
+                        width: 100, height: 100, borderRadius: '50%',
+                        background: stat.gradient, opacity: 0.1, zIndex: 0
+                      }} />
+
+                      <Stack spacing={2} position="relative" zIndex={1}>
+                        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                          <Box sx={{
+                            width: 56, height: 56, borderRadius: 3,
+                            background: stat.gradient,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            boxShadow: `0 8px 16px -4px ${alpha(stat.color, 0.4)}`
+                          }}>
+                            {stat.icon}
+                          </Box>
+                          <Typography variant="h4" fontWeight={900} sx={{ color: stat.color }}>
+                            {String(stat.count).length > 10 ? String(stat.count).substring(0, 10) + '...' : stat.count}
+                          </Typography>
+                        </Stack>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight={800} color="text.primary">
+                            {stat.label}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" fontWeight={500} noWrap>
+                            {stat.sub}
+                          </Typography>
+                        </Box>
+                      </Stack>
                     </Paper>
                   </Grid>
-                  <Grid item xs={12} sm={6} md={3}>
-                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                      <Typography variant="overline" color="text.secondary">{label('Reports', 'التقارير')}</Typography>
-                      <Typography variant="h5" fontWeight={900}>{totalReports}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {label('Clinical & lab reports', 'التقارير الطبية والمعملية')}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={3}>
-                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                      <Typography variant="overline" color="text.secondary">{label('Next Appointment', 'الموعد القادم')}</Typography>
-                      <Typography variant="h6" fontWeight={800}>
-                        {nextAppointment ? fmtNiceDateTime(nextAppointment._d || nextAppointment.date) : label('No upcoming', 'لا يوجد موعد قادم')}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {nextAppointment?.time || ''}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={6} md={3}>
-                    <Paper elevation={0} sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper' }}>
-                      <Typography variant="overline" color="text.secondary">{label('Latest Report', 'أحدث تقرير')}</Typography>
-                      <Typography variant="h6" fontWeight={800}>
-                        {latestReport?.diagnosis || latestReport?.titleEn || latestReport?.titleAr || label('Not yet added', 'لم يُضف بعد')}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {latestReport?.date ? fmtNiceDateTime(latestReport.date) : ''}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                </Grid>
-              </Paper>
+                ))}
+              </Grid>
+
 
               {/* Tabs Navigation */}
-              <Paper sx={{ borderRadius: 3, border: (t) => `1px solid ${t.palette.divider}`, overflow: 'hidden' }}>
+              <Box sx={{ width: '100%' }}>
                 <Tabs
                   value={tabValue}
                   onChange={handleTabChange}
                   variant="scrollable"
                   scrollButtons="auto"
                   sx={{
-                    bgcolor: 'background.paper',
+                    '& .MuiTabs-indicator': {
+                      height: 4,
+                      borderRadius: 2,
+                      background: (t) => `linear-gradient(90deg, ${t.palette.primary.main}, ${t.palette.secondary.main})`
+                    },
                     '& .MuiTab-root': {
                       textTransform: 'none',
                       fontWeight: 700,
-                      fontSize: '0.95rem',
-                      minHeight: 56,
-                      px: 3
+                      fontSize: '1rem',
+                      minHeight: 60,
+                      px: 3,
+                      color: 'text.secondary',
+                      '&.Mui-selected': { color: 'primary.main' }
                     }
                   }}
                 >
@@ -1121,94 +1229,98 @@ export default function PatientDetailsPage() {
                   <Tab label={label('Notes', 'الملاحظات')} icon={<EditOutlinedIcon fontSize="small" />} iconPosition="start" />
                   <Tab label={label('External Labs', 'معامل خارجية')} icon={<ScienceIcon fontSize="small" />} iconPosition="start" />
                 </Tabs>
-                <Divider />
+                <Divider sx={{ mt: -0.2 }} />
 
                 {/* TAB 1: OVERVIEW */}
                 <CustomTabPanel value={tabValue} index={0}>
                   <Stack spacing={3}>
-                    {/* AI Summary */}
+                    {/* AI Summary Card */}
                     <Paper
                       elevation={0}
                       sx={{
-                        p: 3,
-                        borderRadius: 4,
-                        border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
-                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.08)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+                        p: 4,
+                        borderRadius: 5,
                         position: 'relative',
                         overflow: 'hidden',
-                        transition: 'all 0.3s ease',
-                        '&:hover': {
-                          boxShadow: (t) => `0 12px 32px -4px ${alpha(t.palette.primary.main, 0.15)}`,
-                          borderColor: 'primary.main'
-                        }
+                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.secondary.main, 0.05)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
+                        border: (t) => `1px solid ${alpha(t.palette.secondary.main, 0.2)}`,
+                        boxShadow: (t) => `0 12px 40px -10px ${alpha(t.palette.secondary.main, 0.15)}`,
                       }}
                     >
                       <Box sx={{
-                        position: 'absolute', top: -40, right: -40, width: 150, height: 150,
-                        borderRadius: '50%', bgcolor: (t) => alpha(t.palette.primary.main, 0.05), zIndex: 0
+                        position: 'absolute', top: -50, right: -50, width: 200, height: 200,
+                        borderRadius: '50%', bgcolor: (t) => alpha(t.palette.secondary.main, 0.05), zIndex: 0
                       }} />
 
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 2, position: 'relative', zIndex: 1 }}>
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 3, position: 'relative', zIndex: 1 }}>
                         <Stack direction="row" spacing={2} alignItems="center">
-                          <Avatar sx={{ bgcolor: 'primary.main', boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)' }}>
-                            <AutoAwesomeIcon color="inherit" />
+                          <Avatar sx={{
+                            width: 56, height: 56,
+                            background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
+                            boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`
+                          }}>
+                            <AutoAwesomeIcon sx={{ fontSize: 32 }} />
                           </Avatar>
                           <Box>
-                            <Typography variant="h6" fontWeight={800} color="text.primary">
+                            <Typography variant="h5" fontWeight={900} color="text.primary">
                               {label('AI Clinical Summary', 'الملخص السريري الذكي')}
                             </Typography>
-                            <Typography variant="caption" color="text.secondary" fontWeight={500}>
+                            <Typography variant="body2" color="text.secondary" fontWeight={600}>
                               {label('Powered by Shafy AI', 'مدعوم بواسطة شافي AI')}
                             </Typography>
                           </Box>
                         </Stack>
                         <Button
                           variant="contained"
-                          size="medium"
+                          size="large"
                           startIcon={aiBusy ? <Box sx={{ width: 20, height: 20 }} /> : <AutoAwesomeIcon />}
                           onClick={summarizeWithAI}
                           disabled={aiBusy}
                           sx={{
-                            borderRadius: 2.5,
+                            borderRadius: 3,
                             textTransform: 'none',
-                            fontWeight: 700,
-                            px: 3,
-                            background: (t) => `linear-gradient(45deg, ${t.palette.primary.main}, ${t.palette.primary.dark})`,
-                            boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                            fontWeight: 800,
+                            px: 4,
+                            py: 1.2,
+                            background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
+                            boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`,
+                            '&:hover': {
+                              background: (t) => `linear-gradient(135deg, ${t.palette.secondary.dark}, ${t.palette.secondary.main})`,
+                            }
                           }}
                         >
-                          {aiBusy ? <LinearProgress sx={{ width: 100, height: 6, borderRadius: 1 }} color="inherit" /> : label('Generate Summary', 'توليد الملخص')}
+                          {aiBusy ? <LinearProgress sx={{ width: 120, height: 6, borderRadius: 2 }} color="inherit" /> : label('Generate Summary', 'توليد الملخص')}
                         </Button>
                       </Stack>
 
-                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 2, mb: 2 }}>{aiErr}</Alert>}
+                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 3, mb: 3 }}>{aiErr}</Alert>}
 
                       <Paper
                         elevation={0}
                         sx={{
-                          p: 2.5,
-                          borderRadius: 3,
+                          p: 3,
+                          borderRadius: 4,
                           bgcolor: 'rgba(255,255,255,0.6)',
                           backdropFilter: 'blur(10px)',
                           border: '1px solid rgba(255,255,255,0.5)',
-                          minHeight: 100,
+                          minHeight: 120,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: !aiText ? 'center' : 'flex-start'
                         }}
                       >
                         {aiBusy ? (
-                          <Stack spacing={1.5} width="100%">
-                            <Skeleton variant="text" width="90%" height={24} />
-                            <Skeleton variant="text" width="80%" height={24} />
-                            <Skeleton variant="text" width="95%" height={24} />
+                          <Stack spacing={2} width="100%">
+                            <Skeleton variant="text" width="90%" height={32} />
+                            <Skeleton variant="text" width="80%" height={32} />
+                            <Skeleton variant="text" width="95%" height={32} />
                           </Stack>
                         ) : aiText ? (
-                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }} color="text.primary">
+                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: '1.05rem' }} color="text.primary">
                             {aiText}
                           </Typography>
                         ) : (
-                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center' }}>
+                          <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center', fontWeight: 500 }}>
                             {label('Click "Generate Summary" to get a concise AI-powered overview of this patient\'s history and status.', 'اضغط على "توليد الملخص" للحصول على نظرة عامة موجزة مدعومة بالذكاء الاصطناعي.')}
                           </Typography>
                         )}
@@ -1291,33 +1403,39 @@ export default function PatientDetailsPage() {
                     </Grid>
 
                     {/* Vitals & Activity Row */}
-                    <Grid container spacing={3}>
+                    <Grid container spacing={4}>
                       {/* Vitals Section */}
                       <Grid item xs={12} md={6}>
                         <Paper
-                          variant="outlined"
+                          elevation={0}
                           sx={{
-                            p: 3,
-                            borderRadius: 3,
+                            p: 4,
+                            borderRadius: 5,
                             height: '100%',
-                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.primary.main, 0.02)} 100%)`,
-                            border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.1)}`,
+                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.error.main, 0.02)} 100%)`,
+                            border: (t) => `1px solid ${alpha(t.palette.error.main, 0.1)}`,
+                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
                             position: 'relative',
                             overflow: 'hidden'
                           }}
                         >
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-                            <Stack direction="row" alignItems="center" spacing={1.5}>
-                              <Avatar sx={{ width: 40, height: 40, bgcolor: 'error.light', color: 'error.dark', boxShadow: '0 4px 12px rgba(211, 47, 47, 0.2)' }}>
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 4 }}>
+                            <Stack direction="row" alignItems="center" spacing={2}>
+                              <Avatar sx={{
+                                width: 48, height: 48,
+                                bgcolor: (t) => alpha(t.palette.error.main, 0.1),
+                                color: 'error.main',
+                                borderRadius: 2.5
+                              }}>
                                 <BloodtypeIcon />
                               </Avatar>
-                              <Typography variant="h6" fontWeight={800}>
+                              <Typography variant="h6" fontWeight={900}>
                                 {label('Vitals & Metrics', 'المؤشرات الحيوية')}
                               </Typography>
                             </Stack>
                             {!editMode.vitals ? (
-                              <IconButton onClick={() => handleEditModeToggle('vitals')} size="small" sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon fontSize="small" />
+                              <IconButton onClick={() => handleEditModeToggle('vitals')} sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon />
                               </IconButton>
                             ) : (
                               <Stack direction="row" spacing={1}>
@@ -1337,21 +1455,22 @@ export default function PatientDetailsPage() {
                               { key: 'temperature', label: label('Temperature', 'درجة الحرارة'), unit: '°C', icon: '🌡️', color: '#ed6c02' }
                             ].map((item) => (
                               <Grid item xs={6} key={item.key}>
-                                <Box
+                                <Paper
+                                  elevation={0}
                                   sx={{
-                                    p: 2,
-                                    borderRadius: 2.5,
-                                    bgcolor: (t) => alpha(item.color, 0.08),
+                                    p: 2.5,
+                                    borderRadius: 3,
+                                    bgcolor: (t) => alpha(item.color, 0.04),
                                     border: (t) => `1px solid ${alpha(item.color, 0.1)}`,
                                     transition: 'all 0.2s',
                                     '&:hover': {
-                                      bgcolor: (t) => alpha(item.color, 0.12),
+                                      bgcolor: (t) => alpha(item.color, 0.08),
                                       transform: 'translateY(-2px)'
                                     }
                                   }}
                                 >
-                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                                    <span>{item.icon}</span> {item.label}
+                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                    <span style={{ fontSize: '1.2rem' }}>{item.icon}</span> {item.label}
                                   </Typography>
 
                                   {editMode.vitals ? (
@@ -1363,16 +1482,16 @@ export default function PatientDetailsPage() {
                                       placeholder="—"
                                       InputProps={{
                                         disableUnderline: true,
-                                        sx: { fontSize: '1.1rem', fontWeight: 700, color: item.color }
+                                        sx: { fontSize: '1.25rem', fontWeight: 800, color: item.color }
                                       }}
                                     />
                                   ) : (
-                                    <Typography variant="h6" fontWeight={800} sx={{ color: item.color }}>
+                                    <Typography variant="h5" fontWeight={900} sx={{ color: item.color }}>
                                       {patient[item.key] || '—'}
-                                      {patient[item.key] && item.unit && <Typography component="span" variant="caption" sx={{ opacity: 0.7, ml: 0.5 }}>{item.unit}</Typography>}
+                                      {patient[item.key] && item.unit && <Typography component="span" variant="caption" sx={{ opacity: 0.7, ml: 0.5, fontWeight: 600 }}>{item.unit}</Typography>}
                                     </Typography>
                                   )}
-                                </Box>
+                                </Paper>
                               </Grid>
                             ))}
                           </Grid>
@@ -1381,89 +1500,113 @@ export default function PatientDetailsPage() {
 
                       {/* Activity Timeline */}
                       <Grid item xs={12} md={6}>
-                        <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%' }}>
-                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'info.light', color: 'info.dark' }}>
-                              <AssignmentIcon fontSize="small" />
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            p: 4,
+                            borderRadius: 5,
+                            height: '100%',
+                            border: '1px solid rgba(0,0,0,0.08)',
+                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
+                          }}
+                        >
+                          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 4 }}>
+                            <Avatar sx={{ width: 48, height: 48, bgcolor: (t) => alpha(t.palette.info.main, 0.1), color: 'info.main', borderRadius: 2.5 }}>
+                              <AssignmentIcon />
                             </Avatar>
-                            <Typography variant="h6" fontWeight={800}>
+                            <Typography variant="h6" fontWeight={900}>
                               {label('Recent Activity', 'النشاط الأخير')}
                             </Typography>
                           </Stack>
-                          <Stack spacing={1.5}>
+                          <Stack spacing={2.5}>
                             {/* Latest appointment */}
                             {appts.length > 0 && (
-                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', mt: 0.5 }} />
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="body2" fontWeight={600}>
-                                    {label('Appointment', 'موعد')}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {fmtNiceDateTime(appts[0]?.date)} • {appts[0]?.status}
-                                  </Typography>
-                                </Box>
-                              </Stack>
+                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #2196f3' }}>
+                                <Stack direction="row" spacing={2} alignItems="center">
+                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'primary.light', color: 'white' }}>
+                                    <EventIcon fontSize="small" />
+                                  </Box>
+                                  <Box sx={{ flex: 1 }}>
+                                    <Typography variant="subtitle2" fontWeight={800}>
+                                      {label('Appointment', 'موعد')}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                      {fmtNiceDateTime(appts[0]?.date)} • {appts[0]?.status}
+                                    </Typography>
+                                  </Box>
+                                </Stack>
+                              </Paper>
                             )}
                             {/* Latest report */}
                             {reports.length > 0 && (
-                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'secondary.main', mt: 0.5 }} />
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="body2" fontWeight={600}>
-                                    {label('Report Added', 'تقرير مضاف')}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {fmtNiceDateTime(reports[0]?.date)} • {reports[0]?.titleEn || reports[0]?.title || 'Report'}
-                                  </Typography>
-                                </Box>
-                              </Stack>
+                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #9c27b0' }}>
+                                <Stack direction="row" spacing={2} alignItems="center">
+                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'secondary.light', color: 'white' }}>
+                                    <DescriptionIcon fontSize="small" />
+                                  </Box>
+                                  <Box sx={{ flex: 1 }}>
+                                    <Typography variant="subtitle2" fontWeight={800}>
+                                      {label('Report Added', 'تقرير مضاف')}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                      {fmtNiceDateTime(reports[0]?.date)} • {reports[0]?.titleEn || reports[0]?.title || 'Report'}
+                                    </Typography>
+                                  </Box>
+                                </Stack>
+                              </Paper>
                             )}
                             {/* Notes updated */}
                             {patient.notesUpdatedAt && (
-                              <Stack direction="row" spacing={1.5} alignItems="flex-start">
-                                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'warning.main', mt: 0.5 }} />
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="body2" fontWeight={600}>
-                                    {label('Notes Updated', 'تحديث الملاحظات')}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {fmtNiceDateTime(patient.notesUpdatedAt)} • {patient.notesUpdatedBy || 'Staff'}
-                                  </Typography>
-                                </Box>
-                              </Stack>
+                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #ed6c02' }}>
+                                <Stack direction="row" spacing={2} alignItems="center">
+                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'warning.light', color: 'white' }}>
+                                    <EditOutlinedIcon fontSize="small" />
+                                  </Box>
+                                  <Box sx={{ flex: 1 }}>
+                                    <Typography variant="subtitle2" fontWeight={800}>
+                                      {label('Notes Updated', 'تحديث الملاحظات')}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                      {fmtNiceDateTime(patient.notesUpdatedAt)} • {patient.notesUpdatedBy || 'Staff'}
+                                    </Typography>
+                                  </Box>
+                                </Stack>
+                              </Paper>
                             )}
                             {/* If no activity */}
                             {!appts.length && !reports.length && !patient.notesUpdatedAt && (
-                              <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                                {label('No recent activity', 'لا يوجد نشاط حديث')}
-                              </Typography>
+                              <Box sx={{ textAlign: 'center', py: 4, opacity: 0.6 }}>
+                                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                                  {label('No recent activity', 'لا يوجد نشاط حديث')}
+                                </Typography>
+                              </Box>
                             )}
                           </Stack>
                         </Paper>
                       </Grid>
                     </Grid>
 
-                    <Grid container spacing={3}>
+                    <Grid container spacing={4}>
                       {/* Contact Info */}
                       <Grid item xs={12} md={5}>
                         <Paper
-                          variant="outlined"
+                          elevation={0}
                           sx={{
-                            p: 3,
-                            borderRadius: 3,
+                            p: 4,
+                            borderRadius: 5,
                             height: '100%',
                             background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.info.main, 0.03)} 100%)`,
                             border: (t) => `1px solid ${alpha(t.palette.info.main, 0.1)}`,
+                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
                           }}
                         >
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 3 }}>
-                            <Typography variant="h6" fontWeight={800}>
+                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 4 }}>
+                            <Typography variant="h6" fontWeight={900}>
                               {label('Contact Information', 'معلومات الاتصال')}
                             </Typography>
                             {!editMode.contact ? (
-                              <IconButton onClick={() => handleEditModeToggle('contact')} size="small" sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon fontSize="small" />
+                              <IconButton onClick={() => handleEditModeToggle('contact')} sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon />
                               </IconButton>
                             ) : (
                               <Stack direction="row" spacing={1}>
@@ -1482,11 +1625,11 @@ export default function PatientDetailsPage() {
                               { key: 'address', label: label('Address', 'العنوان'), icon: <PlaceIcon fontSize="small" />, type: 'text' }
                             ].map((item) => (
                               <Stack key={item.key} direction="row" spacing={2} alignItems="flex-start">
-                                <Avatar sx={{ width: 36, height: 36, bgcolor: 'action.hover', color: 'text.secondary' }}>
+                                <Avatar sx={{ width: 40, height: 40, bgcolor: 'action.hover', color: 'text.secondary', borderRadius: 2 }}>
                                   {item.icon}
                                 </Avatar>
                                 <Box sx={{ flex: 1 }}>
-                                  <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ mb: 0.5 }}>
+                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ mb: 0.5, display: 'block' }}>
                                     {item.label}
                                   </Typography>
 
@@ -1502,7 +1645,7 @@ export default function PatientDetailsPage() {
                                     />
                                   ) : (
                                     <Stack direction="row" alignItems="center" spacing={1}>
-                                      <Typography variant="body1" fontWeight={500}>
+                                      <Typography variant="body1" fontWeight={600}>
                                         {patient[item.key] || '—'}
                                       </Typography>
                                       {patient[item.key] && (
@@ -1517,16 +1660,16 @@ export default function PatientDetailsPage() {
                                     <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
                                       {item.key === 'phone' && (
                                         <>
-                                          <Button size="small" variant="outlined" startIcon={<PhoneIcon />} component={Link} href={`tel:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                          <Button size="small" variant="outlined" startIcon={<PhoneIcon />} component={Link} href={`tel:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
                                             {label('Call', 'اتصال')}
                                           </Button>
-                                          <Button size="small" variant="outlined" component={Link} href={`sms:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                          <Button size="small" variant="outlined" component={Link} href={`sms:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
                                             SMS
                                           </Button>
                                         </>
                                       )}
                                       {item.key === 'email' && (
-                                        <Button size="small" variant="outlined" startIcon={<EmailIcon />} component={Link} href={`mailto:${patient.email}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem' }}>
+                                        <Button size="small" variant="outlined" startIcon={<EmailIcon />} component={Link} href={`mailto:${patient.email}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
                                           {label('Email', 'إرسال')}
                                         </Button>
                                       )}
@@ -1542,22 +1685,23 @@ export default function PatientDetailsPage() {
                       {/* Clinical Profile */}
                       <Grid item xs={12} md={7}>
                         <Paper
-                          variant="outlined"
+                          elevation={0}
                           sx={{
-                            p: 3,
-                            borderRadius: 3,
+                            p: 4,
+                            borderRadius: 5,
                             height: '100%',
                             background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.secondary.main, 0.03)} 100%)`,
                             border: (t) => `1px solid ${alpha(t.palette.secondary.main, 0.1)}`,
+                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
                           }}
                         >
                           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-                            <Typography variant="h6" fontWeight={800}>
+                            <Typography variant="h6" fontWeight={900}>
                               {label('Clinical Profile', 'الملف السريري')}
                             </Typography>
                             {!editMode.clinical ? (
-                              <IconButton onClick={() => handleEditModeToggle('clinical')} size="small" sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon fontSize="small" />
+                              <IconButton onClick={() => handleEditModeToggle('clinical')} sx={{ bgcolor: 'action.hover' }}>
+                                <EditOutlinedIcon />
                               </IconButton>
                             ) : (
                               <Stack direction="row" spacing={1}>
@@ -1593,7 +1737,7 @@ export default function PatientDetailsPage() {
                             }}
                           />
 
-                          <Grid container spacing={3} sx={{ mt: 1 }}>
+                          <Grid container spacing={3} sx={{ mt: 2 }}>
                             <Grid item xs={12} sm={6}>
                               <Labeled title={label('Marital Status', 'الحالة الاجتماعية')}>
                                 {editMode.clinical ? (
@@ -1612,7 +1756,7 @@ export default function PatientDetailsPage() {
                                     <option value="Widowed">{label('Widowed', 'أرمل/ة')}</option>
                                   </TextField>
                                 ) : (
-                                  <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 500 }} />
+                                  <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 600 }} />
                                 )}
                               </Labeled>
                             </Grid>
@@ -2003,7 +2147,7 @@ export default function PatientDetailsPage() {
                     )}
                   </Paper>
                 </CustomTabPanel>
-              </Paper>
+              </Box>
             </Stack>
           )}
 
