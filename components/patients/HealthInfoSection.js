@@ -6,19 +6,24 @@ import {
   Typography,
   Paper,
   Stack,
-  RadioGroup,
-  FormControlLabel,
-  Radio,
   Divider,
   useTheme,
+  Button,
+  alpha,
+  CircularProgress
 } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 
 /**
- * HealthInfoSection – Enhanced version (matches EditHealthInfoDialog)
- * Each question appears as a clean, single-row card with hover effect.
+ * HealthInfoSection – Enhanced version
+ * Supports both controlled mode (form/setForm) and direct update mode (patient/onUpdate).
+ * Replaces Radio buttons with modern toggle cards.
  */
-export default function HealthInfoSection({ form = {}, setForm = () => { }, t, isArabic }) {
+export default function HealthInfoSection({ form, setForm, patient, onUpdate, t, isArabic }) {
   const theme = useTheme();
+  const [updating, setUpdating] = React.useState({});
 
   // 🌍 Translation helper
   const translate = React.useCallback(
@@ -26,14 +31,30 @@ export default function HealthInfoSection({ form = {}, setForm = () => { }, t, i
     [t, isArabic]
   );
 
+  // Determine current values
+  const values = form || patient || {};
+  const isReadOnly = !setForm && !onUpdate;
+
   // 🧩 State handler
-  const handleBool = React.useCallback(
-    (field) => (e) => {
-      const val = e.target.value === 'true';
-      if (typeof setForm === 'function') setForm((f) => ({ ...(f || {}), [field]: val }));
-    },
-    [setForm]
-  );
+  const handleToggle = (field, val) => async () => {
+    // If same value, do nothing (or toggle off if needed, but for Yes/No usually we keep it)
+    if (values[field] === val) return;
+
+    if (setForm) {
+      // Controlled mode (Add Patient)
+      setForm((f) => ({ ...(f || {}), [field]: val }));
+    } else if (onUpdate) {
+      // Direct update mode (Patient Profile)
+      try {
+        setUpdating((prev) => ({ ...prev, [field]: true }));
+        await onUpdate(field, val);
+      } catch (error) {
+        console.error('Failed to update:', error);
+      } finally {
+        setUpdating((prev) => ({ ...prev, [field]: false }));
+      }
+    }
+  };
 
   // 🩺 Questions list
   const questions = React.useMemo(() => {
@@ -44,11 +65,11 @@ export default function HealthInfoSection({ form = {}, setForm = () => { }, t, i
       { key: 'drinksAlcohol', label: translate('Does the patient drink alcohol?', 'هل يشرب المريض الكحول؟') },
       { key: 'familyHistory', label: translate('Family history of similar diseases?', 'هل يوجد تاريخ عائلي لأمراض مشابهة؟') },
     ];
-    if (form?.gender?.toLowerCase() === 'female') {
+    if (values?.gender?.toLowerCase() === 'female') {
       base.push({ key: 'isPregnant', label: translate('Is the patient pregnant?', 'هل المريضة حامل؟') });
     }
     return base;
-  }, [translate, form?.gender]);
+  }, [translate, values?.gender]);
 
   return (
     <Box sx={{ mt: 3 }}>
@@ -93,70 +114,110 @@ export default function HealthInfoSection({ form = {}, setForm = () => { }, t, i
         }}
       >
         <Stack spacing={2.2}>
-          {questions.map((q, i) => (
-            <Paper
-              key={q.key}
-              variant="outlined"
-              sx={{
-                p: { xs: 1.5, sm: 2 },
-                borderRadius: 3,
-                boxShadow: 'none',
-                background: (th) => `linear-gradient(135deg, ${th.palette.background.default} 0%, ${th.palette.grey[50]} 100%)`,
-                border: (th) => `2px solid ${th.palette.divider}`,
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                '&:hover': {
-                  borderColor: theme.palette.success.main,
-                  boxShadow: `0 4px 12px rgba(46, 125, 50, 0.2)`,
-                  transform: 'translateY(-3px) scale(1.01)',
-                  background: (th) => th.palette.background.paper,
-                },
-                direction: isArabic ? 'rtl' : 'ltr',
-              }}
-            >
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="center"
-                flexWrap="wrap"
-                spacing={1.5}
-              >
-                <Typography
-                  variant="subtitle1"
-                  fontWeight={700}
-                  color="text.primary"
-                  sx={{
-                    flex: 1,
-                    textAlign: isArabic ? 'right' : 'left',
-                    lineHeight: 1.3,
-                  }}
-                >
-                  {`${i + 1}. ${q.label}`}
-                </Typography>
+          {questions.map((q, i) => {
+            const isYes = values[q.key] === true;
+            const isNo = values[q.key] === false;
+            const isLoading = updating[q.key];
 
-                <RadioGroup
-                  row
-                  value={String(form?.[q.key] ?? false)}
-                  onChange={handleBool(q.key)}
-                  sx={{
-                    gap: 1.5,
-                    justifyContent: isArabic ? 'flex-start' : 'flex-end',
-                    flexShrink: 0,
-                  }}
+            return (
+              <Paper
+                key={q.key}
+                variant="outlined"
+                sx={{
+                  p: { xs: 1.5, sm: 2 },
+                  borderRadius: 3,
+                  boxShadow: 'none',
+                  background: (th) => `linear-gradient(135deg, ${th.palette.background.default} 0%, ${th.palette.grey[50]} 100%)`,
+                  border: (th) => `2px solid ${th.palette.divider}`,
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  '&:hover': {
+                    borderColor: theme.palette.success.main,
+                    boxShadow: `0 4px 12px rgba(46, 125, 50, 0.2)`,
+                    transform: 'translateY(-2px)',
+                    background: (th) => th.palette.background.paper,
+                  },
+                  direction: isArabic ? 'rtl' : 'ltr',
+                }}
+              >
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="center"
+                  flexWrap="wrap"
+                  spacing={1.5}
                 >
-                  <FormControlLabel
-                    value="true"
-                    control={<Radio color="success" />}
-                    label={translate('Yes', 'نعم')}
-                  />
-                  <FormControlLabel
-                    value="false"
-                    control={<Radio color="error" />}
-                    label={translate('No', 'لا')}
-                  />
-                </RadioGroup>
-              </Stack>
-            </Paper>
-          ))}
+                  <Typography
+                    variant="subtitle1"
+                    fontWeight={700}
+                    color="text.primary"
+                    sx={{
+                      flex: 1,
+                      textAlign: isArabic ? 'right' : 'left',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {`${i + 1}. ${q.label}`}
+                  </Typography>
+
+                  {/* Custom Toggle UI */}
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {isLoading ? (
+                      <CircularProgress size={24} />
+                    ) : (
+                      <>
+                        <Button
+                          onClick={handleToggle(q.key, true)}
+                          disabled={isReadOnly}
+                          variant={isYes ? 'contained' : 'outlined'}
+                          color="success"
+                          startIcon={isYes ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
+                          sx={{
+                            borderRadius: 2,
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            px: 2,
+                            opacity: isNo ? 0.5 : 1,
+                            borderColor: isYes ? 'transparent' : 'divider',
+                            bgcolor: isYes ? 'success.main' : 'transparent',
+                            color: isYes ? 'white' : 'text.secondary',
+                            '&:hover': {
+                              bgcolor: isYes ? 'success.dark' : alpha(theme.palette.success.main, 0.1),
+                              borderColor: 'success.main',
+                            }
+                          }}
+                        >
+                          {translate('Yes', 'نعم')}
+                        </Button>
+                        <Button
+                          onClick={handleToggle(q.key, false)}
+                          disabled={isReadOnly}
+                          variant={isNo ? 'contained' : 'outlined'}
+                          color="error"
+                          startIcon={isNo ? <CancelIcon /> : <RadioButtonUncheckedIcon />}
+                          sx={{
+                            borderRadius: 2,
+                            textTransform: 'none',
+                            fontWeight: 700,
+                            px: 2,
+                            opacity: isYes ? 0.5 : 1,
+                            borderColor: isNo ? 'transparent' : 'divider',
+                            bgcolor: isNo ? 'error.main' : 'transparent',
+                            color: isNo ? 'white' : 'text.secondary',
+                            '&:hover': {
+                              bgcolor: isNo ? 'error.dark' : alpha(theme.palette.error.main, 0.1),
+                              borderColor: 'error.main',
+                            }
+                          }}
+                        >
+                          {translate('No', 'لا')}
+                        </Button>
+                      </>
+                    )}
+                  </Stack>
+                </Stack>
+              </Paper>
+            );
+          })}
         </Stack>
 
         <Divider sx={{ mt: 3, opacity: 0.4 }} />

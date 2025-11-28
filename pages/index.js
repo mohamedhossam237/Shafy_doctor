@@ -644,6 +644,7 @@ export default function DashboardIndexPage() {
   const [doctorName, setDoctorName] = React.useState('Doctor');
   const [appointments, setAppointments] = React.useState([]);
   const [weeklyData, setWeeklyData] = React.useState([]);
+  const [dailyRevenue, setDailyRevenue] = React.useState(0);
   const [recentPatients, setRecentPatients] = React.useState([]);
   const [recentReports, setRecentReports] = React.useState([]);
   const [counts, setCounts] = React.useState({ appointments: 0, patients: 0, reports: 0 });
@@ -752,6 +753,15 @@ export default function DashboardIndexPage() {
           patients: visiblePatientsCount,
           reports: repRows.length,
         });
+
+        const income = rows
+          .filter(r => isToday(r._dt))
+          .reduce((acc, r) => {
+            const price = Number(r.doctorPrice || 0);
+            const extra = Number(r.additionalFees || 0);
+            return acc + price + extra;
+          }, 0);
+        setDailyRevenue(income);
       } catch (e) {
         console.error(e);
         setErr(e?.message || 'Failed to load dashboard');
@@ -808,7 +818,7 @@ export default function DashboardIndexPage() {
                   {isArabic ? 'نظرة عامة' : 'Overview'}
                 </Typography>
                 <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <StatTile
                       icon={<CalendarTodayIcon />}
                       label={{ en: "Today's Appts", ar: 'مواعيد اليوم' }}
@@ -820,7 +830,7 @@ export default function DashboardIndexPage() {
                       delay={0.1}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <StatTile
                       icon={<PeopleAltIcon />}
                       label={{ en: 'Total Patients', ar: 'إجمالي المرضى' }}
@@ -832,7 +842,7 @@ export default function DashboardIndexPage() {
                       delay={0.2}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={4}>
+                  <Grid item xs={12} sm={3}>
                     <StatTile
                       icon={<AnalyticsIcon />}
                       label={{ en: 'Total Reports', ar: 'التقارير' }}
@@ -925,3 +935,4 @@ export default function DashboardIndexPage() {
     </AppLayout>
   );
 }
+

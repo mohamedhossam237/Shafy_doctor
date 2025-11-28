@@ -502,6 +502,24 @@ export default function PatientDetailsPage() {
     }
   };
 
+  const handleHealthInfoUpdate = async (field, value) => {
+    if (!patient?.id) return;
+    try {
+      const ref = doc(db, 'patients', patient.id);
+      const updateData = {
+        [field]: value,
+        updatedAt: new Date(),
+        updatedBy: user?.uid || user?.email || 'doctor'
+      };
+      await updateDoc(ref, updateData);
+      setPatient((prev) => ({ ...prev, ...updateData }));
+      setOkMsg(label('Health info updated', 'تم تحديث المعلومات الصحية'));
+    } catch (e) {
+      console.error(e);
+      setError(label('Failed to update', 'تعذر التحديث'));
+    }
+  };
+
   const handleCancelEdit = (section) => {
     setEditMode((prev) => ({ ...prev, [section]: false }));
   };
@@ -1662,7 +1680,12 @@ export default function PatientDetailsPage() {
                           </Grid>
 
                           <Box sx={{ mt: 3 }}>
-                            <HealthInfoSection patient={patient} isArabic={isArabic} label={label} />
+                            <HealthInfoSection
+                              patient={patient}
+                              isArabic={isArabic}
+                              t={label}
+                              onUpdate={handleHealthInfoUpdate}
+                            />
                           </Box>
                         </Paper>
                       </Grid>
