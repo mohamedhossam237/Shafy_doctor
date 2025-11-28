@@ -129,10 +129,12 @@ function normalizeInitial(initial) {
  *  - isArabic: boolean
  *  - initialHours?: object (shape like { sat: {open, start, end}, ... , appointmentDuration?: number })
  *  - onSaved?: (hoursObjWithDuration) => void
+ *  - skipDirectSave?: boolean (if true, only calls onSaved callback without writing to Firestore)
  *
  * NOTE:
  *   We now persist `appointmentDuration` (minutes) alongside working hours.
  *   This value is clinic-specific (the parent passes/receives it inside the clinic's `working_hours` object).
+ *   When skipDirectSave is true, the parent is responsible for persisting to Firestore.
  */
 export default function EditHoursDialog({
   open,
@@ -141,6 +143,7 @@ export default function EditHoursDialog({
   isArabic = false,
   initialHours = null,
   onSaved,
+  skipDirectSave = false,
 }) {
   const dir = isArabic ? 'rtl' : 'ltr';
 
@@ -217,18 +220,28 @@ export default function EditHoursDialog({
       setError(vErr);
       return;
     }
-    if (!doctorUID) {
+    if (!doctorUID && !skipDirectSave) {
       setError(isArabic ? 'لا يمكن الحفظ: معرّف الطبيب غير موجود.' : 'Cannot save: doctor UID missing.');
       return;
     }
 
     setSaving(true);
     setError('');
-    const ref = doc(db, 'doctors', doctorUID);
-    const ts = new Date().toISOString();
 
     // Combine hours with duration into one object to store under working_hours
     const workingObj = { ...hours, appointmentDuration: Number(duration) };
+
+    // If skipDirectSave is true, just call the parent callback and let them handle persistence
+    if (skipDirectSave) {
+      onSaved && onSaved(workingObj);
+      setSaving(false);
+      onClose && onClose();
+      return;
+    }
+
+    // Otherwise, write to Firestore directly (legacy/single-clinic mode)
+    const ref = doc(db, 'doctors', doctorUID);
+    const ts = new Date().toISOString();
 
     try {
       // Write to both top-level and nested clinic.* without overwriting other clinic fields

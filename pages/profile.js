@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/router';
 import {
   Box, Container, Stack, Typography, IconButton, Grid, Paper, Button, Avatar,
-  Chip, Tooltip, Link as MLink, Skeleton, CircularProgress, Snackbar, Alert
+  Chip, Tooltip, Link as MLink, Skeleton, CircularProgress, Snackbar, Alert, TextField
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
@@ -29,6 +29,9 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ToggleOnIcon from '@mui/icons-material/ToggleOn';
+import ToggleOffIcon from '@mui/icons-material/ToggleOff';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -104,7 +107,7 @@ export default function DoctorProfilePage() {
         setDoctor(JSON.parse(cached));
         setLoading(false);
       }
-    } catch {}
+    } catch { }
   }, [mounted]);
 
   const fetchDoctor = React.useCallback(async () => {
@@ -116,7 +119,7 @@ export default function DoctorProfilePage() {
       if (snap.exists()) {
         const fresh = snap.data();
         setDoctor(fresh);
-        try { localStorage.setItem('cachedDoctorData', JSON.stringify(fresh)); } catch {}
+        try { localStorage.setItem('cachedDoctorData', JSON.stringify(fresh)); } catch { }
       } else {
         setDoctor(null);
       }
@@ -129,6 +132,125 @@ export default function DoctorProfilePage() {
   }, [user?.uid]);
 
   React.useEffect(() => { if (user?.uid) fetchDoctor(); }, [user?.uid, fetchDoctor]);
+
+  // Clinic Management State
+  const [newClinic, setNewClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
+  const [editingClinicId, setEditingClinicId] = React.useState(null);
+  const [editClinic, setEditClinic] = React.useState({ name_ar: '', address_ar: '', phone: '' });
+  const [hoursClinicId, setHoursClinicId] = React.useState(null);
+  const [openHours, setOpenHours] = React.useState(false);
+
+  const makeClinicId = () => `clinic_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+  const addClinic = async () => {
+    if (!newClinic.name_ar) return setSnack({ open: true, severity: 'error', msg: t('Clinic name required', 'اسم العيادة مطلوب') });
+    try {
+      setLoading(true);
+      const clinicObj = {
+        id: makeClinicId(),
+        name_ar: newClinic.name_ar,
+        address_ar: newClinic.address_ar,
+        phone: newClinic.phone,
+        active: true,
+        working_hours: null,
+      };
+      const updatedClinics = [...(doctor?.clinics || []), clinicObj];
+      await updateDoc(doc(db, 'doctors', user.uid), { clinics: updatedClinics });
+      await fetchDoctor();
+      setNewClinic({ name_ar: '', address_ar: '', phone: '' });
+      setSnack({ open: true, severity: 'success', msg: t('Clinic added', 'تم إضافة العيادة') });
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Failed to add clinic', 'فشل إضافة العيادة') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteClinic = async (clinic) => {
+    if (!confirm(t('Delete this clinic?', 'هل أنت متأكد من حذف العيادة؟'))) return;
+    try {
+      setLoading(true);
+      const updatedClinics = (doctor?.clinics || []).filter((c) => c.id !== clinic.id);
+      await updateDoc(doc(db, 'doctors', user.uid), { clinics: updatedClinics });
+      await fetchDoctor();
+      setSnack({ open: true, severity: 'success', msg: t('Clinic deleted', 'تم حذف العيادة') });
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Failed to delete', 'فشل الحذف') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleClinicActive = async (clinic) => {
+    try {
+      const updatedClinics = (doctor?.clinics || []).map((c) =>
+        c.id === clinic.id ? { ...c, active: !c.active } : c
+      );
+      await updateDoc(doc(db, 'doctors', user.uid), { clinics: updatedClinics });
+      await fetchDoctor(); // Refresh to show update
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Update failed', 'فشل التحديث') });
+    }
+  };
+
+  const startEditClinic = (clinic) => {
+    setEditClinic({
+      name_ar: clinic.name_ar || '',
+      address_ar: clinic.address_ar || '',
+      phone: clinic.phone || '',
+    });
+    setEditingClinicId(clinic.id);
+  };
+
+  const cancelEditClinic = () => {
+    setEditingClinicId(null);
+    setEditClinic({ name_ar: '', address_ar: '', phone: '' });
+  };
+
+  const saveEditClinic = async (clinic) => {
+    try {
+      setLoading(true);
+      const updatedClinics = (doctor?.clinics || []).map((c) =>
+        c.id === clinic.id ? { ...c, ...editClinic } : c
+      );
+      await updateDoc(doc(db, 'doctors', user.uid), { clinics: updatedClinics });
+      await fetchDoctor();
+      setEditingClinicId(null);
+      setSnack({ open: true, severity: 'success', msg: t('Clinic updated', 'تم تحديث العيادة') });
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Update failed', 'فشل التحديث') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openHoursForClinic = (clinic) => {
+    setHoursClinicId(clinic.id);
+    setOpenHours(true);
+  };
+
+  const handleHoursSaved = async (obj) => {
+    try {
+      setLoading(true);
+      const updatedClinics = (doctor?.clinics || []).map((c) =>
+        c.id === hoursClinicId ? { ...c, working_hours: obj || {} } : c
+      );
+      await updateDoc(doc(db, 'doctors', user.uid), { clinics: updatedClinics });
+      await fetchDoctor();
+      setOpenHours(false);
+      setHoursClinicId(null);
+      setSnack({ open: true, severity: 'success', msg: t('Hours updated', 'تم تحديث الساعات') });
+    } catch (e) {
+      console.error(e);
+      setSnack({ open: true, severity: 'error', msg: t('Update failed', 'فشل التحديث') });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const extras = React.useMemo(
     () => (Array.isArray(doctor?.profileImages) ? doctor.profileImages.filter(Boolean) : []),
@@ -255,33 +377,42 @@ export default function DoctorProfilePage() {
   /* Small field tile used in Payment section (clean card with icon) */
   const FieldTile = ({ icon, title, value, actions, muted }) => (
     <Paper
-      variant="outlined"
+      elevation={0}
       sx={{
-        p: 1.25,
-        borderRadius: 2.5,
+        p: 2,
+        borderRadius: 3,
         display: 'flex',
         alignItems: 'center',
-        gap: 1.25,
-        borderColor: 'divider',
-        bgcolor: 'background.paper',
+        gap: 2,
+        bgcolor: 'rgba(255,255,255,0.6)',
+        border: '1px solid rgba(255,255,255,0.5)',
+        transition: 'all 0.2s ease',
+        '&:hover': {
+          bgcolor: 'rgba(255,255,255,0.9)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+        }
       }}
     >
       <Box
         sx={{
-          width: 40, height: 40, borderRadius: '50%',
+          width: 48,
+          height: 48,
+          borderRadius: 2.5,
           display: 'grid', placeItems: 'center',
-          bgcolor: 'primary.main', opacity: 0.12, flexShrink: 0,
+          bgcolor: 'primary.50',
+          color: 'primary.main',
+          flexShrink: 0,
         }}
       >
-        <Box sx={{ color: 'primary.main' }}>{icon}</Box>
+        <Box>{icon}</Box>
       </Box>
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant="caption" color="text.secondary">
+        <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ display: 'block', mb: 0.5 }}>
           {title}
         </Typography>
         <Typography
           variant="body1"
-          sx={{ fontWeight: 800, ...(muted ? { color: 'text.disabled' } : {}) }}
+          sx={{ fontWeight: 800, ...(muted ? { color: 'text.disabled' } : { color: 'text.primary' }) }}
           noWrap
         >
           {value || '—'}
@@ -297,70 +428,111 @@ export default function DoctorProfilePage() {
         <Container maxWidth="md" sx={{ pt: 2 }}>
           {/* Header */}
           <Paper
-            variant="outlined"
+            elevation={0}
             sx={{
-              p: { xs: 1.75, sm: 2.25 },
-              borderRadius: 3,
+              p: { xs: 3, md: 4 },
+              borderRadius: 5,
               overflow: 'hidden',
               position: 'relative',
-              background: 'linear-gradient(135deg, rgba(25,118,210,.10), rgba(25,118,210,.02))',
+              background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+              color: 'white',
+              boxShadow: '0 20px 40px -10px rgba(25, 118, 210, 0.4)',
+              mb: 3,
               '&:before': {
                 content: '""',
                 position: 'absolute',
-                inset: 0,
-                background: 'radial-gradient(800px 200px at 10% -20%, rgba(25,118,210,.16), transparent)',
+                top: -100,
+                right: -100,
+                width: 400,
+                height: 400,
+                background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)',
+                borderRadius: '50%',
                 pointerEvents: 'none',
               },
             }}
           >
             {loading ? (
-              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5} alignItems="center" justifyContent="space-between">
-                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5} alignItems="center">
-                  <Skeleton variant="circular" width={84} height={84} />
+              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={3} alignItems="center" justifyContent="space-between">
+                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={3} alignItems="center">
+                  <Skeleton variant="circular" width={120} height={120} sx={{ bgcolor: 'rgba(255,255,255,0.2)' }} />
                   <Box sx={{ minWidth: 0 }}>
-                    <Skeleton variant="text" width={180} height={28} />
-                    <Skeleton variant="text" width={120} />
+                    <Skeleton variant="text" width={240} height={40} sx={{ bgcolor: 'rgba(255,255,255,0.2)' }} />
+                    <Skeleton variant="text" width={160} sx={{ bgcolor: 'rgba(255,255,255,0.2)' }} />
                   </Box>
                 </Stack>
-                <Skeleton variant="rounded" width={96} height={40} />
+                <Skeleton variant="rounded" width={120} height={48} sx={{ bgcolor: 'rgba(255,255,255,0.2)' }} />
               </Stack>
             ) : (
-              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5} alignItems="center" justifyContent="space-between">
-                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5} alignItems="center" sx={{ position: 'relative' }}>
+              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={3} alignItems="center" justifyContent="space-between">
+                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={3} alignItems="center" sx={{ position: 'relative' }}>
                   <Avatar
                     src={avatarUrl || undefined}
                     alt="Profile"
                     sx={{
-                      width: 86, height: 86,
-                      bgcolor: 'primary.main', color: 'primary.contrastText',
-                      fontWeight: 900, border: '2px solid rgba(255,255,255,.85)',
-                      boxShadow: '0 8px 30px rgba(25,118,210,.25)',
-                      position: 'relative',
+                      width: 120, height: 120,
+                      bgcolor: 'white', color: 'primary.main',
+                      fontWeight: 900,
+                      border: '4px solid rgba(255,255,255,0.3)',
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                      fontSize: '2.5rem',
                     }}
                   >
                     Dr
                   </Avatar>
                   <Box sx={{ minWidth: 0 }}>
                     <Typography
-                      variant="h6" fontWeight={900} noWrap
+                      variant="h3" fontWeight={900} noWrap
                       title={doctor ? (isArabic ? doctor?.name_ar : doctor?.name_en) : ''}
+                      sx={{
+                        fontSize: { xs: '1.75rem', md: '2.5rem' },
+                        mb: 0.5,
+                        textShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                      }}
                     >
                       {doctor ? (isArabic ? doctor?.name_ar : doctor?.name_en) : t('Doctor', 'الطبيب')}
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: 320 }}>
+                    <Typography variant="h6" sx={{ opacity: 0.9, fontWeight: 500 }} noWrap>
                       {doctor ? (isArabic ? doctor?.specialty_ar : doctor?.specialty_en) : '—'}
                     </Typography>
                   </Box>
                 </Stack>
 
-                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1}>
-                  <Tooltip title={t('Refresh', 'تحديث')}><IconButton onClick={fetchDoctor}><RefreshIcon /></IconButton></Tooltip>
-                  <Tooltip title={t('Edit overview', 'تعديل النظرة العامة')}>
-                    <IconButton onClick={() => openDlg('overview')}><EditIcon /></IconButton>
+                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5}>
+                  <Tooltip title={t('Refresh', 'تحديث')}>
+                    <IconButton onClick={fetchDoctor} sx={{ color: 'white', bgcolor: 'rgba(255,255,255,0.1)', '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' } }}>
+                      <RefreshIcon />
+                    </IconButton>
                   </Tooltip>
-                  <Tooltip title={t('Edit details page', 'صفحة تفاصيل موسعة')}>
-                    <IconButton onClick={() => router.push(withLang('/doctor/details'))}><PublicIcon /></IconButton>
-                  </Tooltip>
+                  <Button
+                    variant="outlined"
+                    startIcon={<EditIcon />}
+                    onClick={() => openDlg('overview')}
+                    sx={{
+                      color: 'white',
+                      borderColor: 'rgba(255,255,255,0.4)',
+                      borderRadius: 3,
+                      backdropFilter: 'blur(10px)',
+                      bgcolor: 'rgba(255,255,255,0.1)',
+                      '&:hover': { bgcolor: 'rgba(255,255,255,0.2)', borderColor: 'white' }
+                    }}
+                  >
+                    {t('Edit', 'تعديل')}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={<PublicIcon />}
+                    onClick={() => router.push(withLang('/doctor/details'))}
+                    sx={{
+                      bgcolor: 'white',
+                      color: 'primary.main',
+                      borderRadius: 3,
+                      fontWeight: 700,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                      '&:hover': { bgcolor: 'grey.50' }
+                    }}
+                  >
+                    {t('Details', 'التفاصيل')}
+                  </Button>
                 </Stack>
               </Stack>
             )}
@@ -368,23 +540,21 @@ export default function DoctorProfilePage() {
             {/* Sticky inline pill navigation */}
             <Box
               sx={{
-                mt: 2,
+                mt: 4,
                 display: 'flex',
-                gap: 1,
+                gap: 1.5,
                 overflowX: 'auto',
                 pb: 1,
                 flexDirection: isArabic ? 'row-reverse' : 'row',
                 position: 'sticky',
                 top: 8,
                 zIndex: 1,
-                backdropFilter: 'saturate(180%) blur(6px)',
                 '&::-webkit-scrollbar': { display: 'none' },
               }}
             >
               {navItems.map((item) => (
                 <Button
                   key={item.id}
-                  variant="outlined"
                   startIcon={item.icon}
                   onClick={() => {
                     const el = document.getElementById(item.id);
@@ -395,17 +565,18 @@ export default function DoctorProfilePage() {
                     borderRadius: 999,
                     textTransform: 'none',
                     fontWeight: 700,
-                    px: 2.25,
+                    px: 3,
                     py: 1,
-                    bgcolor: 'background.paper',
-                    borderColor: 'divider',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.05)',
-                    '& .MuiSvgIcon-root': { fontSize: 18 },
+                    bgcolor: 'rgba(255,255,255,0.15)',
+                    color: 'white',
+                    backdropFilter: 'blur(10px)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    transition: 'all 0.2s ease',
                     '&:hover': {
-                      bgcolor: 'primary.main',
-                      color: 'primary.contrastText',
-                      borderColor: 'primary.main',
-                      '& .MuiSvgIcon-root': { color: 'inherit' },
+                      bgcolor: 'white',
+                      color: 'primary.main',
+                      transform: 'translateY(-2px)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                     },
                   }}
                 >
@@ -416,17 +587,48 @@ export default function DoctorProfilePage() {
           </Paper>
 
           {/* Upload bar */}
-          <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 3, mt: 1.25 }}>
-            <Stack direction={isArabic ? 'row-reverse' : 'row'} alignItems="center" justifyContent="space-between" spacing={1}>
-              <Typography variant="subtitle2" color="text.secondary" fontWeight={800}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 4,
+              mt: 3,
+              border: "1px solid rgba(255, 255, 255, 0.6)",
+              background: "linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.7) 100%)",
+              backdropFilter: "blur(20px)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.05)",
+            }}
+          >
+            <Stack direction={isArabic ? 'row-reverse' : 'row'} alignItems="center" justifyContent="space-between" spacing={2}>
+              <Typography variant="subtitle1" color="text.primary" fontWeight={800}>
                 {t('Manage Profile', 'إدارة الملف الشخصي')}
               </Typography>
-              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1}>
+              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1.5}>
                 <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={onSelectedFile} multiple />
-                <Button startIcon={<AddAPhotoIcon />} variant="outlined" onClick={() => fileInputRef.current?.click()} sx={{ borderRadius: 2 }}>
+                <Button
+                  startIcon={<AddAPhotoIcon />}
+                  variant="outlined"
+                  onClick={() => fileInputRef.current?.click()}
+                  sx={{
+                    borderRadius: 3,
+                    borderColor: 'primary.main',
+                    color: 'primary.main',
+                    '&:hover': { bgcolor: 'primary.50' }
+                  }}
+                >
                   {t('Upload Photos', 'رفع صور')}
                 </Button>
-                <Button startIcon={<LogoutIcon />} variant="contained" color="error" onClick={doLogout} sx={{ borderRadius: 2 }}>
+                <Button
+                  startIcon={<LogoutIcon />}
+                  variant="contained"
+                  color="error"
+                  onClick={doLogout}
+                  sx={{
+                    borderRadius: 3,
+                    boxShadow: '0 4px 12px rgba(211, 47, 47, 0.2)',
+                    '&:hover': { boxShadow: '0 6px 16px rgba(211, 47, 47, 0.3)' }
+                  }}
+                >
                   {t('Logout', 'تسجيل الخروج')}
                 </Button>
               </Stack>
@@ -435,17 +637,37 @@ export default function DoctorProfilePage() {
             <Box
               ref={dropRef}
               sx={{
-                mt: 1, p: 1.5, borderRadius: 2,
+                mt: 2,
+                p: 3,
+                borderRadius: 3,
                 border: (t) => `2px dashed ${t.palette.divider}`,
                 textAlign: 'center',
-                transition: 'border-color .15s ease, background-color .15s ease',
-                bgcolor: 'transparent',
-                '&[data-hover="1"]': { borderColor: 'primary.main', bgcolor: 'rgba(25,118,210,.06)' },
+                transition: 'all 0.2s ease',
+                bgcolor: 'rgba(255,255,255,0.5)',
+                '&[data-hover="1"]': {
+                  borderColor: 'primary.main',
+                  bgcolor: 'rgba(25, 118, 210, 0.08)',
+                  transform: 'scale(1.01)'
+                },
               }}
             >
-              <Stack alignItems="center" spacing={0.5}>
-                <UploadFileIcon color="primary" />
-                <Typography variant="body2" color="text.secondary">
+              <Stack alignItems="center" spacing={1}>
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '50%',
+                    bgcolor: 'primary.50',
+                    color: 'primary.main',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    mb: 1
+                  }}
+                >
+                  <UploadFileIcon fontSize="large" />
+                </Box>
+                <Typography variant="body2" color="text.secondary" fontWeight={500}>
                   {t('Drag & drop images here, or click “Upload Photos”.', 'اسحب وأفلت الصور هنا أو اضغط "رفع صور".')}
                 </Typography>
               </Stack>
@@ -456,8 +678,18 @@ export default function DoctorProfilePage() {
           {loading ? (
             <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}><CircularProgress /></Box>
           ) : !doctor ? (
-            <Paper sx={{ p: 3, mt: 2, borderRadius: 3 }}>
-              <Typography color="text.secondary">{t('No data found', 'لا توجد بيانات')}</Typography>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 4,
+                mt: 3,
+                borderRadius: 4,
+                bgcolor: 'rgba(255,255,255,0.6)',
+                border: '1px solid rgba(255,255,255,0.5)',
+                textAlign: 'center'
+              }}
+            >
+              <Typography color="text.secondary" fontWeight={500}>{t('No data found', 'لا توجد بيانات')}</Typography>
             </Paper>
           ) : (
             <>
@@ -488,13 +720,16 @@ export default function DoctorProfilePage() {
                       <InfoTile icon={<CalendarMonthIcon />} title={t('Graduation Year', 'سنة التخرج')} value={doctor?.graduationYear} rtl={isArabic} />
                     </Grid>
                     <Grid item xs={6} md={3}>
-                      <InfoTile icon={<WorkIcon />} title={t('Experience', 'سنوات الخبرة')} value={doctor?.experienceYears != null ? `${doctor.experienceYears} ${t('years','سنوات')}` : ''} rtl={isArabic} />
+                      <InfoTile icon={<WorkIcon />} title={t('Experience', 'سنوات الخبرة')} value={doctor?.experienceYears != null ? `${doctor.experienceYears} ${t('years', 'سنوات')}` : ''} rtl={isArabic} />
                     </Grid>
                     <Grid item xs={6} md={3}>
-                      <InfoTile icon={<MonetizationOnIcon />} title={t('Checkup Price','سعر الكشف')} value={doctor?.checkupPrice != null ? `${doctor.checkupPrice} ${t('EGP','جنيه')}` : ''} rtl={isArabic} />
+                      <InfoTile icon={<MonetizationOnIcon />} title={t('Checkup Price', 'سعر الكشف')} value={doctor?.checkupPrice != null ? `${doctor.checkupPrice} ${t('EGP', 'جنيه')}` : ''} rtl={isArabic} />
                     </Grid>
                     <Grid item xs={6} md={3}>
-                      <InfoTile icon={<PhoneIcon />} title={t('Phone','رقم الهاتف')} value={doctor?.phone} rtl={isArabic} />
+                      <InfoTile icon={<MonetizationOnIcon />} title={t('Follow-up Price', 'سعر المتابعة')} value={doctor?.followUpPrice != null ? `${doctor.followUpPrice} ${t('EGP', 'جنيه')}` : ''} rtl={isArabic} />
+                    </Grid>
+                    <Grid item xs={6} md={3}>
+                      <InfoTile icon={<PhoneIcon />} title={t('Phone', 'رقم الهاتف')} value={doctor?.phone} rtl={isArabic} />
                     </Grid>
                   </Grid>
                 </SectionCard>
@@ -505,11 +740,11 @@ export default function DoctorProfilePage() {
                 <SectionCard
                   id="payment"
                   icon={<MonetizationOnIcon />}
-                  title={t('Payment for Bookings','بيانات الدفع للحجوزات')}
+                  title={t('Payment for Bookings', 'بيانات الدفع للحجوزات')}
                   rtl={isArabic}
                   action={
                     <Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('payment')} sx={{ borderRadius: 2 }}>
-                      {t('Edit','تعديل')}
+                      {t('Edit', 'تعديل')}
                     </Button>
                   }
                 >
@@ -517,16 +752,17 @@ export default function DoctorProfilePage() {
                     <Stack spacing={1.25}>
                       {/* small meta chips */}
                       <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} useFlexGap flexWrap="wrap">
-                        <Chip label={`${t('Type','النوع')}: ${doctor.payment.type === 'wallet' ? t('Wallet','محفظة') : 'InstaPay'}`} />
+                        <Chip label={`${t('Type', 'النوع')}: ${doctor.payment.type === 'wallet' ? t('Wallet', 'محفظة') : 'InstaPay'}`} />
                         {doctor.payment.walletProvider && (
-                          <Chip label={`${t('Provider','المزوّد')}: ${
-                            { vodafone: t('Vodafone Cash','فودافون كاش'),
-                              etisalat: t('Etisalat Cash','اتصالات كاش'),
-                              orange: t('Orange Money','أورنج موني'),
-                              we: t('WE Pay','وي باي') }[doctor.payment.walletProvider] || doctor.payment.walletProvider
-                          }`} />
+                          <Chip label={`${t('Provider', 'المزوّد')}: ${{
+                            vodafone: t('Vodafone Cash', 'فودافون كاش'),
+                            etisalat: t('Etisalat Cash', 'اتصالات كاش'),
+                            orange: t('Orange Money', 'أورنج موني'),
+                            we: t('WE Pay', 'وي باي')
+                          }[doctor.payment.walletProvider] || doctor.payment.walletProvider
+                            }`} />
                         )}
-                        {doctor.payment.bankName && <Chip label={`${t('Bank','البنك')}: ${doctor.payment.bankName}`} />}
+                        {doctor.payment.bankName && <Chip label={`${t('Bank', 'البنك')}: ${doctor.payment.bankName}`} />}
                       </Stack>
 
                       {/* tiles row */}
@@ -534,7 +770,7 @@ export default function DoctorProfilePage() {
                         <Grid item xs={12} md={6}>
                           <FieldTile
                             icon={<PublicIcon />}
-                            title={t('InstaPay ID','معرّف إنستا باي')}
+                            title={t('InstaPay ID', 'معرّف إنستا باي')}
                             value={doctor.payment.instapayId}
                             muted={!doctor.payment.instapayId}
                             actions={
@@ -546,7 +782,7 @@ export default function DoctorProfilePage() {
                                   onClick={() => copy(doctor.payment.instapayId)}
                                   sx={{ borderRadius: 2 }}
                                 >
-                                  {t('Copy','نسخ')}
+                                  {t('Copy', 'نسخ')}
                                 </Button>
                               ) : null
                             }
@@ -555,7 +791,7 @@ export default function DoctorProfilePage() {
                         <Grid item xs={12} md={6}>
                           <FieldTile
                             icon={<PhoneIcon />}
-                            title={t('InstaPay Mobile','موبايل إنستا باي')}
+                            title={t('InstaPay Mobile', 'موبايل إنستا باي')}
                             value={doctor.payment.instapayMobile}
                             muted={!doctor.payment.instapayMobile}
                             actions={
@@ -569,7 +805,7 @@ export default function DoctorProfilePage() {
                                     startIcon={<PhoneIcon />}
                                     sx={{ borderRadius: 2 }}
                                   >
-                                    {t('Call','اتصال')}
+                                    {t('Call', 'اتصال')}
                                   </Button>
                                   <Button
                                     size="small"
@@ -578,7 +814,7 @@ export default function DoctorProfilePage() {
                                     onClick={() => copy(doctor.payment.instapayMobile)}
                                     sx={{ borderRadius: 2 }}
                                   >
-                                    {t('Copy','نسخ')}
+                                    {t('Copy', 'نسخ')}
                                   </Button>
                                 </Stack>
                               ) : null
@@ -590,7 +826,7 @@ export default function DoctorProfilePage() {
                           <Grid item xs={12} md={6}>
                             <FieldTile
                               icon={<PhoneIcon />}
-                              title={t('Wallet Number','رقم المحفظة')}
+                              title={t('Wallet Number', 'رقم المحفظة')}
                               value={doctor.payment.walletNumber}
                               muted={!doctor.payment.walletNumber}
                               actions={
@@ -604,7 +840,7 @@ export default function DoctorProfilePage() {
                                       startIcon={<PhoneIcon />}
                                       sx={{ borderRadius: 2 }}
                                     >
-                                      {t('Call','اتصال')}
+                                      {t('Call', 'اتصال')}
                                     </Button>
                                     <Button
                                       size="small"
@@ -613,7 +849,7 @@ export default function DoctorProfilePage() {
                                       onClick={() => copy(doctor.payment.walletNumber)}
                                       sx={{ borderRadius: 2 }}
                                     >
-                                      {t('Copy','نسخ')}
+                                      {t('Copy', 'نسخ')}
                                     </Button>
                                   </Stack>
                                 ) : null
@@ -626,7 +862,7 @@ export default function DoctorProfilePage() {
                           <Grid item xs={12}>
                             <FieldTile
                               icon={<MonetizationOnIcon />}
-                              title={t('Notes','ملاحظات')}
+                              title={t('Notes', 'ملاحظات')}
                               value={doctor.payment.notes}
                             />
                           </Grid>
@@ -637,178 +873,263 @@ export default function DoctorProfilePage() {
                     <EmptyPrompt
                       rtl={isArabic}
                       text={t('Add payment details (InstaPay or Wallet) so patients can transfer the fee and upload receipt.',
-                              'أضف بيانات الدفع (إنستا باي أو محفظة) ليتمكن المرضى من التحويل ورفع إيصال.')}
-                      actionLabel={t('Add payment','إضافة الدفع')}
+                        'أضف بيانات الدفع (إنستا باي أو محفظة) ليتمكن المرضى من التحويل ورفع إيصال.')}
+                      actionLabel={t('Add payment', 'إضافة الدفع')}
                       onAction={() => openDlg('payment')}
                     />
                   )}
                 </SectionCard>
               </Box>
-{/* Services & Subspecialties */}
-<Grid container spacing={1.25} sx={{ mt: 0.5 }}>
-  <Grid item xs={12} md={6}>
-    <SectionCard
-      id="services"
-      icon={<MedicalServicesIcon />}
-      title={t('Services Offered','الخدمات المقدمة')}
-      rtl={isArabic}
-      action={
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<EditIcon />}
-          onClick={() => openDlg('services')}
-          sx={{ borderRadius: 2 }}
-        >
-          {t('Edit','تعديل')}
-        </Button>
-      }
-    >
-      {(() => {
-        // Prefer structured extraServices; fallback to legacy "services" (strings)
-        const structured = Array.isArray(doctor?.extraServices) ? doctor.extraServices.filter(Boolean) : [];
-        const legacy = Array.isArray(doctor?.services) ? doctor.services.filter(Boolean) : [];
-
-        if (structured.length > 0) {
-          return (
-            <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} useFlexGap flexWrap="wrap">
-              {structured.map((e) => (
-                <Stack key={e.id || e.name_ar} direction="row" spacing={0.75} alignItems="center">
-                  <Chip label={e.name_ar || '—'} sx={{ fontWeight: 800 }} />
-                  <Chip label={`${Number(e.price || 0)} ${t('EGP','ج.م')}`} />
-                </Stack>
-              ))}
-            </Stack>
-          );
-        }
-
-        if (legacy.length > 0) {
-          // display legacy list without prices
-          return <ChipGroup items={legacy} />;
-        }
-
-        return (
-          <EmptyPrompt
-            rtl={isArabic}
-            text={t('List procedures or services you offer.','أضف الإجراءات أو الخدمات التي تقدمها.')}
-            actionLabel={t('Add services','إضافة خدمات')}
-            onAction={() => openDlg('services')}
-          />
-        );
-      })()}
-    </SectionCard>
-  </Grid>
-
-  <Grid item xs={12} md={6}>
-    <SectionCard
-      id="subspecialties"
-      icon={<LocalHospitalIcon />}
-      title={t('Subspecialties','التخصصات الفرعية')}
-      rtl={isArabic}
-      action={
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<EditIcon />}
-          onClick={() => openDlg('subspecialties')}
-          sx={{ borderRadius: 2 }}
-        >
-          {t('Edit','تعديل')}
-        </Button>
-      }
-    >
-      {Array.isArray(doctor?.subspecialties) && doctor.subspecialties.length > 0 ? (
-        <ChipGroup items={doctor.subspecialties} />
-      ) : (
-        <EmptyPrompt
-          rtl={isArabic}
-          text={t('Show your subspecialties to help patients find you.','اعرض تخصصاتك الفرعية لمساعدة المرضى.')}
-          actionLabel={t('Add subspecialties','إضافة تخصصات')}
-          onAction={() => openDlg('subspecialties')}
-        />
-      )}
-    </SectionCard>
-  </Grid>
-</Grid>
-
-
-              {/* Clinics & Hours */}
+              {/* Services & Subspecialties */}
               <Grid container spacing={1.25} sx={{ mt: 0.5 }}>
-                <Grid item xs={12} md={7}>
+                <Grid item xs={12} md={6}>
                   <SectionCard
-                    id="clinic"
-                    icon={<PlaceIcon />}
-                    title={t('Clinics','العيادات')}
+                    id="services"
+                    icon={<MedicalServicesIcon />}
+                    title={t('Services Offered', 'الخدمات المقدمة')}
                     rtl={isArabic}
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('clinics')} sx={{ borderRadius: 2 }}>{t('Manage clinics','إدارة العيادات')}</Button>}
+                    action={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<EditIcon />}
+                        onClick={() => openDlg('services')}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {t('Edit', 'تعديل')}
+                      </Button>
+                    }
                   >
-                    {clinicsList && clinicsList.length ? (
-                      <Grid container spacing={1.25}>
-                        {clinicsList.map((c) => (
-                          <Grid item xs={12} key={c.id}>
-                            <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
-                              <Stack spacing={0.5}>
-                                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-                                  <Chip label={c.name_ar || '—'} sx={{ fontWeight: 800 }} />
-                                  <Chip label={c.active ? t('Active','مفعل') : t('Inactive','موقوف')} color={c.active ? 'success' : 'default'} sx={{ fontWeight: 700 }} />
-                                  {c.phone ? (
-                                    <Button size="small" variant="outlined" component={MLink} href={`tel:${c.phone}`} startIcon={<PhoneIcon />} sx={{ borderRadius: 2 }}>
-                                      {c.phone}
-                                    </Button>
-                                  ) : null}
-                                </Stack>
+                    {(() => {
+                      // Prefer structured extraServices; fallback to legacy "services" (strings)
+                      const structured = Array.isArray(doctor?.extraServices) ? doctor.extraServices.filter(Boolean) : [];
+                      const legacy = Array.isArray(doctor?.services) ? doctor.services.filter(Boolean) : [];
 
-                                {c.address_ar ? (
-                                  <Typography variant="body2" color="text.secondary">
-                                    {c.address_ar}
-                                  </Typography>
-                                ) : null}
-
-                                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.25 }}>
-                                  {c.working_hours ? t('Working hours set','تم ضبط ساعات العمل') : t('No hours yet','لا توجد ساعات بعد')}
-                                </Typography>
+                      if (structured.length > 0) {
+                        return (
+                          <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} useFlexGap flexWrap="wrap">
+                            {structured.map((e) => (
+                              <Stack key={e.id || e.name_ar} direction="row" spacing={0.75} alignItems="center">
+                                <Chip label={e.name_ar || '—'} sx={{ fontWeight: 800 }} />
+                                <Chip label={`${Number(e.price || 0)} ${t('EGP', 'ج.م')}`} />
                               </Stack>
-                            </Paper>
-                          </Grid>
-                        ))}
-                      </Grid>
-                    ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Add your clinics (name, address, phone).','أضف عياداتك (الاسم، العنوان، الهاتف).')} actionLabel={t('Add clinic','إضافة عيادة')} onAction={() => openDlg('clinics')} />
-                    )}
+                            ))}
+                          </Stack>
+                        );
+                      }
+
+                      if (legacy.length > 0) {
+                        // display legacy list without prices
+                        return <ChipGroup items={legacy} />;
+                      }
+
+                      return (
+                        <EmptyPrompt
+                          rtl={isArabic}
+                          text={t('List procedures or services you offer.', 'أضف الإجراءات أو الخدمات التي تقدمها.')}
+                          actionLabel={t('Add services', 'إضافة خدمات')}
+                          onAction={() => openDlg('services')}
+                        />
+                      );
+                    })()}
                   </SectionCard>
                 </Grid>
 
-                <Grid item xs={12} md={5}>
+                <Grid item xs={12} md={6}>
                   <SectionCard
-                    id="hours"
-                    icon={<AccessTimeIcon />}
-                    title={t('Working Hours','ساعات العمل')}
+                    id="subspecialties"
+                    icon={<LocalHospitalIcon />}
+                    title={t('Subspecialties', 'التخصصات الفرعية')}
                     rtl={isArabic}
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('clinics')} sx={{ borderRadius: 2 }} disabled={!user?.uid}>{t('Manage','إدارة')}</Button>}
+                    action={
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<EditIcon />}
+                        onClick={() => openDlg('subspecialties')}
+                        sx={{ borderRadius: 2 }}
+                      >
+                        {t('Edit', 'تعديل')}
+                      </Button>
+                    }
                   >
-                    {clinicsList && clinicsList.length ? (
-                      <Stack spacing={1}>
-                        {clinicsList.map((c) => (
-                          <Paper key={c.id} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
-                            <Typography variant="caption" fontWeight={800} sx={{ mb: 0.5 }}>
-                              {c.name_ar || '—'}
-                            </Typography>
-                            {c.working_hours ? (
-                              <HoursGrid hours={c.working_hours} rtl={isArabic} />
-                            ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                {t('No hours yet','لا توجد ساعات بعد')}
-                              </Typography>
-                            )}
-                          </Paper>
-                        ))}
-                      </Stack>
+                    {Array.isArray(doctor?.subspecialties) && doctor.subspecialties.length > 0 ? (
+                      <ChipGroup items={doctor.subspecialties} />
                     ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Let patients know your weekly schedule.','عرّف المرضى على جدول عملك الأسبوعي.')} actionLabel={t('Add hours','إضافة الساعات')} onAction={() => openDlg('clinics')} />
+                      <EmptyPrompt
+                        rtl={isArabic}
+                        text={t('Show your subspecialties to help patients find you.', 'اعرض تخصصاتك الفرعية لمساعدة المرضى.')}
+                        actionLabel={t('Add subspecialties', 'إضافة تخصصات')}
+                        onAction={() => openDlg('subspecialties')}
+                      />
                     )}
                   </SectionCard>
                 </Grid>
               </Grid>
+
+
+              {/* Clinics & Hours */}
+              {/* Clinics Management */}
+              <Box sx={{ mt: 2 }}>
+                <SectionCard
+                  id="clinic"
+                  icon={<PlaceIcon />}
+                  title={t('Clinics', 'العيادات')}
+                  rtl={isArabic}
+                >
+                  {/* Add Clinic Form */}
+                  <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 3, bgcolor: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.5)' }}>
+                    <Grid container spacing={1}>
+                      <Grid item xs={12} md={4}>
+                        <TextField
+                          label={t('Clinic Name', 'اسم العيادة')}
+                          value={newClinic.name_ar}
+                          onChange={(e) => setNewClinic((c) => ({ ...c, name_ar: e.target.value }))}
+                          fullWidth size="small"
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={5}>
+                        <TextField
+                          label={t('Address', 'العنوان')}
+                          value={newClinic.address_ar}
+                          onChange={(e) => setNewClinic((c) => ({ ...c, address_ar: e.target.value }))}
+                          fullWidth size="small"
+                        />
+                      </Grid>
+                      <Grid item xs={7} md={2}>
+                        <TextField
+                          label={t('Phone', 'هاتف العيادة')}
+                          value={newClinic.phone}
+                          onChange={(e) => setNewClinic((c) => ({ ...c, phone: e.target.value }))}
+                          fullWidth size="small"
+                        />
+                      </Grid>
+                      <Grid item xs={5} md={1} sx={{ display: 'flex', alignItems: 'stretch' }}>
+                        <Button
+                          onClick={addClinic}
+                          variant="contained"
+                          sx={{ borderRadius: 2, width: '100%' }}
+                          disabled={!user?.uid}
+                        >
+                          {t('Add', 'إضافة')}
+                        </Button>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+
+                  {/* Clinics List */}
+                  <Stack spacing={1.25}>
+                    {clinicsList.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary" align="center">
+                        {t('No clinics yet.', 'لا توجد عيادات بعد.')}
+                      </Typography>
+                    ) : (
+                      clinicsList.map((c) => {
+                        const editing = editingClinicId === c.id;
+                        return (
+                          <Paper
+                            key={c.id}
+                            elevation={0}
+                            sx={{
+                              p: 2,
+                              borderRadius: 3,
+                              bgcolor: 'rgba(255,255,255,0.6)',
+                              border: '1px solid rgba(255,255,255,0.5)',
+                              transition: 'all 0.2s ease',
+                              '&:hover': {
+                                bgcolor: 'rgba(255,255,255,0.9)',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                              }
+                            }}
+                          >
+                            {editing ? (
+                              <Grid container spacing={1} alignItems="center">
+                                <Grid item xs={12} md={3}>
+                                  <TextField
+                                    label={t('Clinic Name', 'اسم العيادة')}
+                                    value={editClinic.name_ar}
+                                    onChange={(e) => setEditClinic((v) => ({ ...v, name_ar: e.target.value }))}
+                                    fullWidth size="small"
+                                  />
+                                </Grid>
+                                <Grid item xs={12} md={6}>
+                                  <TextField
+                                    label={t('Address', 'العنوان')}
+                                    value={editClinic.address_ar}
+                                    onChange={(e) => setEditClinic((v) => ({ ...v, address_ar: e.target.value }))}
+                                    fullWidth size="small"
+                                  />
+                                </Grid>
+                                <Grid item xs={7} md={2}>
+                                  <TextField
+                                    label={t('Phone', 'هاتف العيادة')}
+                                    value={editClinic.phone}
+                                    onChange={(e) => setEditClinic((v) => ({ ...v, phone: e.target.value }))}
+                                    fullWidth size="small"
+                                  />
+                                </Grid>
+                                <Grid item xs={5} md={1}>
+                                  <Stack direction="row" spacing={1}>
+                                    <Button size="small" variant="contained" onClick={() => saveEditClinic(c)}>{t('Save', 'حفظ')}</Button>
+                                    <Button size="small" onClick={cancelEditClinic}>{t('Cancel', 'إلغاء')}</Button>
+                                  </Stack>
+                                </Grid>
+                              </Grid>
+                            ) : (
+                              <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} alignItems="center" justifyContent="space-between">
+                                <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+                                  <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                                    <Typography variant="subtitle1" fontWeight={800} color="primary.main" sx={{ maxWidth: { xs: '100%', md: 400 }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {c.name_ar || '—'}
+                                    </Typography>
+                                    <Chip
+                                      label={c.active ? t('Active', 'مفعل') : t('Inactive', 'موقوف')}
+                                      size="small"
+                                      color={c.active ? 'success' : 'default'}
+                                      sx={{ fontWeight: 700 }}
+                                    />
+                                  </Stack>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {c.address_ar || '—'}
+                                  </Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {t('Phone', 'هاتف')}: {c.phone || '—'}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {c.working_hours ? t('Working hours set', 'تم ضبط ساعات العمل') : t('No hours yet', 'لا توجد ساعات بعد')}
+                                  </Typography>
+                                </Stack>
+                                <Stack direction={isArabic ? 'row-reverse' : 'row'} spacing={0.5}>
+                                  <Tooltip title={t('Edit Hours', 'تعديل ساعات العمل')}>
+                                    <IconButton onClick={() => openHoursForClinic(c)}>
+                                      <AccessTimeIcon />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={t('Toggle Status', 'تبديل الحالة')}>
+                                    <IconButton onClick={() => toggleClinicActive(c)}>
+                                      {c.active ? <ToggleOnIcon color="success" /> : <ToggleOffIcon />}
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={t('Edit', 'تعديل')}>
+                                    <IconButton onClick={() => startEditClinic(c)}>
+                                      <EditIcon />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={t('Delete', 'حذف')}>
+                                    <IconButton onClick={() => deleteClinic(c)}>
+                                      <DeleteOutlineIcon color="error" />
+                                    </IconButton>
+                                  </Tooltip>
+                                </Stack>
+                              </Stack>
+                            )}
+                          </Paper>
+                        );
+                      })
+                    )}
+                  </Stack>
+                </SectionCard>
+              </Box>
 
               {/* Education, Certs, Memberships, Awards */}
               <Grid container spacing={1.25} sx={{ mt: 0.5 }}>
@@ -816,9 +1137,9 @@ export default function DoctorProfilePage() {
                   <SectionCard
                     id="education"
                     icon={<SchoolIcon />}
-                    title={t('Education & Training','التعليم والتدريب')}
+                    title={t('Education & Training', 'التعليم والتدريب')}
                     rtl={isArabic}
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('education')} sx={{ borderRadius: 2 }}>{t('Edit','تعديل')}</Button>}
+                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('education')} sx={{ borderRadius: 2 }}>{t('Edit', 'تعديل')}</Button>}
                   >
                     {Array.isArray(doctor?.education) && doctor.education.length > 0 ? (
                       <Stack spacing={0.75}>
@@ -829,7 +1150,7 @@ export default function DoctorProfilePage() {
                         ))}
                       </Stack>
                     ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Add your degrees and training.','أضف درجاتك وبرامج التدريب.')} actionLabel={t('Add education','إضافة التعليم')} onAction={() => openDlg('education')} />
+                      <EmptyPrompt rtl={isArabic} text={t('Add your degrees and training.', 'أضف درجاتك وبرامج التدريب.')} actionLabel={t('Add education', 'إضافة التعليم')} onAction={() => openDlg('education')} />
                     )}
                   </SectionCard>
                 </Grid>
@@ -837,9 +1158,9 @@ export default function DoctorProfilePage() {
                   <SectionCard
                     id="certs"
                     icon={<WorkspacePremiumIcon />}
-                    title={t('Certifications & Licenses','الشهادات والتراخيص')}
+                    title={t('Certifications & Licenses', 'الشهادات والتراخيص')}
                     rtl={isArabic}
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('certs')} sx={{ borderRadius: 2 }}>{t('Edit','تعديل')}</Button>}
+                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('certs')} sx={{ borderRadius: 2 }}>{t('Edit', 'تعديل')}</Button>}
                   >
                     {Array.isArray(doctor?.certifications) && doctor.certifications.length > 0 ? (
                       <Stack spacing={0.75}>
@@ -850,7 +1171,7 @@ export default function DoctorProfilePage() {
                         ))}
                       </Stack>
                     ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Show your certifications and licenses.','اعرض شهاداتك وتراخيصك.')} actionLabel={t('Add certifications','إضافة الشهادات')} onAction={() => openDlg('certs')} />
+                      <EmptyPrompt rtl={isArabic} text={t('Show your certifications and licenses.', 'اعرض شهاداتك وتراخيصك.')} actionLabel={t('Add certifications', 'إضافة الشهادات')} onAction={() => openDlg('certs')} />
                     )}
                   </SectionCard>
                 </Grid>
@@ -858,15 +1179,15 @@ export default function DoctorProfilePage() {
                   <SectionCard
                     id="memberships"
                     icon={<GroupsIcon />}
-                    title={t('Memberships','العضويات')}
+                    title={t('Memberships', 'العضويات')}
                     rtl={isArabic}
                     dense
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('memberships')} sx={{ borderRadius: 2 }}>{t('Edit','تعديل')}</Button>}
+                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('memberships')} sx={{ borderRadius: 2 }}>{t('Edit', 'تعديل')}</Button>}
                   >
                     {Array.isArray(doctor?.memberships) && doctor.memberships.length > 0 ? (
                       <ChipGroup items={doctor.memberships} />
                     ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('List your professional memberships.','أدرج عضوياتك المهنية.')} actionLabel={t('Add memberships','إضافة العضويات')} onAction={() => openDlg('memberships')} />
+                      <EmptyPrompt rtl={isArabic} text={t('List your professional memberships.', 'أدرج عضوياتك المهنية.')} actionLabel={t('Add memberships', 'إضافة العضويات')} onAction={() => openDlg('memberships')} />
                     )}
                   </SectionCard>
                 </Grid>
@@ -874,10 +1195,10 @@ export default function DoctorProfilePage() {
                   <SectionCard
                     id="awards"
                     icon={<WorkspacePremiumIcon />}
-                    title={t('Awards','الجوائز')}
+                    title={t('Awards', 'الجوائز')}
                     rtl={isArabic}
                     dense
-                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('awards')} sx={{ borderRadius: 2 }}>{t('Edit','تعديل')}</Button>}
+                    action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('awards')} sx={{ borderRadius: 2 }}>{t('Edit', 'تعديل')}</Button>}
                   >
                     {Array.isArray(doctor?.awards) && doctor.awards.length > 0 ? (
                       <Stack spacing={0.75}>
@@ -888,7 +1209,7 @@ export default function DoctorProfilePage() {
                         ))}
                       </Stack>
                     ) : (
-                      <EmptyPrompt rtl={isArabic} text={t('Share notable awards to build trust.','اعرض الجوائز المميزة لتعزيز الثقة.')} actionLabel={t('Add awards','إضافة الجوائز')} onAction={() => openDlg('awards')} />
+                      <EmptyPrompt rtl={isArabic} text={t('Share notable awards to build trust.', 'اعرض الجوائز المميزة لتعزيز الثقة.')} actionLabel={t('Add awards', 'إضافة الجوائز')} onAction={() => openDlg('awards')} />
                     )}
                   </SectionCard>
                 </Grid>
@@ -899,15 +1220,15 @@ export default function DoctorProfilePage() {
                 <SectionCard
                   id="links"
                   icon={<PublicIcon />}
-                  title={t('Online Presence','التواجد الإلكتروني')}
+                  title={t('Online Presence', 'التواجد الإلكتروني')}
                   rtl={isArabic}
                   dense
-                  action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('links')} sx={{ borderRadius: 2 }}>{t('Edit','تعديل')}</Button>}
+                  action={<Button size="small" variant="outlined" startIcon={<EditIcon />} onClick={() => openDlg('links')} sx={{ borderRadius: 2 }}>{t('Edit', 'تعديل')}</Button>}
                 >
                   {doctor?.socials ? (
                     <SocialLinks links={doctor.socials} rtl={isArabic} />
                   ) : (
-                    <EmptyPrompt rtl={isArabic} text={t('Add your website or social profiles.','أضف موقعك وروابط وسائل التواصل.')} actionLabel={t('Add links','إضافة الروابط')} onAction={() => openDlg('links')} />
+                    <EmptyPrompt rtl={isArabic} text={t('Add your website or social profiles.', 'أضف موقعك وروابط وسائل التواصل.')} actionLabel={t('Add links', 'إضافة الروابط')} onAction={() => openDlg('links')} />
                   )}
                 </SectionCard>
               </Box>
@@ -917,18 +1238,18 @@ export default function DoctorProfilePage() {
                 <SectionCard
                   id="photos"
                   icon={<PhotoLibraryIcon />}
-                  title={t('Photos','الصور')}
+                  title={t('Photos', 'الصور')}
                   rtl={isArabic}
                   bleedTop
-                  action={<Button size="small" variant="outlined" startIcon={<AddAPhotoIcon />} onClick={() => fileInputRef.current?.click()} sx={{ borderRadius: 2 }}>{t('Upload','رفع')}</Button>}
+                  action={<Button size="small" variant="outlined" startIcon={<AddAPhotoIcon />} onClick={() => fileInputRef.current?.click()} sx={{ borderRadius: 2 }}>{t('Upload', 'رفع')}</Button>}
                 >
                   {allImages.length ? (
                     <Gallery images={allImages} rtl={isArabic} avatarUrl={avatarUrl} onSetAvatar={setAvatar} />
                   ) : (
                     <EmptyPrompt
                       rtl={isArabic}
-                      text={t('Add photos to showcase your clinic or work.','أضف صوراً لعرض عيادتك أو أعمالك.')}
-                      actionLabel={t('Upload photo','رفع صورة')}
+                      text={t('Add photos to showcase your clinic or work.', 'أضف صوراً لعرض عيادتك أو أعمالك.')}
+                      actionLabel={t('Upload photo', 'رفع صورة')}
                       onAction={() => fileInputRef.current?.click()}
                     />
                   )}
@@ -947,16 +1268,24 @@ export default function DoctorProfilePage() {
 
       {/* Dialogs */}
       <EditOverviewDialog open={dlg.overview} onClose={() => closeDlg('overview')} isArabic={isArabic} doctor={doctor || {}} onSaved={fetchDoctor} />
-<EditServicesDialog
-  open={dlg.services}
-  onClose={() => closeDlg('services')}
-  isArabic={isArabic}
-  services={doctor?.extraServices || doctor?.services || []}
-  onSaved={fetchDoctor}
-/>
+      <EditServicesDialog
+        open={dlg.services}
+        onClose={() => closeDlg('services')}
+        isArabic={isArabic}
+        services={doctor?.extraServices || doctor?.services || []}
+        onSaved={fetchDoctor}
+      />
       <EditSubspecialtiesDialog open={dlg.subspecialties} onClose={() => closeDlg('subspecialties')} isArabic={isArabic} subspecialties={doctor?.subspecialties || []} onSaved={fetchDoctor} />
       <EditClinicDialog open={dlg.clinic} onClose={() => closeDlg('clinic')} isArabic={isArabic} onSaved={fetchDoctor} />
-      <EditHoursDialog open={dlg.hours} onClose={() => closeDlg('hours')} isArabic={isArabic} doctorUID={user?.uid} initialHours={resolvedHours || doctor} onSaved={fetchDoctor} />
+      <EditHoursDialog
+        open={openHours}
+        onClose={() => { setOpenHours(false); setHoursClinicId(null); }}
+        isArabic={isArabic}
+        doctorUID={user?.uid}
+        initialHours={clinicsList.find(c => c.id === hoursClinicId)?.working_hours || null}
+        onSaved={handleHoursSaved}
+        skipDirectSave={true}
+      />
       <EditEducationDialog open={dlg.education} onClose={() => closeDlg('education')} isArabic={isArabic} education={doctor?.education || []} onSaved={fetchDoctor} />
       <EditCertsDialog open={dlg.certs} onClose={() => closeDlg('certs')} isArabic={isArabic} certifications={doctor?.certifications || []} onSaved={fetchDoctor} />
       <EditMembershipsDialog open={dlg.memberships} onClose={() => closeDlg('memberships')} isArabic={isArabic} memberships={doctor?.memberships || []} onSaved={fetchDoctor} />
