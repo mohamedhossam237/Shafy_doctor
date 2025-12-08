@@ -17,6 +17,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
   collection, query, where, onSnapshot, limit as qLimit, // no orderBy → no composite index needed
+  doc, getDoc
 } from 'firebase/firestore';
 
 /* ---------- utils ---------- */
@@ -35,6 +36,11 @@ function toMillis(v) {
   if (v?.toDate) return v.toDate().getTime();
   try { return new Date(v).getTime() || 0; } catch { return 0; }
 }
+const chunk10 = (arr=[]) => {
+  const out = [];
+  for (let i=0;i<arr.length;i+=10) out.push(arr.slice(i, i+10));
+  return out;
+};
 
 export default function MessagesIndex() {
   const router = useRouter();
@@ -51,6 +57,9 @@ export default function MessagesIndex() {
   // sent (messages composed from Patients page)
   const [sentRows, setSentRows] = React.useState([]);
   const [loadingSent, setLoadingSent] = React.useState(true);
+
+  // replies meta for sent rows: { [rootId]: { count, lastTs, lastBody } }
+  const [repliesMeta, setRepliesMeta] = React.useState({});
 
   React.useEffect(()=>{
     const rq = router?.query||{};
@@ -124,7 +133,7 @@ export default function MessagesIndex() {
             body: m.body || '',
             lang: m.lang || '',
             type: m.type || 'direct',
-            createdAt: toMillis(m.createdAt),
+            createdAt: toMillis(m.createdAt || m.created_at || m.sentAt || m.ts),
           };
         })
         .filter(x => (x.type || 'direct') === 'direct') // only direct messages you send
@@ -136,6 +145,60 @@ export default function MessagesIndex() {
 
     return ()=>unsub();
   }, [user?.uid]);
+
+  /* -------- Subscribe to replies for (recent) sent messages --------
+     We aggregate replies where replyTo == sentRow.id,
+     counting ONLY patient replies (senderRole === 'patient').
+     We watch the first N most-recent roots to limit listeners. */
+  const MAX_TRACKED_SENT = 40;
+  React.useEffect(()=>{
+    const roots = sentRows.slice(0, MAX_TRACKED_SENT).map(r => r.id);
+    if (roots.length === 0) { setRepliesMeta({}); return; }
+
+    const unsubs = [];
+    const caches = new Map(); // chunkKey -> last snap
+
+    const apply = () => {
+      // Merge all cached chunks into one meta map
+      const meta = {};
+      caches.forEach((snap)=>{
+        snap.docs.forEach(d=>{
+          const data = d.data() || {};
+          const root = data.replyTo;
+          const senderRole = String(data.senderRole || data.role || '').toLowerCase();
+          if (!root) return;
+          if (senderRole && senderRole !== 'patient') return; // keep only patient responses
+          const ts = toMillis(data.createdAt || data.created_at || data.sentAt || data.ts);
+          const body = data.body || '';
+
+          const prev = meta[root] || { count: 0, lastTs: 0, lastBody: '' };
+          const next = { ...prev, count: prev.count + 1 };
+          if ((ts || 0) >= (prev.lastTs || 0)) {
+            next.lastTs = ts || prev.lastTs;
+            next.lastBody = body || prev.lastBody;
+          }
+          meta[root] = next;
+        });
+      });
+      setRepliesMeta(meta);
+    };
+
+    chunk10(roots).forEach((ids, idx)=>{
+      // where('replyTo', 'in', ids) + limit — no orderBy → no composite index required
+      const qRef = query(
+        collection(db, 'messages'),
+        where('replyTo', 'in', ids),
+        qLimit(1000)
+      );
+      const unsub = onSnapshot(qRef, (snap)=>{
+        caches.set(String(idx), snap);
+        apply();
+      }, ()=>{});
+      unsubs.push(unsub);
+    });
+
+    return ()=> unsubs.forEach(u=>{ try{u();}catch{} });
+  }, [sentRows]);
 
   /* -------- Filters -------- */
   const filterText = (txt='') => txt.toLowerCase().includes(qText.toLowerCase());
@@ -268,44 +331,68 @@ export default function MessagesIndex() {
             </List>
           ) : (
             <List>
-              {list.map(m => (
-                <ListItemButton
-                  key={m.id}
-                  onClick={() => m.patientId && router.push(withLang(`/patients/${m.patientId}`))}
-                  sx={{ borderBottom: theme=>`1px solid ${theme.palette.divider}` }}
-                >
-                  <ListItemAvatar>
-                    <Avatar sx={{ bgcolor:'primary.main' }}>
-                      <PersonIcon/>
-                    </Avatar>
-                  </ListItemAvatar>
-                  <ListItemText
-                    primary={
-                      <Box sx={{ display:'flex', alignItems:'baseline', gap:1, flexWrap:'wrap' }}>
-                        <Typography fontWeight={800} noWrap sx={{ maxWidth: '60%' }}>
-                          {m.patientName || (isArabic ? 'مريض' : 'Patient')} {m.patientId ? `· ${m.patientId}` : ''}
-                        </Typography>
-                        {!!m.subject && (
-                          <Typography variant="body2" color="text.secondary" noWrap sx={{ flex:1 }}>
-                            — {m.subject}
+              {list.map(m => {
+                const meta = repliesMeta[m.id] || { count: 0, lastTs: 0, lastBody: '' };
+                return (
+                  <ListItemButton
+                    key={m.id}
+                    onClick={() => router.push(withLang(`/messages/${m.id}`))} // open the thread page
+                    sx={{ borderBottom: theme=>`1px solid ${theme.palette.divider}` }}
+                  >
+                    <ListItemAvatar>
+                      <Avatar sx={{ bgcolor:'primary.main' }}>
+                        <PersonIcon/>
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={
+                        <Box sx={{ display:'flex', alignItems:'baseline', gap:1, flexWrap:'wrap' }}>
+                          <Typography fontWeight={800} noWrap sx={{ maxWidth: '60%' }}>
+                            {m.patientName || (isArabic ? 'مريض' : 'Patient')} {m.patientId ? `· ${m.patientId}` : ''}
                           </Typography>
-                        )}
-                        <Typography variant="caption" color="text.secondary" sx={{ ml:'auto' }}>
-                          {m.createdAt ? timeAgo(m.createdAt) : ''}
-                        </Typography>
-                      </Box>
-                    }
-                    secondary={
-                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25 }}>
-                        <Typography variant="body2" color="text.secondary" noWrap sx={{ flex:1 }}>
-                          {m.body || (isArabic ? 'بدون نص' : 'No content')}
-                        </Typography>
-                        {!!m.lang && <Chip size="small" label={m.lang.toUpperCase()} />}
-                      </Stack>
-                    }
-                  />
-                </ListItemButton>
-              ))}
+                          {!!m.subject && (
+                            <Typography variant="body2" color="text.secondary" noWrap sx={{ flex:1 }}>
+                              — {m.subject}
+                            </Typography>
+                          )}
+                          <Typography variant="caption" color="text.secondary" sx={{ ml:'auto' }}>
+                            {m.createdAt ? timeAgo(m.createdAt) : ''}
+                          </Typography>
+                        </Box>
+                      }
+                      secondary={
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25, flexWrap:'wrap' }}>
+                          {/* original body preview */}
+                          <Typography variant="body2" color="text.secondary" noWrap sx={{ flex:1, minWidth: 200 }}>
+                            {m.body || (isArabic ? 'بدون نص' : 'No content')}
+                          </Typography>
+
+                          {/* Replies chip */}
+                          <Chip
+                            size="small"
+                            color={meta.count ? 'primary' : 'default'}
+                            variant={meta.count ? 'filled' : 'outlined'}
+                            label={
+                              isArabic
+                                ? `الردود: ${meta.count || 0}`
+                                : `Replies: ${meta.count || 0}`
+                            }
+                          />
+
+                          {/* Last reply preview (if any) */}
+                          {meta.lastTs ? (
+                            <Typography variant="caption" color="text.secondary" noWrap sx={{ width: '100%' }}>
+                              {isArabic ? 'آخر رد' : 'Last reply'} · {timeAgo(meta.lastTs)} — {meta.lastBody || (isArabic ? 'بدون نص' : 'No content')}
+                            </Typography>
+                          ) : null}
+
+                          {!!m.lang && <Chip size="small" label={m.lang.toUpperCase()} />}
+                        </Stack>
+                      }
+                    />
+                  </ListItemButton>
+                );
+              })}
               {list.length===0 && (
                 <Box sx={{ py:4, textAlign:'center' }}>
                   <Typography color="text.secondary">

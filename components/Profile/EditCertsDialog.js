@@ -82,7 +82,7 @@ function validateCert(c, isArabic) {
 
   if (c.year) {
     const y = parseInt(c.year, 10);
-    if (isNaN(y) || y < 1900 || y > 2100) {
+    if (Number.isNaN(y) || y < 1900 || y > 2100) {
       errs.year = isArabic ? 'سنة غير صحيحة' : 'Invalid year';
     }
   }
@@ -113,11 +113,10 @@ export default function EditCertsDialog({
 }) {
   const dir = isArabic ? 'rtl' : 'ltr';
 
-  // Memoize normalized props so identity changes upstream don't retrigger resets
+  // Memoize normalized props using a simple, correct dependency list
   const initialMemo = React.useMemo(
     () => normalizeInitial(initialCerts),
-    // stringify is fine here; the list is tiny and this runs only on prop change
-    [JSON.stringify(initialCerts)]
+    [initialCerts]
   );
 
   const [rows, setRows] = React.useState(initialMemo);
@@ -199,8 +198,8 @@ export default function EditCertsDialog({
         updatedAt: new Date().toISOString(),
       });
 
-      onSaved && onSaved(clean);
-      onClose && onClose();
+      if (onSaved) onSaved(clean);
+      if (onClose) onClose();
     } catch (e) {
       setError(e?.message || (isArabic ? 'تعذّر الحفظ' : 'Failed to save'));
     } finally {

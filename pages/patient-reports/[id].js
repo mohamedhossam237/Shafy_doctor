@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
   Avatar, Box, Button, Chip, CircularProgress, Container, Divider,
-  Grid, Paper, Skeleton, Stack, Typography
+  Grid, Paper, Skeleton, Stack, Typography, Snackbar, Alert, Tooltip
 } from '@mui/material';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import PersonIcon from '@mui/icons-material/Person';
@@ -13,6 +13,8 @@ import EventIcon from '@mui/icons-material/Event';
 import CategoryIcon from '@mui/icons-material/Category';
 import PaidIcon from '@mui/icons-material/Paid';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -30,6 +32,28 @@ function fmtDate(val) {
       hour: '2-digit', minute: '2-digit'
     }).format(d);
   } catch { return '—'; }
+}
+
+// Lazy loader for jsPDF from CDN (no npm install required)
+async function loadJsPdfFromCdn() {
+  if (typeof window === 'undefined') return null;
+  if (window.jspdf?.jsPDF) return window.jspdf.jsPDF;
+  // Already loading?
+  if (document.getElementById('jspdf-cdn')) {
+    // wait briefly for it to be ready
+    await new Promise(r => setTimeout(r, 100));
+    return window.jspdf?.jsPDF || null;
+  }
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.id = 'jspdf-cdn';
+    s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load jsPDF from CDN'));
+    document.body.appendChild(s);
+  });
+  return window.jspdf?.jsPDF || null;
 }
 
 export default function PatientReportDetails() {
@@ -51,6 +75,7 @@ export default function PatientReportDetails() {
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState('');
   const [row, setRow] = React.useState(null);
+  const [snack, setSnack] = React.useState({ open: false, msg: '', severity: 'info' });
 
   React.useEffect(() => setMounted(true), []);
   React.useEffect(() => {
@@ -78,7 +103,7 @@ export default function PatientReportDetails() {
 
   if (!mounted) return null;
 
-  const title = row?.title || (isArabic ? 'تقرير طبي' : 'Medical Report');
+  const title = row?.title || row?.titleAr || row?.titleEn || (isArabic ? 'تقرير طبي' : 'Medical Report');
   const patientName = row?.patientName || (isArabic ? 'مريض' : 'Patient');
   const patientID = row?.patientID || row?.patientId;
   const dateTxt = row?.date ? fmtDate(row.date) : '—';
@@ -98,6 +123,85 @@ export default function PatientReportDetails() {
   const categoryTxt = row?.category ? (categoryMap[row.category] || row.category) : null;
   const fee = typeof row?.fee === 'number' ? row.fee : Number(row?.fee || 0);
   const notes = row?.notes || row?.description;
+
+  const currentUrl =
+    typeof window !== 'undefined'
+      ? window.location.origin + router.asPath
+      : '';
+
+  // WhatsApp (free, 1-tap) — sends text + link to this report page
+  const shareToWhatsApp = () => {
+    const t = isArabic ? (sAr, sEn) => sAr : (sAr, sEn) => sEn;
+    const lines = [
+      t('📝 تقرير طبي', '📝 Medical Report'),
+      `${t('العنوان', 'Title')}: ${title}`,
+      `${t('المريض', 'Patient')}: ${patientName}${patientID ? ` (${patientID})` : ''}`,
+      `${t('التاريخ', 'Date')}: ${dateTxt}`,
+      `${t('النوع', 'Type')}: ${typeTxt}${categoryTxt ? ` • ${categoryTxt}` : ''}`,
+      fee > 0 ? `${t('الرسوم', 'Fee')}: ${fee}` : null,
+      notes ? `${t('ملاحظات', 'Notes')}: ${notes}` : null,
+      '',
+      t('رابط التقرير', 'Report link') + `: ${currentUrl || ''}`
+    ].filter(Boolean);
+    const text = encodeURIComponent(lines.join('\n'));
+
+    const waUrl = `https://wa.me/?text=${text}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  // Optional PDF download (no NPM): load jsPDF from CDN at click
+  const downloadPdf = async () => {
+    try {
+      const JS = await loadJsPdfFromCdn();
+      if (!JS) {
+        setSnack({ open: true, severity: 'error', msg: isArabic ? 'تعذر تحميل مولد PDF' : 'Failed to load PDF generator' });
+        return;
+      }
+      const doc = new JS({ unit: 'pt', format: 'a4' });
+      const pad = 28;
+      let y = 48;
+
+      const write = (txt, opts = {}) => {
+        const { bold = false, size = 12 } = opts;
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        doc.setFontSize(size);
+        const lines = doc.splitTextToSize(String(txt || ''), 540);
+        lines.forEach((ln) => {
+          doc.text(ln, pad, y);
+          y += size + 6;
+          if (y > 770) { doc.addPage(); y = 48; }
+        });
+        y += 6;
+      };
+
+      // Header
+      write(isArabic ? 'تقرير طبي' : 'Medical Report', { bold: true, size: 18 });
+      y += 6;
+
+      // Meta
+      write(`${isArabic ? 'العنوان' : 'Title'}: ${title}`, { bold: true });
+      write(`${isArabic ? 'المريض' : 'Patient'}: ${patientName}${patientID ? ` (${patientID})` : ''}`);
+      write(`${isArabic ? 'التاريخ' : 'Date'}: ${dateTxt}`);
+      write(`${isArabic ? 'النوع' : 'Type'}: ${typeTxt}${categoryTxt ? ` • ${categoryTxt}` : ''}`);
+      if (fee > 0) write(`${isArabic ? 'الرسوم' : 'Fee'}: ${fee}`);
+      if (notes) {
+        y += 6;
+        write(isArabic ? 'ملاحظات:' : 'Notes:', { bold: true });
+        write(notes);
+      }
+
+      y += 6;
+      if (currentUrl) {
+        write((isArabic ? 'رابط التقرير: ' : 'Report link: ') + currentUrl);
+      }
+
+      const filename = (title || 'report').toString().toLowerCase().replace(/\s+/g, '_') + '.pdf';
+      doc.save(filename);
+      setSnack({ open: true, severity: 'success', msg: isArabic ? 'تم تنزيل PDF' : 'PDF downloaded' });
+    } catch (e) {
+      setSnack({ open: true, severity: 'error', msg: e?.message || (isArabic ? 'فشل إنشاء PDF' : 'PDF generation failed') });
+    }
+  };
 
   return (
     <AppLayout>
@@ -136,6 +240,35 @@ export default function PatientReportDetails() {
                 >
                   {isArabic ? 'رجوع' : 'Back'}
                 </Button>
+
+                {/* Share to WhatsApp (free, 1-tap) */}
+                <Tooltip title={isArabic ? 'مشاركة عبر واتساب' : 'Share via WhatsApp'}>
+                  <span>
+                    <Button
+                      variant="outlined"
+                      color="success"
+                      startIcon={<WhatsAppIcon />}
+                      onClick={shareToWhatsApp}
+                      disabled={!row}
+                    >
+                      {isArabic ? 'مشاركة' : 'Share'}
+                    </Button>
+                  </span>
+                </Tooltip>
+
+                {/* Download PDF (loads jsPDF from CDN at click) */}
+                <Tooltip title={isArabic ? 'تنزيل PDF' : 'Download PDF'}>
+                  <span>
+                    <Button
+                      variant="contained"
+                      startIcon={<PictureAsPdfIcon />}
+                      onClick={downloadPdf}
+                      disabled={!row}
+                    >
+                      PDF
+                    </Button>
+                  </span>
+                </Tooltip>
               </Stack>
             </Stack>
           </Box>
@@ -292,6 +425,17 @@ export default function PatientReportDetails() {
             </>
           )}
         </Container>
+
+        <Snackbar
+          open={snack.open}
+          autoHideDuration={3000}
+          onClose={() => setSnack((s) => ({ ...s, open: false }))}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity={snack.severity} variant="filled" onClose={() => setSnack((s) => ({ ...s, open: false }))}>
+            {snack.msg}
+          </Alert>
+        </Snackbar>
       </Box>
     </AppLayout>
   );

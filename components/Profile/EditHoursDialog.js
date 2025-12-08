@@ -81,8 +81,25 @@ const minutes = (hhmm) => {
 };
 
 function normalizeInitial(initial) {
+  // Returns { hoursObj, duration }
   const base = defaultHours();
-  if (!initial || typeof initial !== 'object') return base;
+  let duration = 15; // default slot minutes
+
+  if (!initial || typeof initial !== 'object') {
+    return { hoursObj: base, duration };
+  }
+
+  // try to pick up saved duration under multiple keys for compatibility
+  duration =
+    parseInt(
+      initial.appointmentDuration ??
+      initial.slotMinutes ??
+      initial.slot_duration ??
+      initial.duration ??
+      initial.durationMinutes ??
+      15,
+      10
+    ) || 15;
 
   const getDay = (id) =>
     initial[id] ||
@@ -100,7 +117,7 @@ function normalizeInitial(initial) {
     };
   });
 
-  return base;
+  return { hoursObj: base, duration };
 }
 
 /* ------------------------------ main component ----------------------------- */
@@ -110,8 +127,14 @@ function normalizeInitial(initial) {
  *  - onClose: () => void
  *  - doctorUID: string (required to save)
  *  - isArabic: boolean
- *  - initialHours?: object (shape like { sat: {open, start, end}, ... } OR { clinic: { workingHours } })
- *  - onSaved?: (hoursObj) => void
+ *  - initialHours?: object (shape like { sat: {open, start, end}, ... , appointmentDuration?: number })
+ *  - onSaved?: (hoursObjWithDuration) => void
+ *  - skipDirectSave?: boolean (if true, only calls onSaved callback without writing to Firestore)
+ *
+ * NOTE:
+ *   We now persist `appointmentDuration` (minutes) alongside working hours.
+ *   This value is clinic-specific (the parent passes/receives it inside the clinic's `working_hours` object).
+ *   When skipDirectSave is true, the parent is responsible for persisting to Firestore.
  */
 export default function EditHoursDialog({
   open,
@@ -120,9 +143,12 @@ export default function EditHoursDialog({
   isArabic = false,
   initialHours = null,
   onSaved,
+  skipDirectSave = false,
 }) {
   const dir = isArabic ? 'rtl' : 'ltr';
+
   const [hours, setHours] = React.useState(defaultHours());
+  const [duration, setDuration] = React.useState(15); // minutes per appointment for this clinic
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState('');
 
@@ -133,7 +159,10 @@ export default function EditHoursDialog({
       initialHours?.clinic?.workingHours ||
       initialHours?.clinic?.working_hours ||
       initialHours;
-    setHours(normalizeInitial(seed));
+
+    const { hoursObj, duration: seedDuration } = normalizeInitial(seed);
+    setHours(hoursObj);
+    setDuration(seedDuration);
     setError('');
   }, [open, initialHours]);
 
@@ -161,6 +190,7 @@ export default function EditHoursDialog({
   };
 
   const validate = () => {
+    // validate daily ranges
     for (const d of DAY_ORDER) {
       const v = hours[d];
       if (v.open && minutes(v.end) <= minutes(v.start)) {
@@ -169,6 +199,17 @@ export default function EditHoursDialog({
           ? `توقيت غير صحيح لليوم: ${name} — وقت النهاية يجب أن يكون بعد البداية.`
           : `Invalid time for ${name}: end must be after start.`;
       }
+    }
+    // validate duration
+    if (!Number.isFinite(Number(duration)) || Number(duration) <= 0) {
+      return isArabic
+        ? 'مدة الكشف يجب أن تكون رقمًا موجبًا بالدقائق.'
+        : 'Appointment duration must be a positive number of minutes.';
+    }
+    if (Number(duration) > 240) {
+      return isArabic
+        ? 'مدة الكشف كبيرة جدًا. الرجاء اختيار مدة أقل من 240 دقيقة.'
+        : 'Appointment duration is too large. Please choose less than 240 minutes.';
     }
     return '';
   };
@@ -179,13 +220,26 @@ export default function EditHoursDialog({
       setError(vErr);
       return;
     }
-    if (!doctorUID) {
+    if (!doctorUID && !skipDirectSave) {
       setError(isArabic ? 'لا يمكن الحفظ: معرّف الطبيب غير موجود.' : 'Cannot save: doctor UID missing.');
       return;
     }
 
     setSaving(true);
     setError('');
+
+    // Combine hours with duration into one object to store under working_hours
+    const workingObj = { ...hours, appointmentDuration: Number(duration) };
+
+    // If skipDirectSave is true, just call the parent callback and let them handle persistence
+    if (skipDirectSave) {
+      onSaved && onSaved(workingObj);
+      setSaving(false);
+      onClose && onClose();
+      return;
+    }
+
+    // Otherwise, write to Firestore directly (legacy/single-clinic mode)
     const ref = doc(db, 'doctors', doctorUID);
     const ts = new Date().toISOString();
 
@@ -193,12 +247,12 @@ export default function EditHoursDialog({
       // Write to both top-level and nested clinic.* without overwriting other clinic fields
       await updateDoc(ref, {
         // top-level (aliases for older reads)
-        working_hours: hours,
-        workingHours: hours,
+        working_hours: workingObj,
+        workingHours: workingObj,
         updatedAt: ts,
-        // nested under clinic
-        'clinic.working_hours': hours,
-        'clinic.workingHours': hours,
+        // nested under clinic (back-compat paths)
+        'clinic.working_hours': workingObj,
+        'clinic.workingHours': workingObj,
         'clinic.updatedAt': ts,
       });
     } catch (e) {
@@ -207,12 +261,12 @@ export default function EditHoursDialog({
         await setDoc(
           ref,
           {
-            working_hours: hours,
-            workingHours: hours,
+            working_hours: workingObj,
+            workingHours: workingObj,
             updatedAt: ts,
             clinic: {
-              working_hours: hours,
-              workingHours: hours,
+              working_hours: workingObj,
+              workingHours: workingObj,
               updatedAt: ts,
             },
           },
@@ -225,7 +279,7 @@ export default function EditHoursDialog({
       }
     }
 
-    onSaved && onSaved(hours);
+    onSaved && onSaved(workingObj); // parent will put it into clinic.working_hours
     setSaving(false);
     onClose && onClose();
   };
@@ -288,9 +342,21 @@ export default function EditHoursDialog({
       <DialogContent dividers sx={{ pt: 2 }}>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           {isArabic
-            ? 'فعّل اليوم وحدد وقت البداية والنهاية. يمكنك نسخ إعدادات يوم لليوم التالي أو تطبيقها على كل الأيام من الشريط العلوي.'
-            : 'Enable a day and choose start/end. You can copy a day down or apply to all using the toolbar.'}
+            ? 'فعّل اليوم وحدد وقت البداية والنهاية. يمكنك نسخ إعدادات يوم لليوم التالي أو تطبيقها على كل الأيام من الشريط العلوي. كما يمكنك تحديد مدة الكشف (بالدقائق) لهذه العيادة.'
+            : 'Enable a day and choose start/end. Use the toolbar to copy or apply to all days. You can also set the appointment duration (minutes) for this clinic.'}
         </Typography>
+
+        {/* Clinic-level appointment duration */}
+        <Box sx={{ mb: 2 }}>
+          <TextField
+            type="number"
+            label={isArabic ? 'مدة الكشف (بالدقائق)' : 'Appointment Duration (minutes)'}
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            inputProps={{ min: 5, max: 240, step: 5 }}
+            sx={{ width: 260 }}
+          />
+        </Box>
 
         {toolbar}
 

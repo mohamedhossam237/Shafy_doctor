@@ -5,756 +5,390 @@ import * as React from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import {
-  Box,
-  Container,
-  Paper,
-  Stack,
-  Typography,
-  Chip,
-  Divider,
-  Button,
-  CircularProgress,
-  Avatar,
-  Snackbar,
-  Alert,
-  Grid,
-  TextField,
-  MenuItem,
+  Box, Container, Paper, Stack, Typography, Button, Chip,
+  Divider, CircularProgress, IconButton, Alert, Snackbar, Tooltip
 } from '@mui/material';
+import { motion } from 'framer-motion';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EventIcon from '@mui/icons-material/Event';
-import ScheduleIcon from '@mui/icons-material/Schedule';
-import PersonIcon from '@mui/icons-material/Person';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
-import NotesIcon from '@mui/icons-material/Notes';
-import TagIcon from '@mui/icons-material/Tag';
+import PersonIcon from '@mui/icons-material/Person';
+import ScheduleIcon from '@mui/icons-material/Schedule';
+import PaymentIcon from '@mui/icons-material/Payment';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import DescriptionIcon from '@mui/icons-material/Description';
-import VisibilityIcon from '@mui/icons-material/Visibility';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-
+import PlaceIcon from '@mui/icons-material/Place';
 import AppLayout from '@/components/AppLayout';
 import AddReportDialog from '@/components/reports/AddReportDialog';
-
+import ReportViewDialog from '@/components/reports/ReportViewDialog';
+import UpdateAppointmentDialog from '@/components/reports/UpdateAppointmentDialog';
+import ExtraFeeDialog from '@/components/reports/ExtraFeeDialog';
+import WhatsAppNotifyDialog from '@/components/reports/WhatsAppNotifyDialog';
 import { db } from '@/lib/firebase';
 import {
-  doc,
-  getDoc,
-  setDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-  updateDoc,
-  serverTimestamp,
+  doc, getDoc, getDocs, query, where,
+  updateDoc, serverTimestamp, collection
 } from 'firebase/firestore';
 
-/* ---------------- helpers ---------------- */
+/* ---------- helpers ---------- */
+const toDate = (v) => (v?.toDate ? v.toDate() : new Date(v));
+const toWaDigits = (raw) => String(raw || '').replace(/\D/g, '');
+const safeNum = (v) => (Number.isFinite(+v) ? +v : 0);
+const currencyLabel = (isAr) => (isAr ? 'ج.م' : 'EGP');
 
-const pad = (n) => String(n).padStart(2, '0');
-const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const translateStatus = (status, isAr) => {
+  const map = {
+    pending: isAr ? 'قيد الانتظار' : 'Pending',
+    confirmed: isAr ? 'مؤكد' : 'Confirmed',
+    completed: isAr ? 'مكتمل' : 'Completed',
+    cancelled: isAr ? 'ملغي' : 'Cancelled',
+  };
+  return map[status] || status;
+};
 
-function toDate(val) {
-  if (!val) return null;
-  if (val instanceof Date) return val;
-  if (typeof val === 'string') {
-    const d = new Date(val);
-    return Number.isNaN(d.getTime()) ? null : d;
+const fmtDate = (d, isAr = false) => {
+  if (!d) return '—';
+  const date = toDate(d);
+  const locale = isAr ? 'ar-EG' : undefined;
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric', month: 'long', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  }).format(date);
+};
+
+const formatNumber = (n, isAr = false) => {
+  const locale = isAr ? 'ar-EG' : 'en-US';
+  return new Intl.NumberFormat(locale).format(n || 0);
+};
+
+const buildStatusMessage = ({ isAr, appt, newStatus, clinicLabel }) => {
+  const when = fmtDate(appt.appointmentDate || appt.date, isAr);
+  const dr = appt.doctorName_ar || appt.doctorName_en || '';
+  const pt = appt.patientName || '';
+  if (isAr) {
+    const map = {
+      confirmed: `مرحبًا ${pt}، تم تأكيد موعدك مع ${dr} ${clinicLabel ? `في ${clinicLabel}` : ''} بتاريخ ${when}.`,
+      completed: `شكرًا ${pt}! تم إنهاء موعدك مع ${dr}.`,
+      cancelled: `مرحبًا ${pt}، تم إلغاء موعدك مع ${dr}.`,
+      pending: `طلب الموعد قيد المراجعة لزيارة ${dr}.`,
+    };
+    return map[newStatus] || map.pending;
   }
-  if (val?.toDate) return val.toDate();
-  if (typeof val === 'object' && 'seconds' in val) return new Date(val.seconds * 1000);
-  return null;
-}
+  const map = {
+    confirmed: `Hi ${pt}, your appointment with ${dr} ${clinicLabel ? `at ${clinicLabel}` : ''} on ${when} is confirmed.`,
+    completed: `Thank you ${pt}! Your appointment with ${dr} is completed.`,
+    cancelled: `Hi ${pt}, your appointment with ${dr} has been cancelled.`,
+    pending: `Hi ${pt}, your appointment request with ${dr} is pending review.`,
+  };
+  return map[newStatus] || map.pending;
+};
 
-function apptLocalDate(appt) {
-  if (appt?.date) return appt.date;
-  const d = toDate(appt?.appointmentDate);
-  return d ? toYMD(d) : null;
-}
-
-function apptTimeMinutes(appt) {
-  if (appt?.time) {
-    const [h, m] = String(appt.time).split(':').map((x) => parseInt(x, 10));
-    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-  }
-  const d = toDate(appt?.appointmentDate);
-  if (!d) return 24 * 60;
-  return d.getHours() * 60 + d.getMinutes();
-}
-
-function fmtTimeFromMinutes(min) {
-  const hh = Math.floor(min / 60);
-  const mm = min % 60;
-  return `${pad(hh)}:${pad(mm)}`;
-}
-
-function fmtFullDateTime(appt) {
-  const ds = apptLocalDate(appt);
-  const mins = apptTimeMinutes(appt);
-  const hhmm = fmtTimeFromMinutes(mins);
-  return ds ? `${ds} ${hhmm}` : hhmm;
-}
-
-function field(appt, a, b) {
-  return appt?.[a] || appt?.[b] || '';
-}
-
-function statusColor(status) {
-  const s = String(status || '').toLowerCase();
-  if (s === 'completed') return 'success';
-  if (s === 'confirmed') return 'info';
-  if (s === 'cancelled') return 'default';
-  return 'warning'; // pending / unknown
-}
-
-function fmtReportDate(d) {
-  const dt = toDate(d);
-  if (!dt) return '—';
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric', month: 'short', day: '2-digit',
-    hour: '2-digit', minute: '2-digit'
-  }).format(dt);
-}
-
-/* ---------------- mini view dialog for a report ---------------- */
-
-function ReportViewDialog({ open, onClose, report, isAr }) {
-  if (!open || !report) return null;
-
-  const t = (en, ar) => (isAr ? ar : en);
-  const meds =
-    Array.isArray(report?.medicationsList) && report.medicationsList.some(m => Object.values(m || {}).some(v => String(v || '').trim()))
-      ? report.medicationsList
-      : null;
-
-  return (
-    <Paper
-      elevation={6}
-      sx={{
-        position: 'fixed',
-        inset: { xs: '8% 3% auto 3%', sm: '10% 10% auto 10%' },
-        zIndex: (th) => th.zIndex.modal + 2,
-        p: { xs: 1.5, sm: 2 },
-        borderRadius: 3,
-        overflowY: 'auto',
-        maxHeight: '80vh',
-        direction: isAr ? 'rtl' : 'ltr',
-      }}
-    >
-      <Stack spacing={1.25}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              icon={<DescriptionIcon />}
-              color="primary"
-              label={t('Clinical Report', 'تقرير سريري')}
-              sx={{ fontWeight: 800, borderRadius: 2 }}
-            />
-            <Typography variant="subtitle2" color="text.secondary">
-              {fmtReportDate(report?.date)}
-            </Typography>
-          </Stack>
-          <Button onClick={onClose} variant="outlined">{t('Close', 'إغلاق')}</Button>
-        </Stack>
-
-        <Divider />
-
-        {/* Header meta */}
-        <Stack spacing={0.5}>
-          <Typography variant="h6" fontWeight={800}>
-            {report?.titleAr || report?.titleEn || report?.title || t('Medical Report', 'تقرير طبي')}
-          </Typography>
-          <Typography color="text.secondary">
-            {t('Patient', 'المريض')}: <strong>{report?.patientName || '—'}</strong>
-            {report?.patientID ? ` · ${report.patientID}` : ''}
-          </Typography>
-        </Stack>
-
-        <Divider />
-
-        {/* Clinical sections */}
-        <Grid container spacing={1.25}>
-          {report?.chiefComplaint && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Chief Complaint', 'الشكوى الرئيسية')}</Typography>
-              <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.chiefComplaint}</Typography>
-            </Grid>
-          )}
-          {report?.findings && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Findings / Examination', 'النتائج / الفحص')}</Typography>
-              <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.findings}</Typography>
-            </Grid>
-          )}
-          {report?.diagnosis && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Diagnosis', 'التشخيص')}</Typography>
-              <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.diagnosis}</Typography>
-            </Grid>
-          )}
-          {report?.procedures && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Procedures', 'الإجراءات')}</Typography>
-              <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.procedures}</Typography>
-            </Grid>
-          )}
-
-          {/* Medications */}
-          {(meds || report?.medications) && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Medications / Prescriptions', 'الأدوية / الوصفات')}</Typography>
-              {meds ? (
-                <Stack component="ul" sx={{ pl: 3, my: 0 }}>
-                  {meds.map((m, i) => {
-                    const parts = [
-                      m?.name,
-                      m?.dose && `(${m.dose})`,
-                      m?.frequency,
-                      m?.duration && `× ${m.duration}`,
-                      m?.notes && `- ${m.notes}`,
-                    ].filter(Boolean).join(' ');
-                    return <li key={i}><Typography sx={{ whiteSpace: 'pre-wrap' }}>{parts || '—'}</Typography></li>;
-                  })}
-                </Stack>
-              ) : (
-                <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.medications}</Typography>
-              )}
-            </Grid>
-          )}
-
-          {/* Vitals */}
-          {report?.vitals && Object.values(report.vitals).some(v => String(v || '').trim()) && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Vitals', 'العلامات الحيوية')}</Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                {report.vitals.bp && <Chip label={`${t('BP', 'ضغط')}: ${report.vitals.bp}`} />}
-                {report.vitals.hr && <Chip label={`${t('HR', 'نبض')}: ${report.vitals.hr}`} />}
-                {report.vitals.temp && <Chip label={`${t('Temp', 'حرارة')}: ${report.vitals.temp}`} />}
-                {report.vitals.spo2 && <Chip label={`${t('SpO₂', 'الأكسجين')}: ${report.vitals.spo2}`} />}
-              </Stack>
-            </Grid>
-          )}
-
-          {/* Follow-up */}
-          {report?.followUp && (
-            <Grid item xs={12}>
-              <Chip
-                icon={<CalendarMonthIcon />}
-                color="info"
-                label={`${t('Follow-up', 'متابعة')}: ${fmtReportDate(report.followUp)}`}
-                sx={{ borderRadius: 2 }}
-              />
-            </Grid>
-          )}
-
-          {/* Attachments */}
-          {Array.isArray(report?.attachments) && report.attachments.length > 0 && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Attachments', 'المرفقات')}</Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap">
-                {report.attachments.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                    <Box
-                      sx={{
-                        width: 120, height: 80, borderRadius: 1.5, overflow: 'hidden',
-                        border: (th) => `1px solid ${th.palette.divider}`,
-                        backgroundImage: `url(${url})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                      }}
-                    />
-                  </a>
-                ))}
-              </Stack>
-            </Grid>
-          )}
-
-          {/* Notes */}
-          {report?.notes && (
-            <Grid item xs={12}>
-              <Typography variant="subtitle2" fontWeight={800}>{t('Additional Notes / Plan', 'ملاحظات إضافية / خطة')}</Typography>
-              <Typography sx={{ whiteSpace: 'pre-wrap' }}>{report.notes}</Typography>
-            </Grid>
-          )}
-        </Grid>
-      </Stack>
-    </Paper>
-  );
-}
-
-/* ---------------- page ---------------- */
-
+/* ---------- main ---------- */
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
   const { id } = router.query || {};
-  const isAr = (String(router?.query?.lang || '').toLowerCase() === 'ar');
-  const t = React.useCallback((en, ar) => (isAr ? ar : en), [isAr]);
+  const isAr = router.query?.lang === 'ar';
+  const t = (en, ar) => (isAr ? ar : en);
 
+  const [appt, setAppt] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState('');
-  const [appt, setAppt] = React.useState(null);
-
-  const [queueNo, setQueueNo] = React.useState(null);
-  const [savingQueue, setSavingQueue] = React.useState(false);
-
   const [status, setStatus] = React.useState('pending');
-  const [savingStatus, setSavingStatus] = React.useState(false);
-
-  const [snack, setSnack] = React.useState({ open: false, severity: 'info', msg: '' });
-
-  // Reports state
   const [reports, setReports] = React.useState([]);
   const [reportsLoading, setReportsLoading] = React.useState(false);
-  const [viewReport, setViewReport] = React.useState(null);
+  const [clinics, setClinics] = React.useState([]);
+  const [queueNo, setQueueNo] = React.useState(null);
+  const [snack, setSnack] = React.useState({ open: false, severity: 'info', msg: '' });
 
-  // add-report dialog control
+  // dialogs
   const [reportOpen, setReportOpen] = React.useState(false);
+  const [viewReport, setViewReport] = React.useState(null);
+  const [updateOpen, setUpdateOpen] = React.useState(false);
+  const [extraDialogOpen, setExtraDialogOpen] = React.useState(false);
+  const [waOpen, setWaOpen] = React.useState(false);
+  const [waMsg, setWaMsg] = React.useState('');
+  const [waDigits, setWaDigits] = React.useState('');
 
-  const statusOptions = [
-    { v: 'pending',    label: t('Pending', 'قيد الانتظار') },
-    { v: 'confirmed',  label: t('Confirmed', 'مؤكد') },
-    { v: 'completed',  label: t('Completed', 'تم') },
-    { v: 'cancelled',  label: t('Cancelled', 'أُلغي') },
-  ];
-
-  // Load the appointment
+  /* ---------- load appointment ---------- */
   React.useEffect(() => {
     if (!id) return;
     (async () => {
-      setLoading(true);
-      setErr('');
       try {
         const snap = await getDoc(doc(db, 'appointments', String(id)));
-        if (!snap.exists()) {
-          setErr(t('Appointment not found.', 'لا يوجد موعد بهذا المعرف.'));
-          setAppt(null);
-          setQueueNo(null);
-          return;
-        }
+        if (!snap.exists()) throw new Error(t('Appointment not found', 'لا يوجد موعد بهذا المعرف'));
         const data = { id: snap.id, ...snap.data() };
-        setAppt(data);
-        setStatus(String(data.status || 'pending').toLowerCase());
+        setStatus(data.status || 'pending');
+        setQueueNo(data.queueNumber || data.serialNumber || null);
+
+        // ✅ Always use the doctor’s configured checkupPrice initially
+        let doctorPrice = data.doctorPrice ?? data.checkupFee ?? 0;
+        if (!doctorPrice && (data.doctorId || data.doctorUID)) {
+          const docSnap = await getDoc(doc(db, 'doctors', String(data.doctorId || data.doctorUID)));
+          if (docSnap.exists()) {
+            const dData = docSnap.data();
+            doctorPrice = Number(dData.checkupPrice || dData.price || 0);
+            await updateDoc(doc(db, 'appointments', snap.id), { doctorPrice });
+          }
+        }
+        setAppt({ ...data, doctorPrice });
       } catch (e) {
-        setErr(e?.message || t('Failed to load appointment.', 'تعذر تحميل الموعد.'));
-        setAppt(null);
-        setQueueNo(null);
+        setErr(e.message);
       } finally {
         setLoading(false);
       }
     })();
   }, [id, t]);
 
-  // Fetch reports linked to this appointment
-  const fetchReports = React.useCallback(async () => {
-    if (!id) return;
-    setReportsLoading(true);
-    try {
+  /* ---------- load clinics ---------- */
+  React.useEffect(() => {
+    const run = async () => {
+      if (!appt?.doctorId && !appt?.doctorUID) return;
+      const snap = await getDoc(doc(db, 'doctors', String(appt.doctorId || appt.doctorUID)));
+      if (snap.exists()) setClinics(snap.data().clinics || []);
+    };
+    run();
+  }, [appt?.doctorId, appt?.doctorUID]);
+
+  /* ---------- load reports ---------- */
+  React.useEffect(() => {
+    const run = async () => {
+      if (!id) return;
+      setReportsLoading(true);
       const qRef = query(collection(db, 'reports'), where('appointmentId', '==', String(id)));
       const snap = await getDocs(qRef);
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // newest first
-      rows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
-      setReports(rows);
-    } catch (e) {
-      console.error(e);
-      // Don't block the page; just show a snackbar
-      setSnack({ open: true, severity: 'error', msg: t('Failed to load reports', 'تعذر تحميل التقارير') });
-    } finally {
+      setReports(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       setReportsLoading(false);
-    }
-  }, [id, t]);
+    };
+    run();
+  }, [id]);
 
-  React.useEffect(() => { fetchReports(); }, [fetchReports]);
+  /* ---------- update handler (with WhatsApp) ---------- */
+  const handleUpdatedAppointment = async (updates) => {
+    const clinicId = appt.clinicId || appt.clinicID;
+    const clinicLabel = clinics.find((c) => c.id === clinicId)?.[isAr ? 'name_ar' : 'name_en'];
+    const msg = buildStatusMessage({
+      isAr,
+      appt: { ...appt, ...updates },
+      newStatus: updates.status || appt.status,
+      clinicLabel,
+    });
+    const digits = toWaDigits(appt.patientPhone);
+    setWaMsg(msg);
+    setWaDigits(digits);
+    setWaOpen(true);
 
-  // Compute queue number
-  React.useEffect(() => {
-    if (!appt) return;
-
-    const dateStr = apptLocalDate(appt);
-    const docUID = appt?.doctorUID || appt?.doctorId;
-    if (!dateStr || !docUID) {
-      setQueueNo(null);
-      return;
-    }
-
-    (async () => {
-      try {
-        const col = collection(db, 'appointments');
-        const [snapA, snapB] = await Promise.all([
-          getDocs(query(col, where('doctorId', '==', docUID), where('date', '==', dateStr))),
-          getDocs(query(col, where('doctorUID', '==', docUID), where('date', '==', dateStr))),
-        ]);
-
-        const map = new Map();
-        for (const d of [...snapA.docs, ...snapB.docs]) {
-          map.set(d.id, { id: d.id, ...d.data() });
-        }
-        const all = Array.from(map.values());
-
-        all.sort((a, b) => apptTimeMinutes(a) - apptTimeMinutes(b));
-
-        const idx = all.findIndex((x) => x.id === appt.id);
-        setQueueNo(idx === -1 ? null : idx + 1);
-      } catch {
-        setQueueNo(null);
-      }
-    })();
-  }, [appt]);
-
-  // Persist queue number on doc if different (optional)
-  React.useEffect(() => {
-    if (!appt || !appt.id) return;
-    if (queueNo == null) return;
-    if (appt.queueNumber === queueNo) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        setSavingQueue(true);
-        await setDoc(doc(db, 'appointments', appt.id), { queueNumber: queueNo }, { merge: true });
-        if (!cancelled) {
-          setAppt((prev) => ({ ...prev, queueNumber: queueNo }));
-        }
-      } catch {
-        // ignore write errors
-      } finally {
-        if (!cancelled) setSavingQueue(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [appt, queueNo]);
-
-  const backHref = `/appointments${isAr ? '?lang=ar' : ''}`;
-
-  // --- status updates ---
-  const applyStatus = async (newStatus) => {
-    if (!appt?.id) return;
-    setSavingStatus(true);
     try {
-      await updateDoc(doc(db, 'appointments', appt.id), {
-        status: newStatus,
+      await updateDoc(doc(db, 'appointments', id), {
+        ...updates,
         updatedAt: serverTimestamp(),
       });
-      setStatus(newStatus);
-      setAppt((prev) => prev ? { ...prev, status: newStatus } : prev);
-      setSnack({ open: true, severity: 'success', msg: t('Status updated', 'تم تحديث الحالة') });
+      setAppt((p) => ({ ...p, ...updates }));
+      setSnack({ open: true, severity: 'success', msg: t('Appointment updated and message sent 📩', 'تم تحديث الموعد وإرسال تنبيه واتساب ✅') });
     } catch (e) {
-      setSnack({ open: true, severity: 'error', msg: e?.message || t('Failed to update status', 'تعذر تحديث الحالة') });
-    } finally {
-      setSavingStatus(false);
+      setSnack({ open: true, severity: 'error', msg: e.message });
     }
   };
 
-  const quickConfirm = () => {
-    if (status !== 'confirmed') applyStatus('confirmed');
-  };
+  /* ---------- price / fees ---------- */
+  const price = appt?.doctorPrice ?? 0;
+  const extraFees = appt?.extraFees ?? [];
+  const extraTotal = extraFees.reduce((s, f) => s + safeNum(f.amount), 0);
+  const grandTotal = price + extraTotal;
+  const clinicId = appt?.clinicId || appt?.clinicID;
+  const clinicLabel = clinics.find((c) => c.id === clinicId)?.[isAr ? 'name_ar' : 'name_en'];
 
-  // When a report is saved from the dialog, refresh list
-  const handleReportSaved = React.useCallback(() => {
-    setSnack({ open: true, severity: 'success', msg: t('Report saved', 'تم حفظ التقرير') });
-    setReportOpen(false);
-    fetchReports();
-  }, [fetchReports, t]);
+  /* ---------- UI ---------- */
+  if (loading)
+    return (
+      <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
+        <Container sx={{ py: 4, textAlign: 'center' }}><CircularProgress /></Container>
+      </AppLayout>
+    );
+  if (err)
+    return (
+      <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
+        <Container sx={{ py: 4 }}><Alert severity="error">{err}</Alert></Container>
+      </AppLayout>
+    );
 
   return (
     <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
-      <Container maxWidth="sm" sx={{ py: { xs: 1, md: 2 } }}>
-        {/* Back */}
-        <Box sx={{ mb: 1, display: 'flex', justifyContent: isAr ? 'flex-end' : 'flex-start' }}>
-          <Button component={Link} href={backHref} startIcon={isAr ? null : <ArrowBackIcon />} endIcon={isAr ? <ArrowBackIcon /> : null}>
-            {t('Back to list', 'العودة للقائمة')}
-          </Button>
-        </Box>
-
-        {/* Content */}
-        <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: 3 }}>
-          {loading ? (
-            <Stack alignItems="center" spacing={1}><CircularProgress size={24} /></Stack>
-          ) : err ? (
-            <Alert severity="error">{err}</Alert>
-          ) : !appt ? null : (
-            <Stack spacing={1.5}>
-              {/* Header / Queue number + Status + Reports */}
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 1,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Avatar sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', fontWeight: 900 }}>
-                    #{queueNo ?? '-'}
-                  </Avatar>
-                  <Stack>
-                    <Typography variant="h6" fontWeight={900}>
-                      {t('Appointment Details', 'تفاصيل الموعد')}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {t('Queue number for the day', 'الرقم التسلسلي لليوم')}:
-                      &nbsp;<strong>{queueNo ?? t('N/A', 'غير متاح')}</strong>
-                      {savingQueue && <>&nbsp;•&nbsp;{t('saving…', 'جارٍ الحفظ…')}</>}
-                    </Typography>
-                  </Stack>
-                </Stack>
-
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
-                  <Chip
-                    icon={<TagIcon />}
-                    label={(appt.status || 'pending').toString()}
-                    color={statusColor(appt.status)}
-                    sx={{ fontWeight: 700, borderRadius: 2 }}
-                  />
-                  <Chip
-                    icon={<DescriptionIcon />}
-                    label={
-                      reportsLoading
-                        ? t('Loading reports…', 'جارٍ تحميل التقارير…')
-                        : `${t('Reports', 'التقارير')}: ${reports.length}`
-                    }
-                    variant="outlined"
-                    sx={{ borderRadius: 2 }}
-                  />
-
-                  {/* Quick confirm */}
-                  {status !== 'confirmed' && status !== 'completed' && status !== 'cancelled' && (
-                    <Button
-                      size="small"
-                      variant="contained"
-                      startIcon={<CheckCircleIcon />}
-                      onClick={quickConfirm}
-                      disabled={savingStatus}
-                    >
-                      {savingStatus ? t('Confirming…', 'جارٍ التأكيد…') : t('Confirm', 'تأكيد')}
-                    </Button>
-                  )}
-
-                  {/* Add Report */}
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<DescriptionIcon />}
-                    onClick={() => setReportOpen(true)}
-                  >
-                    {t('Add Report', 'إضافة تقرير')}
-                  </Button>
-                </Stack>
-              </Box>
-
-              {/* Status selector */}
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                <TextField
-                  size="small"
-                  select
-                  label={t('Status', 'الحالة')}
-                  value={status}
-                  onChange={(e) => applyStatus(e.target.value)}
-                  sx={{ minWidth: 200 }}
-                >
-                  {statusOptions.map((opt) => (
-                    <MenuItem key={opt.v} value={opt.v}>{opt.label}</MenuItem>
-                  ))}
-                </TextField>
-                {savingStatus && <CircularProgress size={18} />}
-              </Box>
-
-              <Divider />
-
-              {/* Time & Doctor */}
-              <Grid container spacing={1.25}>
-                <Grid item xs={12}>
-                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <EventIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Date/Time', 'التاريخ/الوقت')}:
-                      </Typography>
-                      <Typography color="text.secondary">
-                        {fmtFullDateTime(appt)}
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                </Grid>
-
-                <Grid item xs={12}>
-                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <LocalHospitalIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Doctor', 'الطبيب')}:
-                      </Typography>
-                      <Typography color="text.secondary">
-                        {field(appt, 'doctorName_en', 'doctorName_ar') || appt?.doctorId || appt?.doctorUID || '—'}
-                      </Typography>
-                      {field(appt, 'doctorSpecialty_en', 'doctorSpecialty_ar') && (
-                        <>
-                          <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-                          <Typography color="text.secondary">
-                            {field(appt, 'doctorSpecialty_en', 'doctorSpecialty_ar')}
-                          </Typography>
-                        </>
-                      )}
-                    </Stack>
-                  </Paper>
-                </Grid>
-
-                {/* Patient */}
-                <Grid item xs={12}>
-                  <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <PersonIcon color="action" />
-                      <Typography sx={{ fontWeight: 700 }}>
-                        {t('Patient', 'المريض')}:
-                      </Typography>
-                      <Typography color="text.secondary">
-                        {appt?.patientName || '—'}
-                      </Typography>
-                      {appt?.patientPhone && (
-                        <>
-                          <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-                          <Typography color="text.secondary">{appt.patientPhone}</Typography>
-                        </>
-                      )}
-                      {appt?.patientEmail && (
-                        <>
-                          <Divider orientation="vertical" flexItem sx={{ mx: 1 }} />
-                          <Typography color="text.secondary">{appt.patientEmail}</Typography>
-                        </>
-                      )}
-                    </Stack>
-                  </Paper>
-                </Grid>
-
-                {/* Notes */}
-                {(appt?.note || appt?.aiBrief) && (
-                  <Grid item xs={12}>
-                    <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2 }}>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <NotesIcon color="action" />
-                        <Typography sx={{ fontWeight: 700 }}>
-                          {t('Notes', 'ملاحظات')}
-                        </Typography>
-                      </Stack>
-                      {appt?.note && (
-                        <Typography sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                          {appt.note}
-                        </Typography>
-                      )}
-                      {appt?.aiBrief && (
-                        <Alert severity="info" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
-                          <strong>{t('AI Summary:', 'ملخص الذكاء الاصطناعي:')}</strong>{'\n'}{appt.aiBrief}
-                        </Alert>
-                      )}
-                    </Paper>
-                  </Grid>
-                )}
-              </Grid>
-
-              {/* Reports list */}
-              <Box>
-                <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1 }}>
-                  {t('Reports for this appointment', 'التقارير الخاصة بهذا الموعد')}
+      <Container
+        maxWidth="md"
+        sx={{
+          py: { xs: 2, md: 4 },
+          direction: isAr ? 'rtl' : 'ltr',
+          textAlign: isAr ? 'right' : 'left',
+          fontFamily: isAr ? 'Cairo, sans-serif' : undefined,
+        }}
+      >
+        {/* Header */}
+        <motion.div initial={{ opacity: 0, y: -15 }} animate={{ opacity: 1, y: 0 }}>
+          <Box
+            sx={{
+              p: 3, mb: 3, color: 'white',
+              borderRadius: 3,
+              background: 'linear-gradient(135deg,#1E4E8C 0%,#A22727 100%)',
+              boxShadow: '0 4px 15px rgba(0,0,0,0.15)',
+            }}
+          >
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Stack>
+                <Typography variant="h5" fontWeight={900}>
+                  {t('Appointment Details', 'تفاصيل الموعد')}
                 </Typography>
-
-                {reportsLoading ? (
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, textAlign: 'center' }}>
-                    <CircularProgress size={20} />
-                  </Paper>
-                ) : reports.length === 0 ? (
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                    <Typography color="text.secondary">
-                      {t('No reports yet. Add one from the button above.', 'لا توجد تقارير حتى الآن. أضف تقريرًا من الزر بالأعلى.')}
-                    </Typography>
-                  </Paper>
-                ) : (
-                  <Stack spacing={1}>
-                    {reports.map((r) => (
-                      <Paper
-                        key={r.id}
-                        variant="outlined"
-                        sx={{ p: 1.25, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1 }}
-                      >
-                        <Avatar sx={{ bgcolor: 'primary.light', color: 'primary.dark' }}>
-                          <DescriptionIcon />
-                        </Avatar>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography fontWeight={800} noWrap title={r?.titleAr || r?.titleEn || r?.title || ''}>
-                            {r?.titleAr || r?.titleEn || r?.title || t('Medical Report', 'تقرير طبي')}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" noWrap>
-                            {fmtReportDate(r?.date)} • {r?.diagnosis || t('No diagnosis', 'لا يوجد تشخيص')}
-                          </Typography>
-                        </Box>
-                        {r?.followUp && (
-                          <Chip
-                            size="small"
-                            icon={<CalendarMonthIcon />}
-                            label={`${t('Follow-up', 'متابعة')}: ${fmtReportDate(r.followUp)}`}
-                            sx={{ mr: 1 }}
-                          />
-                        )}
-                        <Button
-                          size="small"
-                          variant="text"
-                          startIcon={<VisibilityIcon />}
-                          onClick={() => setViewReport(r)}
-                          sx={{ fontWeight: 700 }}
-                        >
-                          {t('View', 'عرض')}
-                        </Button>
-                      </Paper>
-                    ))}
-                  </Stack>
+                {queueNo && (
+                  <Typography variant="body2" sx={{ mt: 0.3, color: 'rgba(255,255,255,0.9)' }}>
+                    {t('Serial Number', 'الرقم التسلسلي')}: #{formatNumber(queueNo, isAr)}
+                  </Typography>
                 )}
-              </Box>
+                <Typography variant="body2" color="rgba(255,255,255,0.8)">
+                  {t('Status', 'الحالة')}: {translateStatus(status, isAr)}
+                </Typography>
+              </Stack>
+              <Chip
+                icon={<CheckCircleIcon />}
+                label={translateStatus(status, isAr)}
+                sx={{
+                  bgcolor:
+                    status === 'completed'
+                      ? '#4caf50'
+                      : status === 'confirmed'
+                        ? '#0288d1'
+                        : status === 'cancelled'
+                          ? '#757575'
+                          : '#ff9800',
+                  color: '#fff', fontWeight: 700,
+                }}
+              />
+            </Stack>
+          </Box>
+        </motion.div>
 
-              {/* Footer actions */}
-              <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 0.5 }}>
-                <Button component={Link} href={backHref} variant="outlined">
-                  {t('Back', 'رجوع')}
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<ScheduleIcon />}
-                  disabled
-                  title={t('Future actions (e.g., reschedule) can go here', 'إجراءات لاحقة مثل إعادة الجدولة تُضاف لاحقاً')}
-                >
-                  {t('Actions', 'إجراءات')}
+        {/* Main Card */}
+        <Paper sx={{ p: 3, borderRadius: 4, boxShadow: '0 3px 15px rgba(0,0,0,0.05)' }}>
+          <Stack spacing={2}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <LocalHospitalIcon color="primary" />
+              <Typography fontWeight={700}>{t('Doctor', 'الطبيب')}:</Typography>
+              <Typography>{isAr ? appt?.doctorName_ar || appt?.doctorName_en : appt?.doctorName_en || appt?.doctorName_ar}</Typography>
+            </Stack>
+
+            {clinicLabel && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <PlaceIcon color="action" />
+                <Typography fontWeight={700}>{t('Clinic', 'العيادة')}:</Typography>
+                <Typography>{clinicLabel}</Typography>
+              </Stack>
+            )}
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <EventIcon color="action" />
+              <Typography fontWeight={700}>{t('Date/Time', 'التاريخ / الوقت')}:</Typography>
+              <Typography color="text.secondary">{fmtDate(appt.appointmentDate || appt.date, isAr)}</Typography>
+            </Stack>
+
+            <Divider />
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <PersonIcon color="action" />
+              <Typography fontWeight={700}>{t('Patient', 'المريض')}:</Typography>
+              <Typography>{appt.patientName}</Typography>
+              {appt.patientPhone && (
+                <Tooltip title={t('Send WhatsApp message', 'إرسال واتساب')}>
+                  <IconButton
+                    color="success"
+                    onClick={() => {
+                      const msg = buildStatusMessage({ isAr, appt, newStatus: status, clinicLabel });
+                      const digits = toWaDigits(appt.patientPhone);
+                      window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank');
+                    }}
+                  >
+                    <WhatsAppIcon />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Stack>
+
+            <Divider />
+
+            <Stack spacing={1}>
+              <Typography fontWeight={700}>{t('Payment Details', 'تفاصيل الدفع')}</Typography>
+              <Stack direction="row" spacing={1}>
+                <PaymentIcon color="primary" />
+                <Typography>
+                  {t('Checkup Fee', 'رسوم الكشف')}: {formatNumber(price, isAr)} {currencyLabel(isAr)}
+                </Typography>
+              </Stack>
+              <Divider />
+              <Typography align={isAr ? 'left' : 'right'} variant="h6" fontWeight={900}>
+                {t('Grand Total', 'الإجمالي النهائي')}: {formatNumber(grandTotal, isAr)} {currencyLabel(isAr)}
+              </Typography>
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setExtraDialogOpen(true)}>
+                {t('Add Extra Fee', 'إضافة تكلفة')}
+              </Button>
+            </Stack>
+
+            <Divider />
+
+            <Stack>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography fontWeight={900}>{t('Reports', 'التقارير')}</Typography>
+                <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setReportOpen(true)}>
+                  {t('Add Report', 'إضافة تقرير')}
                 </Button>
               </Stack>
+              {reportsLoading ? (
+                <CircularProgress size={20} />
+              ) : reports.length === 0 ? (
+                <Typography color="text.secondary">{t('No reports yet', 'لا توجد تقارير بعد')}</Typography>
+              ) : (
+                <Stack spacing={1.25} mt={1}>
+                  {reports.map((r) => (
+                    <Paper
+                      key={r.id}
+                      variant="outlined"
+                      sx={{ p: 1.5, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                      <Stack>
+                        <Typography fontWeight={700}>{r.titleAr || r.titleEn || '—'}</Typography>
+                        <Typography variant="body2" color="text.secondary">{fmtDate(r.date, isAr)}</Typography>
+                      </Stack>
+                      <Button onClick={() => setViewReport(r)}>{t('View', 'عرض')}</Button>
+                    </Paper>
+                  ))}
+                </Stack>
+              )}
             </Stack>
-          )}
+
+            <Divider />
+            <Stack direction="row" justifyContent="space-between">
+              <Button component={Link} href={`/appointments${isAr ? '?lang=ar' : ''}`} startIcon={<ArrowBackIcon />}>
+                {t('Back', 'رجوع')}
+              </Button>
+              <Button variant="contained" startIcon={<ScheduleIcon />} onClick={() => setUpdateOpen(true)}>
+                {t('Update Appointment', 'تحديث الموعد')}
+              </Button>
+            </Stack>
+          </Stack>
         </Paper>
 
-        {/* Add Report Dialog */}
-        <AddReportDialog
-          open={reportOpen}
-          onClose={() => setReportOpen(false)}
-          isArabic={isAr}
-          appointmentId={id}
-          onSaved={handleReportSaved}
-        />
-
-        {/* View Report Dialog (read-only) */}
-        <ReportViewDialog
-          open={Boolean(viewReport)}
-          onClose={() => setViewReport(null)}
-          report={viewReport}
+        {/* Dialogs */}
+        <AddReportDialog open={reportOpen} onClose={() => setReportOpen(false)} appointmentId={id} isArabic={isAr} />
+        <ReportViewDialog open={Boolean(viewReport)} onClose={() => setViewReport(null)} report={viewReport} isAr={isAr} />
+        <UpdateAppointmentDialog
+          open={updateOpen}
+          onClose={() => setUpdateOpen(false)}
+          appointment={appt}
           isAr={isAr}
+          onSaved={handleUpdatedAppointment}
         />
+        <ExtraFeeDialog open={extraDialogOpen} onClose={() => setExtraDialogOpen(false)} isAr={isAr} />
+        <WhatsAppNotifyDialog open={waOpen} onClose={() => setWaOpen(false)} isAr={isAr} message={waMsg} phoneDigits={waDigits} />
 
-        <Snackbar
-          open={snack.open}
-          autoHideDuration={3500}
-          onClose={() => setSnack((s) => ({ ...s, open: false }))}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        >
-          <Alert severity={snack.severity} variant="filled" onClose={() => setSnack((s) => ({ ...s, open: false }))}>
-            {snack.msg}
-          </Alert>
+        <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
+          <Alert severity={snack.severity}>{snack.msg}</Alert>
         </Snackbar>
       </Container>
     </AppLayout>

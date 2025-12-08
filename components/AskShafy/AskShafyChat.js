@@ -1,61 +1,39 @@
-// /components/AskShafy/AskShafyChat.jsx
+// /components/AskShafy/AskShafyChat.js
 'use client';
+
 import * as React from 'react';
 import {
-  Alert,
-  Avatar,
-  Box,
-  Button,
-  IconButton,
-  InputAdornment,
-  LinearProgress,
-  Paper,
-  Snackbar,
-  Stack,
-  TextField,
-  Typography,
-  useTheme,
+  Alert, Avatar, Box, Button, IconButton, InputAdornment, Paper, Snackbar,
+  Stack, TextField, Typography, useTheme,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import SendIcon from '@mui/icons-material/Send';
 import ImageIcon from '@mui/icons-material/Image';
 import PersonIcon from '@mui/icons-material/Person';
 
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import {
-  doc,
-  onSnapshot,
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-} from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, orderBy, limit } from 'firebase/firestore';
 
 /* ---------------- helpers ---------------- */
 const asDate = (v) => {
   if (!v) return null;
   if (v instanceof Date) return v;
-  if (v?.toDate) try { return v.toDate(); } catch {}
+  if (v?.toDate) try { return v.toDate(); } catch { }
   if (typeof v === 'object' && 'seconds' in v) return new Date(v.seconds * 1000);
   const d = new Date(v);
   return isNaN(d.getTime()) ? null : d;
 };
 
-const fmtDT = (d) =>
-  d
-    ? new Intl.DateTimeFormat(undefined, {
-        year: 'numeric', month: 'short', day: '2-digit',
-        hour: '2-digit', minute: '2-digit',
-      }).format(d)
-    : '—';
+const fmtDT = (d) => d
+  ? new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(d)
+  : '—';
 
 function buildDoctorContext({ lang, doctorDoc, patients, reports, appts }) {
   const isAr = lang === 'ar';
   const dName =
     (isAr ? doctorDoc?.name_ar : doctorDoc?.name_en) ||
-    doctorDoc?.name ||
-    (isAr ? 'الطبيب' : 'Doctor');
+    doctorDoc?.name || (isAr ? 'الطبيب' : 'Doctor');
 
   const patientSamples = patients.slice(0, 8).map((p) => p.name || p.id).filter(Boolean);
 
@@ -122,37 +100,21 @@ export default function AskShafyChat({ lang = 'ar' }) {
   const isArabic = lang === 'ar';
   const dir = isArabic ? 'rtl' : 'ltr';
 
-  // auth
   const [user, setUser] = React.useState(null);
 
-  // live doctor context (client-side only)
   const [doctorDoc, setDoctorDoc] = React.useState(null);
   const [patients, setPatients] = React.useState([]);
   const [reports, setReports] = React.useState([]);
   const [appts, setAppts] = React.useState([]);
-
-  const [loadingCtx, setLoadingCtx] = React.useState(false);
-
-  // chat
   const [messages, setMessages] = React.useState([
-    {
-      role: 'assistant',
-      text:
-        (new Date().getHours() < 12
-          ? (isArabic ? 'صباح الخير ☀️' : 'Good morning ☀️')
-          : (isArabic ? 'مرحبًا 👋' : 'Hello 👋')) +
-        (isArabic ? ' كيف يمكنني مساعدتك اليوم؟' : ' How can I assist you today?'),
-    },
+    { role: 'assistant', text: (new Date().getHours() < 12 ? (isArabic ? 'صباح الخير ☀️' : 'Good morning ☀️') : (isArabic ? 'مرحبًا 👋' : 'Hello 👋')) + (isArabic ? ' كيف يمكنني مساعدتك اليوم؟' : ' How can I assist you today?') },
   ]);
   const [text, setText] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [snack, setSnack] = React.useState({ open: false, msg: '', severity: 'info' });
 
-  // images + OCR
-  const [images, setImages] = React.useState([]);     // {name, url}
-  const [ocrTexts, setOcrTexts] = React.useState([]); // string per image
-  const [ocrBusy, setOcrBusy] = React.useState(false);
-  const [ocrProgress, setOcrProgress] = React.useState(0);
+  const [images, setImages] = React.useState([]);
+  const [ocrTexts, setOcrTexts] = React.useState([]);
 
   const scrollRef = React.useRef(null);
   const inputRef = React.useRef(null);
@@ -164,189 +126,116 @@ export default function AskShafyChat({ lang = 'ar' }) {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  // auth listener
+  React.useEffect(() => onAuthStateChanged(auth, (u) => setUser(u || null)), []);
+
   React.useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u || null));
-    return () => unsub();
-  }, []);
+    if (!user) { setDoctorDoc(null); setPatients([]); setReports([]); setAppts([]); return; }
 
-  // real-time doctor context (ALL client-side)
-  React.useEffect(() => {
-    if (!user) {
-      setDoctorDoc(null);
-      setPatients([]);
-      setReports([]);
-      setAppts([]);
-      return;
-    }
-    setLoadingCtx(true);
+    const unsubDoctor = onSnapshot(doc(db, 'doctors', user.uid), (snap) => setDoctorDoc(snap.exists() ? snap.data() : null));
+    const unsubPatients = onSnapshot(query(collection(db, 'patients'), where('registeredBy', '==', user.uid)), (snap) => {
+      setPatients(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }, () => setPatients([]));
 
-    // doctor doc
-    const unsubDoctor = onSnapshot(doc(db, 'doctors', user.uid), (snap) => {
-      setDoctorDoc(snap.exists() ? snap.data() : null);
-    }, () => { /* ignore */ });
+    const unsubReports = onSnapshot(query(collection(db, 'reports'), where('doctorUID', '==', user.uid), orderBy('date', 'desc'), limit(400)), (snap) => {
+      setReports(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }, () => setReports([]));
 
-    // patients registered by this doctor
-    const qPatients = query(collection(db, 'patients'), where('registeredBy', '==', user.uid));
-    const unsubPatients = onSnapshot(qPatients, (snap) => {
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setPatients(rows);
-    }, () => { setPatients([]); });
-
-    // reports by this doctor (order newest first, cap to 400)
-    const qReports = query(
-      collection(db, 'reports'),
-      where('doctorUID', '==', user.uid),
-      orderBy('date', 'desc'),
-      limit(400)
-    );
-    const unsubReports = onSnapshot(qReports, (snap) => {
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setReports(rows);
-    }, () => { setReports([]); });
-
-    // appointments by doctorUID
-    const qAppt1 = query(collection(db, 'appointments'), where('doctorUID', '==', user.uid));
-    const unsubAppt1 = onSnapshot(qAppt1, (snap) => {
+    const unsubAppt1 = onSnapshot(query(collection(db, 'appointments'), where('doctorUID', '==', user.uid)), (snap) => {
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setAppts((prev) => {
         const map = new Map(prev.map((r) => [r.id, r]));
         rows.forEach((r) => map.set(r.id, r));
         return Array.from(map.values());
       });
-    }, () => { /* ignore */ });
+    });
 
-    // appointments by doctorId (alt field some apps use)
-    const qAppt2 = query(collection(db, 'appointments'), where('doctorId', '==', user.uid));
-    const unsubAppt2 = onSnapshot(qAppt2, (snap) => {
+    const unsubAppt2 = onSnapshot(query(collection(db, 'appointments'), where('doctorId', '==', user.uid)), (snap) => {
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setAppts((prev) => {
         const map = new Map(prev.map((r) => [r.id, r]));
         rows.forEach((r) => map.set(r.id, r));
         return Array.from(map.values());
       });
-    }, () => { /* ignore */ });
+    });
 
-    setLoadingCtx(false);
-    return () => {
-      unsubDoctor?.();
-      unsubPatients?.();
-      unsubReports?.();
-      unsubAppt1?.();
-      unsubAppt2?.();
-    };
+    return () => { unsubDoctor?.(); unsubPatients?.(); unsubReports?.(); unsubAppt1?.(); unsubAppt2?.(); };
   }, [user]);
-
-  // OCR (client-side)
-  const runOcrOnFile = async (file) => {
-    setOcrBusy(true);
-    setOcrProgress(5);
-    try {
-      const Tesseract = (await import('tesseract.js')).default;
-      const { data } = await Tesseract.recognize(file, 'eng+ara', {
-        logger: (m) => {
-          if (m.status === 'recognizing text' && typeof m.progress === 'number') {
-            setOcrProgress(Math.round(m.progress * 100));
-          }
-        },
-      });
-      return data?.text || '';
-    } catch (e) {
-      console.warn('OCR failed:', e?.message || e);
-      return '';
-    } finally {
-      setOcrBusy(false);
-      setOcrProgress(0);
-    }
-  };
 
   const addLocalImage = async (file) => {
     const url = URL.createObjectURL(file);
     setImages((prev) => [...prev, { name: file.name, url }]);
-    const text = await runOcrOnFile(file); // best-effort
-    setOcrTexts((prev) => [...prev, text]);
+    // Optional OCR (kept lightweight)
+    try {
+      const Tesseract = (await import('tesseract.js')).default;
+      const { data } = await Tesseract.recognize(file, 'eng+ara');
+      setOcrTexts((prev) => [...prev, data?.text || '']);
+    } catch { /* ignore */ }
   };
 
   const onPickImage = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await addLocalImage(file);
-    e.target.value = '';
+    const file = e.target.files?.[0]; if (!file) return;
+    await addLocalImage(file); e.target.value = '';
   };
 
-  // memoize context so it's always fresh when state updates
   const doctorContext = React.useMemo(
     () => buildDoctorContext({ lang, doctorDoc, patients, reports, appts }),
     [lang, doctorDoc, patients, reports, appts]
   );
 
-  const send = async () => {
+  const sendText = async () => {
     const msg = text.trim();
-    if (!msg && images.length === 0) {
-      inputRef.current?.focus();
+    if (!msg && images.length === 0) { inputRef.current?.focus(); return; }
+
+    if (!auth.currentUser) {
+      openSnack(isArabic ? 'يرجى تسجيل الدخول.' : 'Please sign in.', 'warning');
       return;
     }
 
     setMessages((m) => [...m, { role: 'user', text: msg, images }]);
-    setText('');
-    setBusy(true);
+    setText(''); setBusy(true);
 
     try {
+      const token = await auth.currentUser.getIdToken();
       const r = await fetch('/api/ask-shafy', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           message: msg,
           images: images.map((i) => i.url),
           ocrTexts,
           lang,
-          doctorContext, // <-- client-built, always up-to-date
+          doctorContext, // optional (server builds its own too)
         }),
       });
-
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMessages((m) => [
-          ...m,
-          { role: 'assistant', text: isArabic ? 'تعذر إكمال الطلب.' : 'Could not complete the request.' },
-        ]);
-        openSnack(j?.error || (isArabic ? 'فشل الطلب' : 'Request failed'), 'error');
-        return;
-      }
+      if (!r.ok) throw new Error(j?.error || 'Request failed');
       setMessages((m) => [...m, { role: 'assistant', text: j.text }]);
     } catch (e) {
+      setMessages((m) => [...m, { role: 'assistant', text: isArabic ? 'تعذر إكمال الطلب.' : 'Could not complete the request.' }]);
       openSnack(e?.message || 'Network error', 'error');
     } finally {
-      setBusy(false);
-      // reset attachments after send
-      setImages([]);
-      setOcrTexts([]);
-    }
-  };
-
-  const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!busy) send();
+      setBusy(false); setImages([]); setOcrTexts([]);
     }
   };
 
   const bubble = (role) =>
     role === 'user'
       ? {
-          bg: theme.palette.primary.main,
-          fg: theme.palette.primary.contrastText,
-          align: isArabic ? 'flex-start' : 'flex-end',
-          row: isArabic ? 'row-reverse' : 'row',
-          shadow: '0 8px 20px rgba(33,150,243,.15)',
-        }
+        bg: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
+        fg: theme.palette.primary.contrastText,
+        align: isArabic ? 'flex-start' : 'flex-end',
+        row: isArabic ? 'row-reverse' : 'row',
+        shadow: '0 12px 24px rgba(25, 118, 210, 0.25)',
+        border: 'none'
+      }
       : {
-          bg: theme.palette.background.paper,
-          fg: theme.palette.text.primary,
-          align: isArabic ? 'flex-end' : 'flex-start',
-          row: isArabic ? 'row' : 'row',
-          shadow: '0 8px 20px rgba(0,0,0,.06)',
-        };
+        bg: theme.palette.background.paper,
+        fg: theme.palette.text.primary,
+        align: isArabic ? 'flex-end' : 'flex-start',
+        row: isArabic ? 'row' : 'row',
+        shadow: '0 8px 20px rgba(0,0,0,.08)',
+        border: (t) => `1px solid ${alpha(t.palette.divider, 0.5)}`
+      };
 
   const AssistantAvatar = (
     <Avatar
@@ -357,76 +246,93 @@ export default function AskShafyChat({ lang = 'ar' }) {
           e.currentTarget.src = '/images/ai_logo.png';
         },
       }}
-      sx={{ width: 34, height: 34, bgcolor: 'transparent' }}
+      sx={{
+        width: 40,
+        height: 40,
+        bgcolor: 'transparent',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        border: (t) => `2px solid ${alpha(t.palette.primary.main, 0.1)}`
+      }}
     />
   );
   const UserAvatar = (
-    <Avatar sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', width: 34, height: 34 }}>
+    <Avatar
+      sx={{
+        bgcolor: 'primary.main',
+        color: 'primary.contrastText',
+        width: 40,
+        height: 40,
+        boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+      }}
+    >
       <PersonIcon />
     </Avatar>
   );
 
   return (
-    <Box dir={dir} sx={{ height: 'calc(100dvh - 140px)', minHeight: 500, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+    <Box dir={dir} sx={{ height: 'calc(100dvh - 360px)', minHeight: 500, display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Paper
         ref={scrollRef}
         elevation={0}
         sx={{
           flex: 1,
           overflowY: 'auto',
-          px: { xs: 1.25, sm: 2 },
-          py: { xs: 1.25, sm: 2 },
-          borderRadius: 3,
-          border: (t) => `1px solid ${t.palette.divider}`,
-          backgroundImage: `radial-gradient( rgba(0,0,0,0.015) 1px, transparent 1px )`,
-          backgroundSize: '16px 16px',
+          px: { xs: 2, sm: 3 },
+          py: { xs: 2, sm: 3 },
+          borderRadius: 4,
+          border: (t) => `1px solid ${alpha(t.palette.divider, 0.5)}`,
+          background: (t) => alpha(t.palette.background.paper, 0.6),
+          backdropFilter: 'blur(20px)',
+          backgroundImage: `radial-gradient(${alpha('#000', 0.02)} 1px, transparent 1px)`,
+          backgroundSize: '20px 20px',
           backgroundPosition: '0 0',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
         }}
       >
-        {loadingCtx && (
-          <Box sx={{ mb: 1.25 }}>
-            <Typography variant="caption" color="text.secondary">
-              {isArabic ? 'يتم تحميل سياق الطبيب…' : 'Loading doctor context…'}
-            </Typography>
-            <LinearProgress />
-          </Box>
-        )}
-
-        {ocrBusy && (
-          <Box sx={{ mb: 1.25 }}>
-            <Typography variant="caption" color="text.secondary">
-              {isArabic ? 'قراءة الصورة (OCR)…' : 'Reading image (OCR)…'}
-            </Typography>
-            <LinearProgress variant="determinate" value={ocrProgress} />
-          </Box>
-        )}
-
-        <Stack spacing={1.25}>
+        <Stack spacing={2}>
           {messages.map((m, i) => {
             const b = bubble(m.role);
             return (
-              <Box key={i} sx={{ display: 'flex', justifyContent: b.align, width: '100%' }}>
-                <Stack direction={b.row} spacing={1} alignItems="flex-end" sx={{ maxWidth: '92%' }}>
+              <Box
+                key={i}
+                sx={{
+                  display: 'flex',
+                  justifyContent: b.align,
+                  width: '100%',
+                  animation: 'fadeIn 0.3s ease-in',
+                  '@keyframes fadeIn': {
+                    from: { opacity: 0, transform: 'translateY(10px)' },
+                    to: { opacity: 1, transform: 'translateY(0)' }
+                  }
+                }}
+              >
+                <Stack direction={b.row} spacing={1.5} alignItems="flex-end" sx={{ maxWidth: '85%' }}>
                   {m.role === 'user' ? UserAvatar : AssistantAvatar}
                   <Box
                     sx={{
-                      bgcolor: b.bg,
+                      background: typeof b.bg === 'function' ? b.bg : b.bg,
                       color: b.fg,
-                      px: 1.5,
-                      py: 1.1,
-                      borderRadius: 2,
+                      px: 2.5,
+                      py: 1.75,
+                      borderRadius: 3,
                       boxShadow: b.shadow,
+                      border: typeof b.border === 'function' ? (t) => b.border(t) : b.border,
                       maxWidth: '100%',
+                      position: 'relative',
+                      '&::before': m.role === 'assistant' ? {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '1px',
+                        background: (t) => `linear-gradient(90deg, transparent, ${alpha(t.palette.primary.main, 0.1)}, transparent)`
+                      } : {}
                     }}
                   >
-                    <Typography sx={{ whiteSpace: 'pre-wrap' }}>{m.text}</Typography>
-                    {!!m.images?.length && (
-                      <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }} justifyContent="flex-start">
-                        {m.images.map((img, k) => (
-                          <Avatar key={k} variant="rounded" src={img.url} sx={{ width: 54, height: 54 }} />
-                        ))}
-                      </Stack>
-                    )}
+                    <Typography sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, fontSize: '0.95rem' }}>
+                      {m.text}
+                    </Typography>
                   </Box>
                 </Stack>
               </Box>
@@ -436,11 +342,28 @@ export default function AskShafyChat({ lang = 'ar' }) {
       </Paper>
 
       {!!images.length && (
-        <Paper sx={{ p: 1.2, borderRadius: 2 }}>
-          <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+        <Paper
+          sx={{
+            p: 1.5,
+            borderRadius: 3,
+            border: (t) => `1px solid ${alpha(t.palette.divider, 0.5)}`,
+            background: (t) => alpha(t.palette.background.paper, 0.8),
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
             {images.map((img, i) => (
-              <Stack key={i} spacing={0.25} alignItems="center">
-                <Avatar variant="rounded" src={img.url} sx={{ width: 44, height: 44 }} />
+              <Stack key={i} spacing={0.5} alignItems="center">
+                <Avatar
+                  variant="rounded"
+                  src={img.url}
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    border: (t) => `2px solid ${alpha(t.palette.primary.main, 0.2)}`
+                  }}
+                />
                 <Typography variant="caption" sx={{ maxWidth: 80 }} noWrap>
                   {img.name}
                 </Typography>
@@ -450,22 +373,62 @@ export default function AskShafyChat({ lang = 'ar' }) {
         </Paper>
       )}
 
-      <Paper elevation={3} sx={{ borderRadius: 3, p: 1, position: 'sticky', bottom: 8 }}>
-        <Stack direction="row" spacing={1} alignItems="flex-end">
+      <Paper
+        elevation={4}
+        sx={{
+          borderRadius: 4,
+          p: 1.5,
+          position: 'sticky',
+          bottom: 8,
+          border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.2)}`,
+          background: (t) => alpha(t.palette.background.paper, 0.95),
+          backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.08)'
+        }}
+      >
+        <Stack direction="row" spacing={1.5} alignItems="flex-end">
           <TextField
             inputRef={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!busy) sendText();
+              }
+            }}
             fullWidth
             multiline
             minRows={1}
             maxRows={6}
             placeholder={isArabic ? 'اكتب رسالتك…' : 'Type your message…'}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 3,
+                bgcolor: (t) => alpha(t.palette.background.default, 0.5),
+                '& fieldset': {
+                  borderColor: (t) => alpha(t.palette.divider, 0.3)
+                },
+                '&:hover fieldset': {
+                  borderColor: (t) => alpha(t.palette.primary.main, 0.3)
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: 'primary.main',
+                  borderWidth: 2
+                }
+              }
+            }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <IconButton component="label" size="small">
+                  <IconButton
+                    component="label"
+                    size="small"
+                    sx={{
+                      color: 'primary.main',
+                      '&:hover': { bgcolor: (t) => alpha(t.palette.primary.main, 0.1) }
+                    }}
+                  >
                     <ImageIcon />
                     <input type="file" hidden accept="image/*" onChange={onPickImage} />
                   </IconButton>
@@ -474,23 +437,33 @@ export default function AskShafyChat({ lang = 'ar' }) {
             }}
           />
           <Button
-            onClick={send}
+            onClick={sendText}
             variant="contained"
             startIcon={<SendIcon />}
             disabled={busy || (!text.trim() && images.length === 0)}
-            sx={{ borderRadius: 2 }}
+            sx={{
+              borderRadius: 3,
+              px: 3,
+              py: 1.5,
+              textTransform: 'none',
+              fontWeight: 700,
+              background: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
+              boxShadow: '0 4px 16px rgba(25, 118, 210, 0.3)',
+              '&:hover': {
+                background: (t) => `linear-gradient(135deg, ${t.palette.primary.dark} 0%, ${t.palette.primary.main} 100%)`,
+                boxShadow: '0 6px 20px rgba(25, 118, 210, 0.4)'
+              },
+              '&:disabled': {
+                background: (t) => alpha(t.palette.action.disabled, 0.12)
+              }
+            }}
           >
             {busy ? (isArabic ? '...إرسال' : 'Sending…') : (isArabic ? 'إرسال' : 'Send')}
           </Button>
         </Stack>
       </Paper>
 
-      <Snackbar
-        open={snack.open}
-        autoHideDuration={4000}
-        onClose={() => setSnack((s) => ({ ...s, open: false }))}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
+      <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack((s) => ({ ...s, open: false }))} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
         <Alert severity={snack.severity} onClose={() => setSnack((s) => ({ ...s, open: false }))} sx={{ whiteSpace: 'pre-wrap' }}>
           {snack.msg}
         </Alert>

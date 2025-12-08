@@ -1,11 +1,11 @@
-// /pages/appointments/new.js
+// /pages/appointments/new.js — add-or-select patient + additional fees + synced doctor timing + clinic selection
 "use client";
 
 import * as React from "react";
 import { useRouter } from "next/router";
 import {
-  Box,
   Container,
+  Box,
   Stack,
   Typography,
   Paper,
@@ -17,6 +17,12 @@ import {
   CircularProgress,
   Divider,
   MenuItem,
+  FormControlLabel,
+  Checkbox,
+  InputAdornment,
+  Grid,
+  Chip,
+  IconButton,
 } from "@mui/material";
 
 import Protected from "@/components/Protected";
@@ -29,32 +35,27 @@ import {
   getDocs,
   getDoc,
   addDoc,
-  doc,
   query,
   where,
   serverTimestamp,
+  doc,
 } from "firebase/firestore";
 
-/* ---------------- helpers to mirror patient flow ---------------- */
+import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
+import PersonAddAlt1Icon from "@mui/icons-material/PersonAddAlt1";
+import EventAvailableIcon from "@mui/icons-material/EventAvailable";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import LocalHospitalIcon from "@mui/icons-material/LocalHospital";
+import MonetizationOnIcon from "@mui/icons-material/MonetizationOn";
+import NoteAltIcon from "@mui/icons-material/NoteAlt";
 
+/* ---------------- helpers ---------------- */
 const pad = (n) => String(n).padStart(2, "0");
 const toYMD = (d) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-function weekdayKey(date) {
-  // Sun=0 ... Sat=6
-  return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
-}
-
-function minutes(hhmm) {
-  const [h = 0, m = 0] = String(hhmm || "")
-    .split(":")
-    .map((x) => parseInt(x, 10) || 0);
-  return h * 60 + m;
-}
-
-function parseDayRanges(val) {
-  // Accepts "09:00-12:00, 13:00-17:00" or array of "HH:MM-HH:MM"
+const weekdayKey = (date) =>
+  ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
+const parseDayRanges = (val) => {
   if (!val) return [];
   const arr = Array.isArray(val) ? val : String(val).split(",");
   const toMin = (s) => {
@@ -67,9 +68,8 @@ function parseDayRanges(val) {
     if (a && b) out.push([toMin(a.trim()), toMin(b.trim())]);
   }
   return out;
-}
-
-function buildSlotsForRanges(ranges, stepMin = 30) {
+};
+const buildSlotsForRanges = (ranges, stepMin = 30) => {
   const slots = [];
   for (const [start, end] of ranges) {
     for (let t = start; t + stepMin <= end; t += stepMin) {
@@ -79,55 +79,73 @@ function buildSlotsForRanges(ranges, stepMin = 30) {
     }
   }
   return slots;
-}
-
-// Convert EditHoursDialog shape {open, start, end} -> "start-end" string (or empty)
-function toRangeStringFromHoursDay(dayObj) {
+};
+const toRangeStringFromHoursDay = (dayObj) => {
   if (!dayObj || dayObj.open !== true) return "";
   const start = dayObj.start || "09:00";
   const end = dayObj.end || "17:00";
   return `${start}-${end}`;
-}
-
-// Try to normalize whatever the doctor doc has into { sun..sat: "HH:MM-HH:MM[, ...]" }
-function normalizeDoctorHours(doctorDoc) {
+};
+const deriveDurationMinutes = (sourceObj) => {
+  const pick = (...vals) => {
+    for (const v of vals) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+  };
+  // doctor root fields
+  const root = pick(
+    sourceObj?.appointmentDuration,
+    sourceObj?.slotMinutes,
+    sourceObj?.slot_duration,
+    sourceObj?.durationMinutes,
+    sourceObj?.duration
+  );
+  if (root) return root;
+  // working hours object may carry appointmentDuration
+  const wh =
+    sourceObj?.working_hours ||
+    sourceObj?.workingHours ||
+    sourceObj?.clinic?.working_hours ||
+    sourceObj?.clinic?.workingHours;
+  if (wh && typeof wh === "object") {
+    const whDur = pick(
+      wh.appointmentDuration,
+      wh.slotMinutes,
+      wh.slot_duration,
+      wh.durationMinutes,
+      wh.duration
+    );
+    if (whDur) return whDur;
+  }
+  return 30; // sensible default
+};
+const normalizeHoursFromAny = (sourceObj) => {
+  if (!sourceObj || typeof sourceObj !== "object") {
+    return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+  }
   const src =
-    doctorDoc?.working_hours ||
-    doctorDoc?.workingHours ||
-    doctorDoc?.clinic?.working_hours ||
-    doctorDoc?.clinic?.workingHours ||
+    sourceObj.working_hours ||
+    sourceObj.workingHours ||
+    (sourceObj.clinic &&
+      (sourceObj.clinic.working_hours || sourceObj.clinic.workingHours)) ||
     null;
-
-  // If already strings/range arrays keyed by day, keep as-is
-  if (src && typeof src === "object" && src.sun && typeof src.sun === "string")
-    return src;
-
-  // If EditHoursDialog shape
-  if (src && typeof src === "object" && src.sun && typeof src.sun === "object") {
+  if (src && typeof src === "object" && typeof src.sun === "string") return src;
+  if (src && typeof src === "object" && typeof src.sun === "object") {
     const out = {};
     for (const k of ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]) {
       out[k] = toRangeStringFromHoursDay(src[k]);
     }
     return out;
   }
-
-  // Fallback: no hours configured
-  return {
-    sun: "",
-    mon: "",
-    tue: "",
-    wed: "",
-    thu: "",
-    fri: "",
-    sat: "",
-  };
-}
+  return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+};
 
 /* ---------------- page ---------------- */
-
 export default function NewAppointmentPage() {
   const router = useRouter();
-  const { user } = useAuth(); // doctor account
+  const { user } = useAuth();
 
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
@@ -137,245 +155,189 @@ export default function NewAppointmentPage() {
   }, [router?.query]);
 
   /* patients */
-  const [loadingPatients, setLoadingPatients] = React.useState(true);
+  const [loadingPatients, setLoadingPatients] = React.useState(false);
   const [patients, setPatients] = React.useState([]);
   const [selectedPatient, setSelectedPatient] = React.useState(null);
+  const [addNewPatient, setAddNewPatient] = React.useState(false);
+  const [newPatientName, setNewPatientName] = React.useState("");
+  const [newPatientPhone, setNewPatientPhone] = React.useState("");
 
-  /* doctor & hours */
+  /* doctor & clinic */
   const [doctor, setDoctor] = React.useState(null);
-  const [hours, setHours] = React.useState(null); // normalized strings per day
-  const [loadingDoctor, setLoadingDoctor] = React.useState(true);
+  const [clinics, setClinics] = React.useState([]);
+  const [selectedClinicId, setSelectedClinicId] = React.useState("");
+  const [hours, setHours] = React.useState(null);
+  const [slotMinutes, setSlotMinutes] = React.useState(30);
 
-  /* form */
-  const [dateStr, setDateStr] = React.useState(toYMD(new Date())); // YYYY-MM-DD
+  /* appointment form */
+  const [dateStr, setDateStr] = React.useState(toYMD(new Date()));
   const [timeStr, setTimeStr] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [appointmentType, setAppointmentType] = React.useState("checkup"); // checkup | followup
+  const [additionalFees, setAdditionalFees] = React.useState("");
+  const [totalAmount, setTotalAmount] = React.useState(0);
 
-  /* slots */
-  const [allSlots, setAllSlots] = React.useState([]);
-  const [bookedSet, setBookedSet] = React.useState(new Set());
-  const availableSlots = React.useMemo(
-    () => allSlots.filter((s) => !bookedSet.has(s)),
-    [allSlots, bookedSet]
-  );
+  /* available slots */
+  const [availableSlots, setAvailableSlots] = React.useState([]);
+  const [loadingSlots, setLoadingSlots] = React.useState(false);
 
   /* ui */
   const [error, setError] = React.useState("");
   const [successMsg, setSuccessMsg] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
 
-  /* Load patients of this doctor */
+  /* ---- Load doctor ---- */
   React.useEffect(() => {
     if (!user?.uid) return;
     (async () => {
-      setLoadingPatients(true);
-      setError("");
-      try {
-        const q = query(
-          collection(db, "patients"),
-          where("registeredBy", "==", user.uid)
-        );
-        const snap = await getDocs(q);
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        rows.sort((a, b) =>
-          String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, {
-            sensitivity: "base",
-          })
-        );
-        setPatients(rows);
-      } catch (e) {
-        console.error(e);
-        setError(
-          isArabic ? "حدث خطأ أثناء تحميل المرضى" : "Failed to load patients"
-        );
-      } finally {
-        setLoadingPatients(false);
-      }
-    })();
-  }, [user?.uid, isArabic]);
-
-  /* Load doctor doc + normalize hours */
-  React.useEffect(() => {
-    if (!user?.uid) return;
-    (async () => {
-      setLoadingDoctor(true);
       try {
         const snap = await getDoc(doc(db, "doctors", String(user.uid)));
-        if (snap.exists()) {
-          const d = { id: snap.id, ...snap.data() };
-          setDoctor(d);
-          setHours(normalizeDoctorHours(d));
-        } else {
-          setDoctor(null);
-          setHours(normalizeDoctorHours(null));
-        }
-      } catch (e) {
-        console.error(e);
-        setDoctor(null);
-        setHours(normalizeDoctorHours(null));
-      } finally {
-        setLoadingDoctor(false);
+        if (!snap.exists()) return;
+        const d = { id: snap.id, ...snap.data() };
+        setDoctor(d);
+        setClinics(d.clinics || []);
+        if (d.clinics?.length === 1) setSelectedClinicId(d.clinics[0].id);
+        setHours(normalizeHoursFromAny(d));
+        setSlotMinutes(deriveDurationMinutes(d));
+        setTotalAmount(Number(d.checkupPrice || 0));
+      } catch (err) {
+        console.error(err);
       }
     })();
   }, [user?.uid]);
 
-  /* recompute slots when date / hours change, and fetch booked for that day */
+  /* ---- Load patients ---- */
+  const loadPatients = async () => {
+    if (!user?.uid) return;
+    setLoadingPatients(true);
+    try {
+      const qRef = query(collection(db, "patients"), where("registeredBy", "==", user.uid));
+      const snap = await getDocs(qRef);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setPatients(rows);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingPatients(false);
+    }
+  };
+
+  /* ---- Load available slots ---- */
   React.useEffect(() => {
-    let cancelled = false;
+    if (!doctor || !dateStr) return;
+    setLoadingSlots(true);
     (async () => {
       try {
-        if (!hours || !dateStr) {
-          setAllSlots([]);
-          setBookedSet(new Set());
-          return;
-        }
-
         const d = new Date(dateStr + "T00:00:00");
-        const k = weekdayKey(d);
+        const weekday = weekdayKey(d);
+        const ranges = parseDayRanges(hours?.[weekday]);
+        const step = Number(slotMinutes) > 0 ? Number(slotMinutes) : 30;
+        let slots = buildSlotsForRanges(ranges, step);
 
-        // Build slots from hours (string ranges) in 30-min steps
-        const ranges = parseDayRanges(hours[k]);
-        let slots = buildSlotsForRanges(ranges, 30);
+        // Fetch booked appointments for doctor on that date
+        const qRef = query(
+          collection(db, "appointments"),
+          where("doctorId", "==", user.uid),
+          where("date", "==", dateStr)
+        );
+        const snap = await getDocs(qRef);
+        const bookedTimes = snap.docs.map((doc) => doc.data().time);
 
-        // If selected date is today, filter out past times
-        const now = new Date();
-        if (toYMD(now) === dateStr) {
-          const nowMin = now.getHours() * 60 + now.getMinutes();
-          slots = slots.filter((s) => minutes(s) > nowMin);
-        }
-
-        if (!cancelled) setAllSlots(slots);
-
-        // Fetch existing appointments (support doctorId and doctorUID)
-        if (!user?.uid) return;
-        const col = collection(db, "appointments");
-        const [snapId, snapUID] = await Promise.all([
-          getDocs(query(col, where("doctorId", "==", String(user.uid)), where("date", "==", dateStr))),
-          getDocs(query(col, where("doctorUID", "==", String(user.uid)), where("date", "==", dateStr))),
-        ]);
-
-        const used = new Set();
-        for (const d of [...snapId.docs, ...snapUID.docs]) {
-          const tm = (d.data()?.time || "").trim();
-          if (tm) used.add(tm);
-        }
-
-        if (!cancelled) setBookedSet(used);
-
-        // Nudge invalid current selection
-        if (timeStr && (!slots.includes(timeStr) || used.has(timeStr))) {
-          setTimeStr("");
-        }
+        // Remove booked slots
+        const available = slots.filter((s) => !bookedTimes.includes(s));
+        setAvailableSlots(available);
       } catch (e) {
-        if (!cancelled) {
-          setAllSlots([]);
-          setBookedSet(new Set());
-        }
+        console.error(e);
+        setAvailableSlots([]);
+      } finally {
+        setLoadingSlots(false);
       }
     })();
+  }, [doctor, dateStr, hours, user?.uid]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [hours, dateStr, user?.uid, timeStr]);
-
-  // Queue number: 1 + count of already-booked with time <= new time
-  function computeQueueNumberForNew(time, existingTimesSet) {
-    const newMin = minutes(time);
-    let count = 0;
-    for (const t of existingTimesSet) {
-      const m = minutes(t);
-      if (m <= newMin) count += 1;
+  /* ---- Update total ---- */
+  React.useEffect(() => {
+    let base = 0;
+    if (appointmentType === "checkup") {
+      base = Number(doctor?.checkupPrice || 0);
+    } else {
+      base = Number(doctor?.followUpPrice || 0);
     }
-    return count + 1;
-  }
+    const extra = Number(additionalFees || 0);
+    setTotalAmount(base + extra);
+  }, [doctor?.checkupPrice, doctor?.followUpPrice, additionalFees, appointmentType]);
 
+  /* ---- Submit ---- */
   async function handleSubmit(e) {
     e.preventDefault();
     if (!user?.uid) return;
 
-    if (!selectedPatient) {
+    let patientId = selectedPatient?.id;
+    let patientName = selectedPatient?.name || "";
+    let patientPhone = selectedPatient?.phone || "";
+
+    if (addNewPatient) {
+      if (!newPatientName.trim() || !newPatientPhone.trim()) {
+        setError(isArabic ? "الرجاء إدخال اسم ورقم المريض" : "Please enter name and phone");
+        return;
+      }
+      const pRef = await addDoc(collection(db, "patients"), {
+        name: newPatientName.trim(),
+        phone: newPatientPhone.trim(),
+        registeredBy: user.uid,
+        createdAt: serverTimestamp(),
+      });
+      patientId = pRef.id;
+      patientName = newPatientName.trim();
+      patientPhone = newPatientPhone.trim();
+    } else if (!selectedPatient) {
       setError(isArabic ? "الرجاء اختيار مريض" : "Please select a patient");
       return;
     }
+
     if (!dateStr || !timeStr) {
-      setError(
-        isArabic ? "اختر التاريخ والوقت" : "Please choose date & time"
-      );
+      setError(isArabic ? "اختر التاريخ والوقت" : "Please choose date & time");
       return;
     }
 
-    // Ensure chosen time is still available
-    if (!availableSlots.includes(timeStr)) {
-      setError(
-        isArabic
-          ? "الوقت المختار لم يعد متاحاً"
-          : "Selected time is no longer available"
-      );
+    if (!selectedClinicId) {
+      setError(isArabic ? "الرجاء اختيار العيادة" : "Please select a clinic");
       return;
     }
 
     try {
       setSubmitting(true);
-      setError("");
-      setSuccessMsg("");
-
-      // Compute queueNumber
-      const queueNumber = computeQueueNumberForNew(timeStr, bookedSet);
-
-      // Doctor fields (align with patient flow)
-      const docNameEn = doctor?.name_en || "";
-      const docNameAr = doctor?.name_ar || "";
-      const specEn = doctor?.specialty_en || doctor?.specialty || "";
-      const specAr = doctor?.specialty_ar || "";
-      const price = doctor?.checkupPrice ?? null;
-
-      // Persist
       await addDoc(collection(db, "appointments"), {
-        doctorId: String(user.uid),     // same as patient flow (doctor doc id)
-        doctorUID: String(user.uid),    // keep for backward-compat
-        doctorName_en: docNameEn,
-        doctorName_ar: docNameAr,
-        doctorSpecialty_en: specEn,
-        doctorSpecialty_ar: specAr,
-        doctorPrice: price,
-
-        date: dateStr,                  // "YYYY-MM-DD"
-        time: timeStr,                  // "HH:MM"
-
-        // also store a combined Date for old views if you want:
-        // appointmentDate: new Date(`${dateStr}T${timeStr}:00`),
-
-        patientUid: selectedPatient.id,
-        patientName: selectedPatient.name || "",
-        patientPhone: selectedPatient.phone || selectedPatient.phoneNumber || "",
-        patientEmail: selectedPatient.email || "",
-
+        doctorId: user.uid,
+        doctorName_ar: doctor?.name_ar || "",
+        doctorName_en: doctor?.name_en || "",
+        doctorPrice: appointmentType === "checkup" ? (doctor?.checkupPrice || 0) : (doctor?.followUpPrice || 0),
+        appointmentType,
+        additionalFees: Number(additionalFees || 0),
+        totalAmount,
+        clinicId: selectedClinicId,
+        date: dateStr,
+        time: timeStr,
+        patientUid: patientId,
+        patientName,
+        patientPhone,
         note: note.trim(),
-        aiBrief: "",
-
-        status: "confirmed",            // doctor-created defaults to confirmed
-        queueNumber,
-
+        status: "confirmed",
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
 
-      setSuccessMsg(
-        isArabic
-          ? `تم إنشاء الموعد. رقم الدور: ${queueNumber}.`
-          : `Appointment created. Queue number: ${queueNumber}.`
-      );
-
-      // Clear form (keep patient chosen if you prefer)
+      setSuccessMsg(isArabic ? "تم إنشاء الموعد بنجاح ✅" : "Appointment created successfully ✅");
+      setAddNewPatient(false);
+      setNewPatientName("");
+      setNewPatientPhone("");
+      setSelectedPatient(null);
+      setAdditionalFees("");
       setTimeStr("");
       setNote("");
+      setSelectedClinicId("");
     } catch (e) {
       console.error(e);
-      setError(
-        e?.message ||
-          (isArabic ? "فشل في إنشاء الموعد" : "Failed to create appointment")
-      );
+      setError(e.message || (isArabic ? "فشل في إنشاء الموعد" : "Failed to create appointment"));
     } finally {
       setSubmitting(false);
     }
@@ -388,49 +350,126 @@ export default function NewAppointmentPage() {
       <AppLayout>
         <Container maxWidth="sm">
           <Stack spacing={2} sx={{ mt: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+            <Stack direction="row" justifyContent="space-between">
               <Typography variant="h5" fontWeight={700}>
                 {isArabic ? "إنشاء موعد جديد" : "Create New Appointment"}
               </Typography>
               <Button variant="text" onClick={() => router.push(backHref)}>
-                {isArabic ? "العودة للمواعيد" : "Back to Appointments"}
+                {isArabic ? "العودة" : "Back"}
               </Button>
             </Stack>
 
             <Paper sx={{ p: 2.5, borderRadius: 2 }}>
               <form onSubmit={handleSubmit}>
                 <Stack spacing={2}>
-                  {/* Patient selector */}
-                  <Autocomplete
-                    options={patients}
-                    loading={loadingPatients}
-                    getOptionLabel={(o) => String(o?.name ?? o?.id ?? "")}
-                    isOptionEqualToValue={(a, b) => a?.id === b?.id}
-                    value={selectedPatient}
-                    onChange={(_, v) => setSelectedPatient(v)}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label={isArabic ? "المريض" : "Patient"}
-                        placeholder={
-                          isArabic ? "ابحث عن مريض..." : "Search patient..."
-                        }
-                        InputProps={{
-                          ...params.InputProps,
-                          endAdornment: (
-                            <>
-                              {loadingPatients ? (
-                                <CircularProgress color="inherit" size={18} />
-                              ) : null}
-                              {params.InputProps.endAdornment}
-                            </>
-                          ),
-                        }}
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={addNewPatient}
+                        onChange={(e) => setAddNewPatient(e.target.checked)}
                       />
-                    )}
+                    }
+                    label={isArabic ? "إضافة مريض جديد" : "Add new patient"}
                   />
 
-                  {/* Date */}
+                  {!addNewPatient ? (
+                    <Autocomplete
+                      onOpen={loadPatients}
+                      options={patients}
+                      loading={loadingPatients}
+                      getOptionLabel={(o) => String(o?.name ?? o?.id ?? "")}
+                      isOptionEqualToValue={(a, b) => a?.id === b?.id}
+                      value={selectedPatient}
+                      onChange={(_, v) => setSelectedPatient(v)}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={isArabic ? "المريض" : "Patient"}
+                          placeholder={isArabic ? "ابحث عن مريض..." : "Search patient..."}
+                          InputProps={{
+                            ...params.InputProps,
+                            endAdornment: (
+                              <>
+                                {loadingPatients ? <CircularProgress size={18} /> : null}
+                                {params.InputProps.endAdornment}
+                              </>
+                            ),
+                          }}
+                        />
+                      )}
+                    />
+                  ) : (
+                    <Stack spacing={1}>
+                      <TextField
+                        label={isArabic ? "اسم المريض" : "Patient Name"}
+                        value={newPatientName}
+                        onChange={(e) => setNewPatientName(e.target.value)}
+                      />
+                      <TextField
+                        label={isArabic ? "رقم الهاتف" : "Phone Number"}
+                        value={newPatientPhone}
+                        onChange={(e) => setNewPatientPhone(e.target.value)}
+                      />
+                    </Stack>
+                  )}
+
+                  <Divider />
+
+                  {/* Clinic selection */}
+                  {clinics.length > 0 && (
+                    <TextField
+                      select
+                      label={isArabic ? "العيادة" : "Clinic"}
+                      value={selectedClinicId}
+                      onChange={(e) => {
+                        setSelectedClinicId(e.target.value);
+                        const selected = clinics.find((c) => c.id === e.target.value);
+                        setHours(normalizeHoursFromAny(selected));
+                      }}
+                    >
+                      {clinics.map((c) => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {isArabic ? c.name_ar || c.name_en : c.name_en || c.name_ar}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                  )}
+
+                  <Divider />
+
+                  {/* Appointment Type Selection */}
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <Typography variant="subtitle2" sx={{ minWidth: 80 }}>
+                      {isArabic ? "نوع الكشف:" : "Type:"}
+                    </Typography>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant={appointmentType === "checkup" ? "contained" : "outlined"}
+                        onClick={() => setAppointmentType("checkup")}
+                        size="small"
+                        sx={{
+                          borderRadius: 4,
+                          textTransform: "none",
+                          boxShadow: "none",
+                        }}
+                      >
+                        {isArabic ? "كشف جديد" : "Examination"}
+                      </Button>
+                      <Button
+                        variant={appointmentType === "followup" ? "contained" : "outlined"}
+                        onClick={() => setAppointmentType("followup")}
+                        size="small"
+                        sx={{
+                          borderRadius: 4,
+                          textTransform: "none",
+                          boxShadow: "none",
+                        }}
+                      >
+                        {isArabic ? "إعادة كشف" : "Re-examination"}
+                      </Button>
+                    </Stack>
+                  </Stack>
+
                   <TextField
                     label={isArabic ? "التاريخ" : "Date"}
                     type="date"
@@ -440,24 +479,18 @@ export default function NewAppointmentPage() {
                     inputProps={{ min: toYMD(new Date()) }}
                   />
 
-                  {/* Time (from working hours + availability) */}
                   <TextField
                     select
                     label={isArabic ? "الوقت" : "Time"}
                     value={timeStr}
                     onChange={(e) => setTimeStr(e.target.value)}
+                    disabled={loadingSlots}
                     helperText={
-                      loadingDoctor
+                      loadingSlots
                         ? isArabic
-                          ? "جاري تحميل مواعيد العمل…"
-                          : "Loading clinic hours…"
-                        : availableSlots.length
-                        ? isArabic
-                          ? "الأوقات المتاحة لهذا اليوم"
-                          : "Available for this date"
-                        : isArabic
-                        ? "لا توجد أوقات متاحة لهذا اليوم"
-                        : "No available times for this date"
+                          ? "جاري تحميل المواعيد..."
+                          : "Loading slots..."
+                        : ""
                     }
                   >
                     {availableSlots.map((s) => (
@@ -467,38 +500,52 @@ export default function NewAppointmentPage() {
                     ))}
                   </TextField>
 
-                  {/* Notes */}
+                  <TextField
+                    label={isArabic ? "رسوم إضافية" : "Additional Fees"}
+                    type="number"
+                    value={additionalFees}
+                    onChange={(e) => setAdditionalFees(e.target.value)}
+                    InputProps={{
+                      startAdornment: <InputAdornment position="start">EGP</InputAdornment>,
+                    }}
+                  />
+
+                  <TextField
+                    label={isArabic ? "الإجمالي" : "Total"}
+                    value={totalAmount}
+                    InputProps={{
+                      readOnly: true,
+                      startAdornment: <InputAdornment position="start">EGP</InputAdornment>,
+                    }}
+                  />
+
                   <TextField
                     label={isArabic ? "ملاحظات (اختياري)" : "Notes (optional)"}
                     multiline
-                    minRows={3}
+                    minRows={2}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                   />
 
-                    <Divider />
+                  <Divider />
 
-                  <Stack direction="row" spacing={1.5} justifyContent="flex-end">
-                    <Button type="button" variant="text" onClick={() => router.push(backHref)}>
+                  <Stack direction="row" justifyContent="flex-end" spacing={1.5}>
+                    <Button variant="outlined" onClick={() => router.push(backHref)}>
                       {isArabic ? "إلغاء" : "Cancel"}
                     </Button>
                     <Button
                       type="submit"
                       variant="contained"
-                      disabled={
-                        submitting ||
-                        loadingPatients ||
-                        loadingDoctor ||
-                        !selectedPatient
-                      }
+                      disabled={submitting}
+                      sx={{ backgroundColor: "#5D4042", "&:hover": { backgroundColor: "#7b5557" } }}
                     >
                       {submitting
                         ? isArabic
                           ? "جاري الحجز..."
                           : "Booking..."
                         : isArabic
-                        ? "تأكيد الحجز"
-                        : "Book Appointment"}
+                          ? "تأكيد الحجز"
+                          : "Book"}
                     </Button>
                   </Stack>
                 </Stack>
@@ -506,7 +553,6 @@ export default function NewAppointmentPage() {
             </Paper>
           </Stack>
 
-          {/* Errors */}
           <Snackbar
             open={Boolean(error)}
             autoHideDuration={4000}
@@ -518,7 +564,6 @@ export default function NewAppointmentPage() {
             </Alert>
           </Snackbar>
 
-          {/* Success */}
           <Snackbar
             open={Boolean(successMsg)}
             autoHideDuration={3500}
