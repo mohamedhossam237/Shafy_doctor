@@ -20,25 +20,31 @@ export default function PatientSearchBar({ isArabic, value, onChange, onAddNew }
 
 
     return (
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-            <TextField
-                fullWidth
-                value={local}
-                onChange={(e) => setLocal(e.target.value)}
-                placeholder={isArabic ? 'ابحث عن مريض...' : 'Search patient...'}
-                InputProps={{
-                    startAdornment: (
-                        <InputAdornment position="start">
-                            <SearchIcon />
-                        </InputAdornment>
-                    ),
-                    endAdornment: local ? (
-                        <InputAdornment position="end">
-                            <IconButton onClick={() => setLocal('')} size="small"><ClearIcon /></IconButton>
-                        </InputAdornment>
-                    ) : null,
-                }}
-            />
-        </Stack>
+        <TextField
+            fullWidth
+            size="medium"
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            placeholder={isArabic ? 'ابحث عن مريض بالاسم أو رقم الهاتف...' : 'Search patient by name or phone...'}
+            InputProps={{
+                startAdornment: (
+                    <InputAdornment position="start">
+                        <SearchIcon />
+                    </InputAdornment>
+                ),
+                endAdornment: local ? (
+                    <InputAdornment position="end">
+                        <IconButton onClick={() => setLocal('')} size="small">
+                            <ClearIcon />
+                        </IconButton>
+                    </InputAdornment>
+                ) : null,
+            }}
+            sx={{
+                '& .MuiOutlinedInput-root': {
+                    borderRadius: 2,
+                },
+            }}
+        />
     );
 }

@@ -11,7 +11,7 @@ import { deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import UpdatePatientDialog from './UpdatePatientDialog';
-
+import PhoneIcon from '@mui/icons-material/Phone';
 export default function PatientCard({ patient, isArabic, onDeleted, onUpdated }) {
   const [anchorEl, setAnchorEl] = React.useState(null);
   const [openEdit, setOpenEdit] = React.useState(false);
@@ -82,67 +82,102 @@ export default function PatientCard({ patient, isArabic, onDeleted, onUpdated })
 
   return (
     <>
-      <Link href={href} style={{ textDecoration: 'none', width: '100%' }}>
+      <Link href={href} style={{ textDecoration: 'none', width: '100%', display: 'block', height: '100%' }}>
         <Paper
+          elevation={1}
           sx={{
             p: 2,
-            borderRadius: 3,
+            borderRadius: 2,
             display: 'flex',
             alignItems: 'center',
-            gap: 1.8,
-            height: 130,
-            width: '100%',
-            boxShadow: '0 3px 10px rgba(0,0,0,0.06)',
-            transition: 'all 0.25s ease',
+            gap: 2,
+            height: '100%',
+            minHeight: 120,
+            border: '1px solid',
+            borderColor: 'divider',
+            transition: 'all 0.2s ease',
             '&:hover': {
-              boxShadow: '0 6px 18px rgba(0,0,0,0.12)',
-              transform: 'translateY(-3px)',
+              boxShadow: 3,
+              borderColor: 'primary.main',
+              transform: 'translateY(-2px)',
             },
           }}
         >
-          <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 600 }}>
+          <Avatar
+            sx={{
+              bgcolor: 'primary.main',
+              fontWeight: 600,
+              width: 48,
+              height: 48,
+              fontSize: '1rem',
+            }}
+          >
             {initials}
           </Avatar>
 
-          <Stack sx={{ flex: 1, minWidth: 0 }}>
-            <Typography fontWeight={700} noWrap>
+          <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.5}>
+            <Typography variant="subtitle1" fontWeight={700} noWrap color="text.primary">
               {patient.name || (isArabic ? 'بدون اسم' : 'Unnamed')}
             </Typography>
             {patient.phone && (
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {(isArabic ? 'الهاتف: ' : 'Phone: ') + patient.phone}
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={0.5}>
+                <PhoneIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+                <Typography variant="body2" color="text.secondary" noWrap>
+                  {patient.phone}
+                </Typography>
+              </Stack>
             )}
-            {patient.age && (
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {(isArabic ? 'العمر: ' : 'Age: ') + patient.age}
-              </Typography>
-            )}
-            {patient.address && (
-              <Typography variant="caption" color="text.secondary" noWrap title={patient.address}>
-                {(isArabic ? 'العنوان: ' : 'Address: ') + patient.address}
-              </Typography>
-            )}
-            <Typography variant="caption" color="text.secondary" noWrap>
-              {(isArabic ? 'آخر زيارة: ' : 'Last Visit: ') + (patient.lastVisit || '—')}
-            </Typography>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              {patient.age && (
+                <Typography variant="caption" color="text.secondary">
+                  {isArabic ? 'العمر: ' : 'Age: '}{patient.age}
+                </Typography>
+              )}
+              {genderLabel && (
+                <Chip
+                  size="small"
+                  label={genderLabel}
+                  sx={{
+                    height: 20,
+                    fontSize: '0.65rem',
+                  }}
+                />
+              )}
+            </Stack>
           </Stack>
 
-          {genderLabel && <Chip size="small" label={genderLabel} />}
+          {/* Action Buttons */}
+          <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0 }}>
+            {/* Message Button */}
+            <Tooltip title={isArabic ? 'إرسال رسالة' : 'Send message'}>
+              <IconButton
+                size="small"
+                onClick={handleMessageClick}
+                sx={{
+                  color: 'success.main',
+                  '&:hover': {
+                    bgcolor: 'rgba(76, 175, 80, 0.1)',
+                  },
+                }}
+              >
+                <ChatBubbleOutlineIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
 
-          {/* Dropdown Menu */}
-          <Tooltip title={isArabic ? 'المزيد' : 'More'}>
-            <IconButton
-              size="small"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setAnchorEl(e.currentTarget);
-              }}
-            >
-              <MoreVertIcon />
-            </IconButton>
-          </Tooltip>
+            {/* Dropdown Menu */}
+            <Tooltip title={isArabic ? 'المزيد' : 'More'}>
+              <IconButton
+                size="small"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setAnchorEl(e.currentTarget);
+                }}
+              >
+                <MoreVertIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
           <Menu
             anchorEl={anchorEl}
             open={menuOpen}
@@ -169,13 +204,6 @@ export default function PatientCard({ patient, isArabic, onDeleted, onUpdated })
               {isArabic ? 'حذف' : 'Delete'}
             </MenuItem>
           </Menu>
-
-          {/* Message Button */}
-          <Tooltip title={isArabic ? 'إرسال رسالة' : 'Send message'}>
-            <IconButton size="small" onClick={handleMessageClick}>
-              <ChatBubbleOutlineIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
         </Paper>
       </Link>
 
