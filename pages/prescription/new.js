@@ -868,7 +868,7 @@ export default function NewPrescriptionPage() {
       return;
     }
 
-    // Format phone number (remove non-digits, ensure Egyptian format with +2)
+    // Format phone number (remove non-digits, ensure Egyptian format with +20)
     const phoneRaw = String(patientPhone || '').replace(/\D/g, '');
     if (!phoneRaw) {
       setSnack({
@@ -879,16 +879,17 @@ export default function NewPrescriptionPage() {
       return;
     }
     
-    // Always treat as Egyptian number: +2 (which becomes +20) + rest of number
+    // Always treat as Egyptian number: +20 (Egypt country code)
     // Remove leading zeros and ensure it starts with +20
     let phoneDigits = phoneRaw.replace(/^0+/, '');
     let formattedPhone;
+    
     if (phoneDigits.startsWith('20')) {
       // Already has country code 20
       formattedPhone = `+${phoneDigits}`;
     } else {
-      // Add +2 (which is +20 for Egypt)
-      formattedPhone = `+2${phoneDigits}`;
+      // Add +20 (Egypt country code)
+      formattedPhone = `+20${phoneDigits}`;
     }
 
     // Build prescription message
