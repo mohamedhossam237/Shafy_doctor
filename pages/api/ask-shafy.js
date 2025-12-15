@@ -10,7 +10,7 @@ export const config = { runtime: 'edge' };
 
 // ====== Fanar setup ======
 const FANAR_BASE = 'https://api.fanar.qa/v1';
-const MODEL_CHAT = 'Fanar';
+const MODEL_CHAT = 'Fanar-C-2-27B';
 const FANAR_ORG = (process.env.FANAR_ORG || '').trim();
 
 function getFanarKey() {

@@ -338,6 +338,71 @@ export default function AskShafyChat({ lang = 'ar' }) {
               </Box>
             );
           })}
+
+          {busy && (
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: bubble('assistant').align,
+                width: '100%',
+              }}
+            >
+              <Stack
+                direction={bubble('assistant').row}
+                spacing={1.5}
+                alignItems="flex-end"
+                sx={{ maxWidth: '60%' }}
+              >
+                {AssistantAvatar}
+                <Box
+                  sx={{
+                    background: (t) => t.palette.background.paper,
+                    color: 'text.secondary',
+                    px: 2,
+                    py: 1.5,
+                    borderRadius: 3,
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.08)',
+                    border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.15)}`,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <Typography sx={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                    {isArabic ? 'شافي يكتب' : 'Shafy is typing'}
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 0.5,
+                      '& span': {
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        bgcolor: 'primary.main',
+                        animation: 'typingDots 1.4s infinite ease-in-out both',
+                      },
+                      '& span:nth-of-type(2)': {
+                        animationDelay: '0.2s',
+                      },
+                      '& span:nth-of-type(3)': {
+                        animationDelay: '0.4s',
+                      },
+                      '@keyframes typingDots': {
+                        '0%, 80%, 100%': { transform: 'scale(0)', opacity: 0.4 },
+                        '40%': { transform: 'scale(1)', opacity: 1 },
+                      },
+                    }}
+                  >
+                    <span />
+                    <span />
+                    <span />
+                  </Box>
+                </Box>
+              </Stack>
+            </Box>
+          )}
         </Stack>
       </Paper>
 

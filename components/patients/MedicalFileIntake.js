@@ -63,7 +63,15 @@ export default function MedicalFileIntake({
   const t = (en, ar) => (isArabic ? ar : en);
 
   const handleUpload = async () => {
-    if (!file || !patientId) return;
+    if (!file || !patientId) {
+      setError(
+        t(
+          "Please select a file and make sure the patient profile is loaded.",
+          "يرجى اختيار ملف والتأكد من تحميل ملف المريض."
+        )
+      );
+      return;
+    }
 
     try {
       if (!user || !user.getIdToken) {
@@ -82,6 +90,9 @@ export default function MedicalFileIntake({
       const form = new FormData();
       form.append("patientId", String(patientId));
       form.append("file", file);
+      if (patient?.name) {
+        form.append("patientName", String(patient.name));
+      }
 
       const res = await fetch("/api/intake-medical-file", {
         method: "POST",
@@ -106,6 +117,38 @@ export default function MedicalFileIntake({
       }
 
       const extracted = data.extracted || {};
+
+      // If backend sent a warning (e.g. no text extracted), surface it to the user
+      if (data.warning) {
+        setWarning(
+          t(
+            data.warning || "The file was uploaded, but no medical data could be extracted.",
+            data.warning || "تم رفع الملف، ولكن تعذر استخراج بيانات طبية قابلة للاستخدام."
+          )
+        );
+      }
+
+      // Detect if there is actually anything meaningful to review
+      const hasContent = Object.keys(extracted).some((key) => {
+        const val = extracted[key];
+        if (Array.isArray(val)) {
+          return val.length > 0;
+        }
+        return !!val;
+      });
+
+      if (!hasContent) {
+        // No data to show in the review table – keep dialog open and notify
+        setWarning((prev) =>
+          prev ||
+          t(
+            "The file was uploaded, but no usable medical information was found. Please try another file or check the file quality.",
+            "تم رفع الملف، ولكن لم يتم العثور على معلومات طبية قابلة للاستخدام. يرجى تجربة ملف آخر أو التحقق من جودة الملف."
+          )
+        );
+        setLoading(false);
+        return;
+      }
 
       // Prepare for review
       setExtractedData(extracted);
@@ -154,8 +197,15 @@ export default function MedicalFileIntake({
         ]);
         mergedForPatient[key] = Array.from(combined).filter(Boolean);
       } else {
-        // Replace single value
-        mergedForPatient[key] = newVal;
+        // For notes, append instead of replace
+        if (key === 'notes') {
+          const existingNotes = typeof oldVal === 'string' ? oldVal : (oldVal || '');
+          const incomingNotes = typeof newVal === 'string' ? newVal : String(newVal || '');
+          mergedForPatient[key] = [existingNotes, incomingNotes].filter(Boolean).join('\n\n');
+        } else {
+          // Replace single value for other scalar fields
+          mergedForPatient[key] = newVal;
+        }
       }
     };
 
@@ -480,20 +530,83 @@ export default function MedicalFileIntake({
                   { key: 'notes', label: t('Notes', 'ملاحظات') },
                 ].map((field) => {
                   const newVal = extractedData?.[field.key];
-                  if (!newVal || (Array.isArray(newVal) && newVal.length === 0)) return null;
+                  if (
+                    newVal == null ||
+                    (Array.isArray(newVal) && newVal.length === 0) ||
+                    (typeof newVal === 'object' && !Array.isArray(newVal) && Object.keys(newVal).length === 0)
+                  ) return null;
 
                   const oldVal = patient?.[field.key];
 
-                  let displayNew = String(newVal);
+                  let displayNew = '';
                   if (Array.isArray(newVal)) {
                     if (field.key === 'labResults') {
                       displayNew = newVal.map(l => `${l.test || ''} ${l.value || ''} ${l.unit || ''} ${l.flag || ''}`.trim()).join('\n');
+                    } else if (newVal.length && typeof newVal[0] === 'object') {
+                      // Safely stringify object arrays so we don't show [object Object]
+                      displayNew = newVal
+                        .map((item) => {
+                          if (!item) return '';
+                          if (typeof item === 'string') return item;
+                          if (item.label || item.name || item.title) {
+                            return item.label || item.name || item.title;
+                          }
+                          const vals = Object.values(item)
+                            .map((v) => String(v || '').trim())
+                            .filter(Boolean);
+                          return vals.join(' ');
+                        })
+                        .filter(Boolean)
+                        .join(', ');
                     } else {
                       displayNew = newVal.join(', ');
                     }
+                  } else if (typeof newVal === 'object' && newVal !== null) {
+                    // Single object → flatten values
+                    if (newVal.label || newVal.name || newVal.title) {
+                      displayNew = newVal.label || newVal.name || newVal.title;
+                    } else {
+                      const vals = Object.values(newVal)
+                        .map((v) => String(v || '').trim())
+                        .filter(Boolean);
+                      displayNew = vals.join(' ');
+                    }
+                  } else {
+                    displayNew = String(newVal);
                   }
 
-                  const displayOld = Array.isArray(oldVal) ? oldVal.join(', ') : (oldVal || '—');
+                  let displayOld = '—';
+                  if (Array.isArray(oldVal)) {
+                    if (oldVal.length && typeof oldVal[0] === 'object') {
+                      displayOld = oldVal
+                        .map((item) => {
+                          if (!item) return '';
+                          if (typeof item === 'string') return item;
+                          if (item.label || item.name || item.title) {
+                            return item.label || item.name || item.title;
+                          }
+                          const vals = Object.values(item)
+                            .map((v) => String(v || '').trim())
+                            .filter(Boolean);
+                          return vals.join(' ');
+                        })
+                        .filter(Boolean)
+                        .join(', ');
+                    } else {
+                      displayOld = oldVal.join(', ');
+                    }
+                  } else if (typeof oldVal === 'object' && oldVal !== null) {
+                    if (oldVal.label || oldVal.name || oldVal.title) {
+                      displayOld = oldVal.label || oldVal.name || oldVal.title;
+                    } else {
+                      const vals = Object.values(oldVal)
+                        .map((v) => String(v || '').trim())
+                        .filter(Boolean);
+                      displayOld = vals.join(' ');
+                    }
+                  } else if (oldVal) {
+                    displayOld = String(oldVal);
+                  }
                   const isSelected = !!reviewSelection[field.key];
 
                   return (
