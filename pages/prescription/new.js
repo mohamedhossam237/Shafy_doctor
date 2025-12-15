@@ -202,6 +202,142 @@ export default function NewPrescriptionPage() {
     }
   }, [user?.uid]);
 
+  // Fetch patient demographics
+  const fetchPatientInfo = React.useCallback(async (patientId) => {
+    try {
+      if (!patientId) {
+        setPatientInfo({ mrn: '', sex: '', dobStr: '', phone: '' });
+        return;
+      }
+
+      const snap = await getDoc(doc(db, 'patients', patientId));
+      const data = snap.exists() ? snap.data() : {};
+
+      const dob =
+        data?.dob instanceof Date
+          ? data.dob
+          : data?.dob?.toDate
+          ? data.dob.toDate()
+          : data?.dob
+          ? new Date(data.dob)
+          : null;
+
+      const dobStr = dob && !isNaN(dob.getTime()) ? dob.toISOString().slice(0, 10) : '';
+
+      // Normalize phone number with +20 (Egypt country code) if not already normalized
+      const normalizePhoneForDisplay = (raw = '') => {
+        const s = String(raw || '').trim();
+        if (!s) return '';
+        // If already starts with +20, return as is
+        if (s.startsWith('+20') && s.length > 3) return s;
+        const d = s.replace(/\D/g, '');
+        if (!d) return s; // Return original if no digits
+        let phoneDigits = d.replace(/^0+/, '');
+        if (phoneDigits.startsWith('20')) return `+${phoneDigits}`;
+        else return `+20${phoneDigits}`;
+      };
+      
+      const phone = data?.phone || data?.mobile || '';
+      setPatientInfo({
+        mrn: data?.mrn || data?.medicalRecordNumber || '',
+        sex: data?.sex || data?.gender || '',
+        dobStr,
+        phone: normalizePhoneForDisplay(phone),
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  // Store patientId from appointment to use when patients are loaded
+  const [pendingPatientId, setPendingPatientId] = React.useState(null);
+
+  // Fetch patientId from appointment if appointmentId is provided
+  React.useEffect(() => {
+    const appointmentId = router.query?.appointmentId;
+    const patientIdFromQuery = router.query?.patientId;
+    
+    console.log('[Prescription] Router query:', { appointmentId, patientIdFromQuery });
+    
+    // If patientId is directly provided, use it
+    if (patientIdFromQuery) {
+      console.log('[Prescription] Setting pendingPatientId from query:', patientIdFromQuery);
+      setPendingPatientId(String(patientIdFromQuery));
+      return;
+    }
+    
+    // If appointmentId is provided but patientId is not, fetch patientId from appointment
+    if (appointmentId && !patientIdFromQuery) {
+      console.log('[Prescription] Fetching appointment:', appointmentId);
+      (async () => {
+        try {
+          const apptSnap = await getDoc(doc(db, 'appointments', String(appointmentId)));
+          if (apptSnap.exists()) {
+            const apptData = apptSnap.data();
+            const apptPatientId = apptData.patientId || apptData.patientUID || apptData.patientID;
+            console.log('[Prescription] Appointment data:', { 
+              patientId: apptData.patientId, 
+              patientUID: apptData.patientUID, 
+              patientID: apptData.patientID,
+              resolved: apptPatientId 
+            });
+            if (apptPatientId) {
+              console.log('[Prescription] Setting pendingPatientId from appointment:', apptPatientId);
+              setPendingPatientId(String(apptPatientId));
+            }
+          } else {
+            console.warn('[Prescription] Appointment not found:', appointmentId);
+          }
+        } catch (err) {
+          console.error('[Prescription] Failed to load appointment for patient selection:', err);
+        }
+      })();
+    }
+  }, [router.query?.appointmentId, router.query?.patientId]);
+
+  // Auto-select patient when patients are loaded and we have a pending patientId
+  React.useEffect(() => {
+    console.log('[Prescription] Auto-select check:', { 
+      selectedPatient: !!selectedPatient, 
+      pendingPatientId, 
+      patientsCount: patients.length 
+    });
+    
+    if (selectedPatient) {
+      console.log('[Prescription] Patient already selected, skipping');
+      return;
+    }
+    
+    if (!pendingPatientId) {
+      console.log('[Prescription] No pendingPatientId, skipping');
+      return;
+    }
+    
+    if (patients.length === 0) {
+      console.log('[Prescription] Patients not loaded yet, skipping');
+      return;
+    }
+    
+    console.log('[Prescription] Searching for patient with ID:', pendingPatientId);
+    console.log('[Prescription] Patients list:', patients.map(p => ({ id: p.id, name: p.name })));
+    
+    const patient = patients.find((p) => {
+      const pId = String(p.id || '').trim();
+      const pendingId = String(pendingPatientId || '').trim();
+      return pId === pendingId || pId === String(pendingId);
+    });
+    
+    if (patient) {
+      console.log('[Prescription] ✅ Patient found, setting:', patient.name, 'ID:', patient.id);
+      setSelectedPatient(patient);
+      fetchPatientInfo(patient.id);
+    } else {
+      console.warn('[Prescription] ❌ Patient not found in patients list.');
+      console.warn('[Prescription] Looking for:', pendingPatientId);
+      console.warn('[Prescription] Available IDs:', patients.map(p => ({ id: p.id, name: p.name })));
+    }
+  }, [pendingPatientId, patients, selectedPatient, fetchPatientInfo]);
+
   // Load medicines
   React.useEffect(() => {
     const loadMedicines = async () => {
@@ -236,39 +372,6 @@ export default function NewPrescriptionPage() {
     };
     loadTests();
   }, []);
-
-  // Fetch patient demographics
-  const fetchPatientInfo = async (patientId) => {
-    try {
-      if (!patientId) {
-        setPatientInfo({ mrn: '', sex: '', dobStr: '', phone: '' });
-        return;
-      }
-
-      const snap = await getDoc(doc(db, 'patients', patientId));
-      const data = snap.exists() ? snap.data() : {};
-
-      const dob =
-        data?.dob instanceof Date
-          ? data.dob
-          : data?.dob?.toDate
-          ? data.dob.toDate()
-          : data?.dob
-          ? new Date(data.dob)
-          : null;
-
-      const dobStr = dob && !isNaN(dob.getTime()) ? dob.toISOString().slice(0, 10) : '';
-
-      setPatientInfo({
-        mrn: data?.mrn || data?.medicalRecordNumber || '',
-        sex: data?.sex || data?.gender || '',
-        dobStr,
-        phone: data?.phone || data?.mobile || '',
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   // Medications handlers
   const addMedication = () =>
@@ -879,16 +982,16 @@ export default function NewPrescriptionPage() {
       return;
     }
     
-    // Always treat as Egyptian number: +20 (Egypt country code)
+    // Always treat as Egyptian number: +20 (Egypt country code for WhatsApp)
     // Remove leading zeros and ensure it starts with +20
     let phoneDigits = phoneRaw.replace(/^0+/, '');
     let formattedPhone;
     
     if (phoneDigits.startsWith('20')) {
-      // Already has country code 20
+      // Already starts with 20
       formattedPhone = `+${phoneDigits}`;
     } else {
-      // Add +20 (Egypt country code)
+      // Add +20 (Egypt country code for WhatsApp)
       formattedPhone = `+20${phoneDigits}`;
     }
 

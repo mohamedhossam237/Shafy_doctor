@@ -283,13 +283,38 @@ export default function NewAppointmentPage() {
       }
       const pRef = await addDoc(collection(db, "patients"), {
         name: newPatientName.trim(),
-        phone: newPatientPhone.trim(),
+        phone: (() => {
+          // Normalize phone number with +20 (Egypt country code)
+          const s = String(newPatientPhone || '').trim();
+          if (!s) return '';
+          const d = s.replace(/\D/g, '');
+          if (!d) return '';
+          let phoneDigits = d.replace(/^0+/, '');
+          if (phoneDigits.startsWith('20')) {
+            return `+${phoneDigits}`;
+          } else {
+            return `+20${phoneDigits}`;
+          }
+        })(),
         registeredBy: user.uid,
         createdAt: serverTimestamp(),
       });
       patientId = pRef.id;
       patientName = newPatientName.trim();
-      patientPhone = newPatientPhone.trim();
+      // Normalize phone number with +20 (Egypt country code)
+      const normalizePhone = (raw = '') => {
+        const s = String(raw || '').trim();
+        if (!s) return '';
+        const d = s.replace(/\D/g, '');
+        if (!d) return '';
+        let phoneDigits = d.replace(/^0+/, '');
+        if (phoneDigits.startsWith('20')) {
+          return `+${phoneDigits}`;
+        } else {
+          return `+20${phoneDigits}`;
+        }
+      };
+      patientPhone = normalizePhone(newPatientPhone);
     } else if (!selectedPatient) {
       setError(isArabic ? "الرجاء اختيار مريض" : "Please select a patient");
       return;

@@ -106,15 +106,26 @@ const sanitizeClinics = (arr) =>
 /* ---------------- row/card ---------------- */
 
 function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel }) {
+  const router = useRouter();
   const d = apptDate(appt);
   const status = String(appt?.status || 'pending').toLowerCase();
   const completed = status === 'completed';
   const confirmed = status === 'confirmed';
   const statusColor = completed ? 'success' : confirmed ? 'info' : 'warning';
 
+  const handleCardClick = (e) => {
+    // Don't navigate if clicking on buttons or interactive elements
+    if (e.target.closest('button') || e.target.closest('a')) {
+      return;
+    }
+    router.push(detailHref);
+  };
+
   return (
     <Paper
+      component="div"
       elevation={0}
+      onClick={handleCardClick}
       sx={{
         p: 3.5,
         borderRadius: 5,
@@ -130,6 +141,7 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         position: 'relative',
         overflow: 'hidden',
+        cursor: 'pointer',
         '&::before': {
           content: '""',
           position: 'absolute',

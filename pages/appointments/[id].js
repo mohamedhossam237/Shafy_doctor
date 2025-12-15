@@ -21,7 +21,6 @@ import PhoneIcon from '@mui/icons-material/Phone';
 import DescriptionIcon from '@mui/icons-material/Description';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AppLayout from '@/components/AppLayout';
-import AddReportDialog from '@/components/reports/AddReportDialog';
 import ReportViewDialog from '@/components/reports/ReportViewDialog';
 import UpdateAppointmentDialog from '@/components/reports/UpdateAppointmentDialog';
 import ExtraFeeDialog from '@/components/reports/ExtraFeeDialog';
@@ -34,7 +33,21 @@ import {
 
 /* ---------- helpers ---------- */
 const toDate = (v) => (v?.toDate ? v.toDate() : new Date(v));
-const toWaDigits = (raw) => String(raw || '').replace(/\D/g, '');
+// Format phone number for WhatsApp: always use +20 for Egyptian numbers
+const toWaDigits = (raw) => {
+  const phoneRaw = String(raw || '').replace(/\D/g, '');
+  if (!phoneRaw) return '';
+  
+  // Always treat as Egyptian number: +20 (Egypt country code for WhatsApp)
+  let phoneDigits = phoneRaw.replace(/^0+/, '');
+  if (phoneDigits.startsWith('20')) {
+    // Already starts with 20
+    return `+${phoneDigits}`;
+  } else {
+    // Add +20 (Egypt country code for WhatsApp)
+    return `+20${phoneDigits}`;
+  }
+};
 const safeNum = (v) => (Number.isFinite(+v) ? +v : 0);
 const currencyLabel = (isAr) => (isAr ? 'ج.م' : 'EGP');
 
@@ -103,7 +116,6 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const [snack, setSnack] = React.useState({ open: false, severity: 'info', msg: '' });
 
   // dialogs
-  const [reportOpen, setReportOpen] = React.useState(false);
   const [viewReport, setViewReport] = React.useState(null);
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [extraDialogOpen, setExtraDialogOpen] = React.useState(false);
@@ -477,10 +489,11 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     {t('Reports', 'التقارير')}
                   </Typography>
                   <Button
+                    component={Link}
+                    href={`/prescription/new?appointmentId=${id}${(appt?.patientId || appt?.patientUID || appt?.patientID) ? `&patientId=${appt.patientId || appt.patientUID || appt.patientID}` : ''}${isAr ? '&lang=ar' : ''}`}
                     variant="outlined"
                     size="small"
                     startIcon={<AddIcon />}
-                    onClick={() => setReportOpen(true)}
                   >
                     {t('Add Report', 'إضافة تقرير')}
                   </Button>
@@ -561,7 +574,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
           </Paper>
 
         {/* Dialogs */}
-        <AddReportDialog open={reportOpen} onClose={() => setReportOpen(false)} appointmentId={id} isArabic={isAr} />
+        {/* AddReportDialog removed - now using /prescription/new page */}
         <ReportViewDialog open={Boolean(viewReport)} onClose={() => setViewReport(null)} report={viewReport} isAr={isAr} />
         <UpdateAppointmentDialog
           open={updateOpen}

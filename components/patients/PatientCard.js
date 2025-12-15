@@ -49,8 +49,16 @@ export default function PatientCard({ patient, isArabic, onDeleted, onUpdated })
       const phoneRaw = String(patient.phone || '').replace(/\D/g, '');
       if (!phoneRaw) return;
 
-      // 🔹 Always treat as Egyptian number
-      const fullPhone = phoneRaw.startsWith('20') ? `+${phoneRaw}` : `+20${phoneRaw.replace(/^0+/, '')}`;
+      // 🔹 Always treat as Egyptian number: +20 (Egypt country code for WhatsApp)
+      let phoneDigits = phoneRaw.replace(/^0+/, '');
+      let fullPhone;
+      if (phoneDigits.startsWith('20')) {
+        // Already starts with 20
+        fullPhone = `+${phoneDigits}`;
+      } else {
+        // Add +20 (Egypt country code for WhatsApp)
+        fullPhone = `+20${phoneDigits}`;
+      }
 
       // Check if user exists in app's "users" collection
       const userSnap = await getDoc(doc(db, 'users', fullPhone));

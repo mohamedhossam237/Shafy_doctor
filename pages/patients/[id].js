@@ -466,8 +466,22 @@ export default function PatientDetailsPage() {
       let updateData = {};
 
       if (section === 'contact') {
+        // Normalize phone number with +20 (Egypt country code)
+        const normalizePhone = (raw = '') => {
+          const s = String(raw || '').trim();
+          if (!s) return '';
+          const d = s.replace(/\D/g, '');
+          if (!d) return '';
+          let phoneDigits = d.replace(/^0+/, '');
+          if (phoneDigits.startsWith('20')) {
+            return `+${phoneDigits}`;
+          } else {
+            return `+20${phoneDigits}`;
+          }
+        };
+        
         updateData = {
-          phone: tempValues.phone,
+          phone: normalizePhone(tempValues.phone),
           email: tempValues.email,
           address: tempValues.address
         };
