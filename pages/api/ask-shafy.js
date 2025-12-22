@@ -36,6 +36,127 @@ async function fanarChat(messages, { max_tokens = 450, temperature = 0.2, respon
   return { ok: r.ok, status: r.status, data };
 }
 
+// ====== TTS (Text-to-Speech) ======
+/**
+ * Generate speech from text using FANAR TTS API
+ * @param {string} text - Text to convert to speech
+ * @param {string} lang - Language ('ar' or 'en') to determine voice
+ * @param {string} model - TTS model ('Fanar-Aura-TTS-2' or 'Fanar-Sadiq-TTS-1')
+ * @returns {Promise<{ok: boolean, status: number, audioBlob?: Blob, error?: string}>}
+ */
+async function fanarTTS(text, lang = 'ar', model = 'Fanar-Aura-TTS-2') {
+  if (!text || !text.trim()) {
+    return { ok: false, status: 400, error: 'Text is required' };
+  }
+
+  // Select voice based on language
+  // Arabic voices: Hamad (male, Gulf), Jasim (male), Huda (female), Noor (female)
+  // English voices: Harry (male, British), Jake (male, American), Amelia (female, British), Emily (female, American)
+  const voices = {
+    ar: 'Hamad', // Default Arabic voice (male, Gulf accent)
+    en: 'Harry', // Default English voice (male, British accent)
+  };
+  const voice = voices[lang] || voices.ar;
+
+  try {
+    const body = {
+      model: model,
+      input: text.trim(),
+      voice: voice,
+    };
+
+    const r = await fetch(`${FANAR_BASE}/audio/speech`, {
+      method: 'POST',
+      headers: { ...commonAuthHeaders({ 'Content-Type': 'application/json' }) },
+      body: JSON.stringify(body),
+    });
+
+    if (!r.ok) {
+      const errorData = await r.json().catch(() => ({}));
+      return {
+        ok: false,
+        status: r.status,
+        error: errorData?.error?.message || errorData?.message || 'TTS request failed',
+      };
+    }
+
+    // TTS returns audio blob (usually MP3)
+    const audioBlob = await r.blob();
+    return { ok: true, status: r.status, audioBlob };
+  } catch (e) {
+    return { ok: false, status: 500, error: e.message || 'TTS error' };
+  }
+}
+
+// ====== STT (Speech-to-Text) ======
+/**
+ * Transcribe audio to text using FANAR STT API
+ * @param {Blob|ArrayBuffer|Uint8Array} audioBlob - Audio file to transcribe
+ * @param {string} model - STT model ('Fanar-Aura-STT-1' for short or 'Fanar-Aura-STT-LF-1' for long-form)
+ * @param {string} format - Response format ('text', 'srt', or 'json')
+ * @returns {Promise<{ok: boolean, status: number, text?: string, data?: any, error?: string}>}
+ */
+async function fanarSTT(audioBlob, model = 'Fanar-Aura-STT-1', format = 'text') {
+  if (!audioBlob) {
+    return { ok: false, status: 400, error: 'Audio file is required' };
+  }
+
+  try {
+    // Create FormData for multipart/form-data
+    const formData = new FormData();
+    
+    // Ensure we have a Blob
+    let blobToSend;
+    if (audioBlob instanceof Blob) {
+      blobToSend = audioBlob;
+    } else if (audioBlob instanceof ArrayBuffer || audioBlob instanceof Uint8Array) {
+      // Convert ArrayBuffer/Uint8Array to Blob
+      const buffer = audioBlob instanceof Uint8Array ? audioBlob.buffer : audioBlob;
+      blobToSend = new Blob([buffer], { type: 'audio/wav' });
+    } else {
+      return { ok: false, status: 400, error: 'Invalid audio format' };
+    }
+    
+    // Create a File from the Blob (FANAR API expects a file)
+    const audioFile = new File([blobToSend], 'audio.wav', { type: blobToSend.type || 'audio/wav' });
+    
+    formData.append('file', audioFile);
+    formData.append('model', model);
+    if (format) formData.append('format', format);
+
+    // Get headers without Content-Type (FormData will set it with boundary)
+    const headers = { ...commonAuthHeaders() };
+    delete headers['Content-Type'];
+
+    const r = await fetch(`${FANAR_BASE}/audio/transcriptions`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!r.ok) {
+      const errorData = await r.json().catch(() => ({}));
+      return {
+        ok: false,
+        status: r.status,
+        error: errorData?.error?.message || errorData?.message || 'STT request failed',
+      };
+    }
+
+    const contentType = r.headers.get('content-type') || '';
+    
+    if (format === 'json' || contentType.includes('application/json')) {
+      const data = await r.json();
+      return { ok: true, status: r.status, data, text: data?.text || data?.transcription || '' };
+    } else {
+      const text = await r.text();
+      return { ok: true, status: r.status, text: text.trim() };
+    }
+  } catch (e) {
+    return { ok: false, status: 500, error: e.message || 'STT error' };
+  }
+}
+
 // ====== Helpers ======
 function trimTo(str, max = 8000) {
   if (!str) return '';
@@ -287,21 +408,130 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
       return `${name}${age}${phone}`;
     }).filter(Boolean);
 
+    // Extract clinical patterns and statistics from reports
+    const extractClinicalPatterns = (reports) => {
+      const diagnosisFreq = new Map();
+      const medicationFreq = new Map();
+      const chiefComplaintFreq = new Map();
+      const patientAges = [];
+      const reportTypes = { clinical: 0, lab: 0 };
+      
+      reports.forEach((r) => {
+        // Count report types
+        if (r.type === 'lab') reportTypes.lab++;
+        else reportTypes.clinical++;
+        
+        // Extract diagnoses
+        if (r.diagnosis) {
+          const dx = String(r.diagnosis).trim();
+          diagnosisFreq.set(dx, (diagnosisFreq.get(dx) || 0) + 1);
+        }
+        
+        // Extract medications
+        if (Array.isArray(r.medications)) {
+          r.medications.forEach((m) => {
+            const medName = m.name || m;
+            if (medName) {
+              medicationFreq.set(medName, (medicationFreq.get(medName) || 0) + 1);
+            }
+          });
+        }
+        
+        // Extract chief complaints
+        if (r.chiefComplaint) {
+          const cc = String(r.chiefComplaint).trim();
+          chiefComplaintFreq.set(cc, (chiefComplaintFreq.get(cc) || 0) + 1);
+        }
+        
+        // Extract patient age if available
+        // (assuming age might be in patient data, we'll skip if not directly in report)
+      });
+      
+      // Get top diagnoses (top 5)
+      const topDiagnoses = Array.from(diagnosisFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([dx, count]) => ({ diagnosis: dx, count }));
+      
+      // Get top medications (top 10)
+      const topMedications = Array.from(medicationFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([med, count]) => ({ medication: med, count }));
+      
+      // Get top chief complaints (top 5)
+      const topComplaints = Array.from(chiefComplaintFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([cc, count]) => ({ complaint: cc, count }));
+      
+      return {
+        topDiagnoses,
+        topMedications,
+        topComplaints,
+        reportTypes,
+        totalReports: reports.length,
+      };
+    };
+    
+    const clinicalPatterns = reports.length > 0 ? extractClinicalPatterns(reports) : null;
+
     // Enhanced report lines with more clinical details for RAG
-    const reportLines = reports.slice(0, 30).map((r) => {
+    const reportLines = reports.slice(0, 40).map((r) => {
       const dt = fmtDT(asDate(r.date));
       const who = r.patientName || r.patientID || '—';
       const title =
         r.titleAr || r.titleEn || r.title ||
         (r.type === 'lab' ? (isAr ? 'تقرير معملي' : 'Lab report') : (isAr ? 'تقرير سريري' : 'Clinical report'));
-      const diagnosis = r.diagnosis ? ` • ${isAr ? 'التشخيص' : 'Dx'}: ${trimTo(String(r.diagnosis), 80)}` : '';
-      const chiefComplaint = r.chiefComplaint ? ` • ${isAr ? 'الشكوى' : 'CC'}: ${trimTo(String(r.chiefComplaint), 60)}` : '';
-      const findings = r.findings ? ` • ${isAr ? 'النتائج' : 'Findings'}: ${trimTo(String(r.findings), 60)}` : '';
+      const diagnosis = r.diagnosis ? ` • ${isAr ? 'التشخيص' : 'Dx'}: ${trimTo(String(r.diagnosis), 100)}` : '';
+      const chiefComplaint = r.chiefComplaint ? ` • ${isAr ? 'الشكوى' : 'CC'}: ${trimTo(String(r.chiefComplaint), 80)}` : '';
+      const findings = r.findings ? ` • ${isAr ? 'النتائج' : 'Findings'}: ${trimTo(String(r.findings), 80)}` : '';
       const meds = r.medications && Array.isArray(r.medications) && r.medications.length > 0
-        ? ` • ${isAr ? 'أدوية' : 'Meds'}: ${r.medications.slice(0, 3).map(m => m.name || m).join(', ')}`
+        ? ` • ${isAr ? 'أدوية' : 'Meds'}: ${r.medications.slice(0, 4).map(m => m.name || m).join(', ')}`
         : '';
-      return `- ${dt} — ${who} — ${title}${diagnosis}${chiefComplaint}${findings}${meds}`;
+      const tests = r.tests && Array.isArray(r.tests) && r.tests.length > 0
+        ? ` • ${isAr ? 'فحوصات' : 'Tests'}: ${r.tests.slice(0, 3).map(t => t.name || t).join(', ')}`
+        : '';
+      return `- ${dt} — ${who} — ${title}${diagnosis}${chiefComplaint}${findings}${meds}${tests}`;
     });
+    
+    // Build clinical patterns summary
+    const buildClinicalPatternsSummary = (patterns, isAr) => {
+      if (!patterns || patterns.totalReports === 0) return '';
+      
+      const lines = [];
+      lines.push(isAr ? 'أنماط سريرية من التقارير السابقة:' : 'Clinical patterns from past reports:');
+      
+      if (patterns.topDiagnoses.length > 0) {
+        lines.push(isAr ? 'التشخيصات الأكثر تكراراً:' : 'Most common diagnoses:');
+        patterns.topDiagnoses.forEach((item, i) => {
+          lines.push(`  ${i + 1}. ${item.diagnosis} (${item.count} ${isAr ? 'مرة' : 'times'})`);
+        });
+      }
+      
+      if (patterns.topMedications.length > 0) {
+        lines.push(isAr ? 'الأدوية الأكثر استخداماً:' : 'Most prescribed medications:');
+        patterns.topMedications.slice(0, 5).forEach((item, i) => {
+          lines.push(`  ${i + 1}. ${item.medication} (${item.count} ${isAr ? 'مرة' : 'times'})`);
+        });
+      }
+      
+      if (patterns.topComplaints.length > 0) {
+        lines.push(isAr ? 'الشكاوى الرئيسية الأكثر شيوعاً:' : 'Most common chief complaints:');
+        patterns.topComplaints.forEach((item, i) => {
+          lines.push(`  ${i + 1}. ${item.complaint} (${item.count} ${isAr ? 'مرة' : 'times'})`);
+        });
+      }
+      
+      lines.push(isAr 
+        ? `إجمالي التقارير: ${patterns.totalReports} (${patterns.reportTypes.clinical} ${isAr ? 'سريري' : 'clinical'}, ${patterns.reportTypes.lab} ${isAr ? 'معملي' : 'lab'})`
+        : `Total reports: ${patterns.totalReports} (${patterns.reportTypes.clinical} clinical, ${patterns.reportTypes.lab} lab)`
+      );
+      
+      return lines.join('\n');
+    };
+    
+    const clinicalPatternsSummary = clinicalPatterns ? buildClinicalPatternsSummary(clinicalPatterns, isAr) : '';
 
     // Clinic information
     const clinicInfo = doctorClinics.length > 0
@@ -314,7 +544,12 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
       : (isAr ? '—' : '—');
 
     const headerAr = `
-أنت "شافي AI" — مساعد سريري ذكي يعمل مع الأطباء فقط في مصر.
+أنت "شافي AI" — مساعد طبي ذكي يعمل مع الأطباء فقط في مصر. أنت مساعد متخصص يدعم الطبيب في عمله اليومي.
+
+أدوارك الرئيسية:
+• مساعد سريري (Clinical Assistant): تدعم اتخاذ القرار الطبي العام، مراجعة الخطط العلاجية، تحليل الأنماط السريرية من التقارير السابقة، وتوضيح الإرشادات المبنية على الدليل (بدون وصف دوائي شخصي للمريض)
+• سكرتير عيادة ذكي (Smart Clinic Secretary): تساعد في تنظيم المواعيد، متابعة المرضى، تلخيص الزيارات، تجهيز الرسائل النصية أو الإلكترونية للمرضى أو الإدارة، وإدارة المعلومات السريرية
+• مساعد تحليل البيانات (Data Analysis Assistant): تحلل أنماط العمل السريري، التشخيصات الشائعة، الأدوية المستخدمة، والشكاوى الرئيسية من بيانات الطبيب الفعلية لتقديم رؤى مفيدة
 
 السياق المصري:
 • جميع العيادات والمرضى والأطباء في مصر
@@ -335,11 +570,17 @@ async function buildDoctorContextFromFirestore({ uid, idToken, lang = 'ar' }) {
 • الاستناد إلى الدليل: عند ذكر حقائق طبية، اذكر الدليل بإيجاز (إرشادات/دراسة واسم الجهة/السنة) إن توفر؛ واذكر رابطًا عامًا إن وجد.
 • ليست بديلاً للتشخيص: القرار العلاجي النهائي للطبيب وبحسب حالة المريض.
 • اللغة: جاوب بلغة المستخدم.
+• الهوية: إذا سُئلت "من أنت؟" أو عن هويتك، عرِّف نفسك دائماً بهذه الصيغة تقريباً: "أنا شافي AI، مساعد طبي وسكرتير ذكي يدعم الطبيب في العيادة." لا تقل أبداً أنك نموذج لغة أو من تطوير شركة تقنية.
 • مهم جداً: يجب أن تكون إجابتك موجزة - بحد أقصى 300 كلمة. كن مباشراً ومختصراً.
 • تذكر: إذا لم تكن المعلومة موجودة في "سياق الطبيب" أو "البيانات المالية" المرفقة أدناه، قل "المعلومات غير متاحة" أو "لا توجد بيانات متاحة". لا تخمن، لا تخترع، لا تستخدم أمثلة عامة.`.trim();
 
     const headerEn = `
-You are "Shafy AI" — an intelligent clinical assistant for physicians in Egypt.
+You are "Shafy AI" — an intelligent medical assistant that works only with physicians in Egypt. You are a specialized assistant that supports the doctor in their daily work.
+
+Your main roles:
+• Clinical Assistant: You support general medical decision-making, review treatment plans, analyze clinical patterns from past reports, and clarify evidence-based guidelines (no personalized prescriptions to individual patients)
+• Smart Clinic Secretary: You help organize appointments, follow up with patients, summarize visits, prepare text or electronic messages (SMS/WhatsApp/email) for patients or staff, and manage clinical information
+• Data Analysis Assistant: You analyze clinical practice patterns, common diagnoses, medications used, and main complaints from the doctor's actual data to provide useful insights
 
 Egyptian Context:
 • All clinics, patients, and doctors are in Egypt
@@ -360,6 +601,7 @@ Core rules (VERY STRICT - MUST FOLLOW):
 • Evidence-based: when stating medical facts, briefly cite the source (guideline/study, org/year) and include a public link if available.
 • Not a substitute for clinical judgment: final decisions rest with the treating physician and patient specifics.
 • Language: respond in the user's language.
+• Identity: If asked "Who are you?" or about your identity, ALWAYS describe yourself as: "I am Shafy AI, a medical assistant and smart secretary that supports the doctor in clinic." Never say you are a language model or mention the underlying provider.
 • Very important: Your response must be concise - maximum 300 words. Be direct and brief.
 • Remember: If the information is not present in the "Doctor context" or "Financial Data" attached below, say "Information not available" or "No data available". Do not guess, do not invent, do not use general examples.`.trim();
 
@@ -432,7 +674,9 @@ ${clinicInfo}
 
 ${financialSummary ? `البيانات المالية:\n${financialSummary}\n` : ''}
 
-أحدث التقارير السريرية (للاستدلال على أنماط التشخيص والعلاج):
+${clinicalPatternsSummary ? `${clinicalPatternsSummary}\n\n` : ''}
+
+أحدث التقارير السريرية (للاستدلال على أنماط التشخيص والعلاج - استخدم هذه الأنماط لفهم أنماط عمل الطبيب):
 ${reportLines.join('\n') || '—'}
 
 المواعيد القادمة:
@@ -509,7 +753,9 @@ ${clinicInfo}
 
 ${financialSummaryEn ? `Financial Data:\n${financialSummaryEn}\n` : ''}
 
-Recent clinical reports (for inferring diagnostic and treatment patterns):
+${clinicalPatterns ? `${buildClinicalPatternsSummary(clinicalPatterns, false)}\n\n` : ''}
+
+Recent clinical reports (for inferring diagnostic and treatment patterns - use these patterns to understand the doctor's practice patterns):
 ${reportLines.join('\n') || '—'}
 
 Upcoming appointments:
@@ -623,7 +869,7 @@ export default async function handler(req) {
     // Parse body
     const body = await req.json();
     const {
-      mode, // "translate_ar_to_en" | undefined
+      mode, // "translate_ar_to_en" | "stt" | undefined
       message,
       ocrTexts = [],
       doctorContext = '',
@@ -645,7 +891,44 @@ export default async function handler(req) {
 
       // NEW: if false, we won't include any server/doctor-wide context
       use_server_context = true,
+
+      // TTS/STT controls
+      audioBase64,                  // base64 encoded audio for STT
+      audioMimeType = 'audio/wav',  // mime type for audio
+      enable_tts = false,           // generate TTS audio for response
+      stt_model = 'Fanar-Aura-STT-1', // STT model
+      tts_model = 'Fanar-Aura-TTS-2', // TTS model
     } = body || {};
+
+    // ===== STT (Speech-to-Text) branch =====
+    if (mode === 'stt' || audioBase64) {
+      if (!audioBase64) {
+        return json({ error: 'audioBase64 is required for STT mode' }, 400);
+      }
+
+      try {
+        // Decode base64 audio to ArrayBuffer
+        const audioBuffer = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0)).buffer;
+        const audioBlob = new Blob([audioBuffer], { type: audioMimeType });
+
+        // Transcribe audio
+        const sttResult = await fanarSTT(audioBlob, stt_model, 'text');
+
+        if (!sttResult.ok) {
+          return json({
+            error: sttResult.error || 'STT request failed',
+          }, sttResult.status || 502);
+        }
+
+        return json({
+          ok: true,
+          text: sttResult.text || '',
+          stt_status: 'success',
+        });
+      } catch (e) {
+        return json({ error: e.message || 'STT processing error' }, 500);
+      }
+    }
 
     // ===== Translation branch =====
     if (mode === 'translate_ar_to_en') {
@@ -741,14 +1024,41 @@ export default async function handler(req) {
     const agent = getAgentForQuery(userTextCore, lang);
     
     // ===== Optional RAG (citations) =====
-    // Enhance RAG query with doctor's specialty for better context
+    // Enhance RAG query with doctor's specialty and relevant context for better retrieval
     let citations = [];
     let medicalSources = [];
     
     if (enable_rag) {
       let ragQuery = String(rag_query || userTextCore).slice(0, 500);
       
-      // If we have doctor context, enhance the query with specialty
+      // Extract key medical terms and context from query
+      const extractMedicalTerms = (text) => {
+        // Simple extraction - look for common medical patterns
+        const medicalKeywords = [];
+        const lowerText = text.toLowerCase();
+        
+        // Common medical terms (can be expanded)
+        const patterns = [
+          /\b(diagnosis|diagnose|diagnosed|dx)\b/gi,
+          /\b(treatment|treat|therapy|medication|medicine|drug)\b/gi,
+          /\b(symptom|symptoms|complaint|complaints)\b/gi,
+          /\b(test|tests|lab|laboratory|examination)\b/gi,
+          /\b(patient|patients|case|cases)\b/gi,
+        ];
+        
+        patterns.forEach(pattern => {
+          const matches = text.match(pattern);
+          if (matches) {
+            medicalKeywords.push(...matches.map(m => m.toLowerCase()));
+          }
+        });
+        
+        return [...new Set(medicalKeywords)].slice(0, 5); // Remove duplicates, limit to 5
+      };
+      
+      const medicalTerms = extractMedicalTerms(userTextCore);
+      
+      // If we have doctor context, enhance the query with specialty and relevant patterns
       if (serverCtx) {
         const specialtyMatch = serverCtx.match(/التخصص:\s*([^\n]+)|Specialty:\s*([^\n]+)/i);
         if (specialtyMatch) {
@@ -758,7 +1068,26 @@ export default async function handler(req) {
             ragQuery = `${ragQuery} ${specialty.trim()}`;
           }
         }
+        
+        // Extract common diagnoses from context if available (from clinical patterns)
+        const diagnosisMatch = serverCtx.match(/التشخيصات الأكثر تكراراً:|Most common diagnoses:/);
+        if (diagnosisMatch) {
+          // Extract first few diagnoses from the patterns section
+          const diagnosesSection = serverCtx.match(/التشخيصات الأكثر تكراراً:[\s\S]{1,500}|Most common diagnoses:[\s\S]{1,500}/i);
+          if (diagnosesSection) {
+            // Add to query to help find relevant reports
+            ragQuery = `${ragQuery} ${diagnosesSection[0].slice(0, 200)}`;
+          }
+        }
       }
+      
+      // Add medical terms to query if found
+      if (medicalTerms.length > 0) {
+        ragQuery = `${ragQuery} ${medicalTerms.join(' ')}`;
+      }
+      
+      // Clean up query (remove extra spaces, limit length)
+      ragQuery = ragQuery.replace(/\s+/g, ' ').trim().slice(0, 600);
       
       // Fetch local RAG citations (doctor's own data)
       citations = await fetchCitations(req, ragQuery, idToken, { limit: Math.max(1, Math.min(10, rag_limit)), timeoutMs: rag_timeout_ms });
@@ -829,22 +1158,26 @@ export default async function handler(req) {
     const ragInstructions = isArabic
       ? `تعليمات استخدام البيانات (صارمة جداً):
 - ممنوع تماماً - لا تستنتج من مصادر خارجية: عند الإجابة على أسئلة حول معلومات الطبيب الشخصية (التخصص، المؤهلات، الجامعة، إلخ)، استخدم فقط البيانات من "معلومات الطبيب الشخصية" المرفقة من Firebase. ممنوع الاستنتاج من الدراسات البحثية أو التقارير أو أي مصادر أخرى.
-- استخدم فقط سياق الطبيب المرفق أدناه (التخصص من "معلومات الطبيب الشخصية"، التقارير السابقة، أنماط العلاج) - لا تستخدم بيانات من طبيب آخر
-- عند الاقتراح على تشخيص أو علاج، قارن مع الحالات المشابهة في التقارير السابقة المرفقة فقط
+- استخدم فقط سياق الطبيب المرفق أدناه (التخصص من "معلومات الطبيب الشخصية"، التقارير السابقة، أنماط العلاج، الأنماط السريرية المستخرجة) - لا تستخدم بيانات من طبيب آخر
+- عند الاقتراح على تشخيص أو علاج، قارن مع الحالات المشابهة في التقارير السابقة المرفقة والأنماط السريرية المستخرجة فقط
+- استخدم الأنماط السريرية (التشخيصات الشائعة، الأدوية المستخدمة، الشكاوى الرئيسية) لفهم أنماط عمل الطبيب وتقديم اقتراحات متسقة مع ممارسته
+- عند الإجابة على أسئلة حول إحصائيات أو أنماط العمل، استخدم الأنماط السريرية المستخرجة من البيانات الفعلية
 - استخدم معلومات العيادات المرفقة فقط عند الإشارة إلى المواعيد أو الخدمات
 - للأسئلة المالية: استخدم فقط "البيانات المالية" المرفقة. لا تخترع تفاصيل عن فحوصات، حقن، أدوية، أو خدمات إضافية غير موجودة في البيانات المرفقة
-- للمعلومات الطبية العامة: يمكنك استخدام المصادر الخارجية (المراجع العلمية) لدعم إجاباتك الطبية العامة، لكن لا تستخدمها للإجابة على أسئلة حول معلومات الطبيب الشخصية
+- للمعلومات الطبية العامة: يمكنك استخدام المصادر الخارجية (المراجع العلمية) لدعم إجاباتك الطبية العامة، لكن لا تستخدمها للإجابة على أسئلة حول معلومات الطبيب الشخصية أو أنماط عمله
 - استخدم المصادر الطبية الموثوقة المرفقة لدعم إجاباتك الطبية العامة فقط
-- تذكر: إذا لم تكن المعلومات موجودة في "معلومات الطبيب الشخصية" أو "البيانات المالية" المرفقة، قل "المعلومات غير متاحة" بدلاً من اختراعها أو الاستنتاج`
+- تذكر: إذا لم تكن المعلومات موجودة في "معلومات الطبيب الشخصية" أو "البيانات المالية" أو "الأنماط السريرية" المرفقة، قل "المعلومات غير متاحة" بدلاً من اختراعها أو الاستنتاج`
       : `Data usage instructions (VERY STRICT):
 - STRICTLY FORBIDDEN - Do not infer from external sources: When answering questions about the doctor's personal information (specialty, qualifications, university, etc.), use ONLY data from "Doctor Profile Information" attached from Firebase. It is FORBIDDEN to infer from research studies, reports, or any other sources.
-- Use ONLY the doctor's context attached below (specialty from "Doctor Profile Information", past reports, treatment patterns) - Do not use data from another doctor
-- When suggesting diagnosis or treatment, compare with similar cases in attached past reports ONLY
+- Use ONLY the doctor's context attached below (specialty from "Doctor Profile Information", past reports, treatment patterns, extracted clinical patterns) - Do not use data from another doctor
+- When suggesting diagnosis or treatment, compare with similar cases in attached past reports and extracted clinical patterns ONLY
+- Use the clinical patterns (common diagnoses, medications used, main complaints) to understand the doctor's practice patterns and provide suggestions consistent with their practice
+- When answering questions about statistics or practice patterns, use the extracted clinical patterns from actual data
 - Use attached clinic information ONLY when referring to appointments or services
 - For financial questions: Use ONLY the attached "Financial Data". Do not invent details about tests, injections, medications, or additional services not present in the attached data
-- For general medical information: You can use external sources (scientific references) to support your general medical answers, but do not use them to answer questions about the doctor's personal information
+- For general medical information: You can use external sources (scientific references) to support your general medical answers, but do not use them to answer questions about the doctor's personal information or practice patterns
 - Use the attached trusted medical sources to support your general medical answers only
-- Remember: If information is not present in the attached "Doctor Profile Information" or "Financial Data", say "Information not available" instead of making it up or inferring`;
+- Remember: If information is not present in the attached "Doctor Profile Information", "Financial Data", or "Clinical Patterns", say "Information not available" instead of making it up or inferring`;
 
     // Add focus instruction at the end
     const finalFocusInstruction = isArabic
@@ -893,15 +1226,60 @@ export default async function handler(req) {
       })),
     ];
 
-    return json({
+    // Generate TTS audio if requested
+    let ttsAudioBase64 = null;
+    let ttsStatus = 'disabled';
+    console.log('[ask-shafy] TTS requested:', enable_tts, 'Text length:', textOut?.length || 0);
+    if (enable_tts && textOut) {
+      try {
+        const ttsResult = await fanarTTS(textOut, lang, tts_model);
+        console.log('[ask-shafy] TTS result:', { ok: ttsResult.ok, hasBlob: !!ttsResult.audioBlob, error: ttsResult.error });
+        if (ttsResult.ok && ttsResult.audioBlob) {
+          // Convert audio blob to base64 for Edge runtime compatibility
+          // Use chunked approach to avoid stack overflow with large files
+          const arrayBuffer = await ttsResult.audioBlob.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          // Convert Uint8Array to base64 in chunks
+          let binaryString = '';
+          const chunkSize = 8192; // Process in 8KB chunks
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            const chunk = uint8Array.slice(i, i + chunkSize);
+            binaryString += String.fromCharCode.apply(null, chunk);
+          }
+          
+          ttsAudioBase64 = btoa(binaryString);
+          ttsStatus = 'success';
+          console.log('[ask-shafy] TTS base64 length:', ttsAudioBase64.length);
+        } else {
+          ttsStatus = 'error';
+          console.error('[ask-shafy] TTS generation failed:', ttsResult.error, ttsResult.status);
+        }
+      } catch (e) {
+        ttsStatus = 'error';
+        console.error('TTS error:', e.message, e.stack);
+      }
+    } else if (!enable_tts) {
+      ttsStatus = 'disabled';
+    }
+
+    const response = {
       ok: true,
       model: MODEL_CHAT,
       text: textOut,
-      tts_status: 'disabled',
+      tts_status: ttsStatus,
       stt_status: 'disabled',
       citations: allCitations, // array of {title,url,source,date,tags}
       agent: agent.type, // 'medical' | 'financial' | 'general'
-    });
+    };
+
+    // Add TTS audio if generated
+    if (ttsAudioBase64) {
+      response.tts_audio_base64 = ttsAudioBase64;
+      response.tts_audio_mime_type = 'audio/mpeg'; // MP3 from FANAR
+    }
+
+    return json(response);
   } catch (e) {
     const status = e?.status || 500;
     return json({ error: e?.message || 'Server error' }, status);
