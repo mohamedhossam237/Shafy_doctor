@@ -16,7 +16,7 @@ export const config = {
 // ===============================================================
 
 const FANAR_BASE = "https://api.fanar.qa/v1";
-const FANAR_MODEL = "Fanar-C-2-27B";
+const FANAR_MODEL = "Fanar";
 const MAX_CHARS_PER_CHUNK = 4000;
 
 function getFanarKey() {
@@ -90,10 +90,6 @@ function parseMultipart(req) {
         ? fields.patientId[0]
         : fields.patientId;
 
-      const patientName = Array.isArray(fields.patientName)
-        ? fields.patientName[0]
-        : fields.patientName;
-
       let file = files.file;
       if (Array.isArray(file)) file = file[0];
 
@@ -109,7 +105,6 @@ function parseMultipart(req) {
 
       resolve({
         patientId,
-        patientName,
         fileBuffer,
         filename: file.originalFilename || "",
         mimeType: file.mimetype || ""
@@ -360,19 +355,13 @@ function makeEmpty() {
 // FANAR EXTRACTION
 // ===============================================================
 
-async function extractWithFanar(text, patientName) {
+async function extractWithFanar(text) {
   const chunks = splitChunks(text);
   const results = [];
-
-  const nameContext = patientName
-    ? `\nPATIENT NAME:\n"${patientName}"\n\nUse this name to infer the patient's gender when it is not explicitly stated in the document. If the name clearly belongs to a male or female in Arabic or English culture, set the "gender" field accordingly. If you are unsure, leave "gender" empty rather than guessing.\n`
-    : '';
 
   const system = `
 You are an expert Medical Scribe and Data Extractor.
 Your goal is to ensure 100% of the document's content is captured.
-
-${nameContext}
 
 STEP 1: THE CLINICAL NARRATIVE (CRITICAL)
 First, write a comprehensive "clinical_summary" that reads like a professional doctor's note.
@@ -440,37 +429,6 @@ JSON STRUCTURE:
   const merged = mergeExtract(results);
   console.log('Final merged extraction:', JSON.stringify(merged, null, 2).substring(0, 1000));
   return merged;
-}
-
-// ===============================================================
-// GENDER INFERENCE FROM NAME (FALLBACK)
-// ===============================================================
-
-async function inferGenderFromName(patientName) {
-  if (!patientName) return '';
-
-  const system = `You are an expert in Arabic and English names.
-Given a person's full name, infer their likely gender.
-Return EXACTLY one of: "Male", "Female", or "" (empty string) if you are not sure. No other words.`;
-
-  const user = `Name: "${patientName}"`;
-
-  try {
-    const resp = await fanarChat([
-      { role: "system", content: system },
-      { role: "user", content: user }
-    ]);
-
-    if (!resp.ok) return '';
-
-    const content = String(resp.data?.choices?.[0]?.message?.content || '').trim();
-    if (/^male$/i.test(content)) return 'Male';
-    if (/^female$/i.test(content)) return 'Female';
-    return '';
-  } catch (e) {
-    console.error("Gender inference failed:", e.message);
-    return '';
-  }
 }
 
 // ===============================================================
@@ -777,8 +735,53 @@ function mergeExtract(parts) {
 // BUILD NOTES
 // ===============================================================
 
-// Previously we built a long composite note from conditions, meds, lab results, etc.
-// We now only want the clinical summary to go into medical notes, so this helper is removed.
+function buildNotes(extracted) {
+  const parts = [];
+
+  if (clean(extracted.clinicalSummary)) {
+    parts.push("CLINICAL SUMMARY:\n" + clean(extracted.clinicalSummary));
+    parts.push("-------------------");
+  }
+
+  const pushArr = (label, arr) => {
+    const items = (arr || []).map(clean).filter(Boolean);
+    if (items.length) {
+      parts.push(label + ": " + items.join(", "));
+    }
+  };
+
+  pushArr("Allergies", extracted.allergies);
+  pushArr("Conditions", extracted.conditions);
+  pushArr("Medications", extracted.medications);
+
+  if (clean(extracted.diagnosis))
+    parts.push("Diagnosis: " + clean(extracted.diagnosis));
+  if (clean(extracted.findings))
+    parts.push("Findings: " + clean(extracted.findings));
+  if (clean(extracted.procedures))
+    parts.push("Procedures: " + clean(extracted.procedures));
+
+  if (Array.isArray(extracted.labResults)) {
+    const lines = extracted.labResults.map(lr => {
+      const seg = [];
+      if (clean(lr.test)) seg.push("Test: " + clean(lr.test));
+      if (clean(lr.value)) seg.push("Value: " + clean(lr.value));
+      if (clean(lr.unit)) seg.push("Unit: " + clean(lr.unit));
+      if (clean(lr.flag)) seg.push("Flag: " + clean(lr.flag));
+      return seg.length ? "- " + seg.join(", ") : null;
+    }).filter(Boolean);
+
+    if (lines.length) {
+      parts.push("Lab Results:");
+      parts.push(...lines);
+    }
+  }
+
+  if (clean(extracted.notes))
+    parts.push("Other notes: " + clean(extracted.notes));
+
+  return parts.join("\n").trim();
+}
 
 function fallbackExtraction(text) {
   const data = makeEmpty();
@@ -873,7 +876,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "File upload failed: " + e.message });
     }
 
-    const { patientId, patientName, fileBuffer, filename, mimeType } = parseResult;
+    const { patientId, fileBuffer, filename, mimeType } = parseResult;
 
     if (!patientId) {
       return res.status(400).json({ error: "Missing patientId" });
@@ -906,7 +909,7 @@ export default async function handler(req, res) {
 
     console.log("Starting AI extraction...");
     try {
-      extracted = await extractWithFanar(cleanText, patientName);
+      extracted = await extractWithFanar(cleanText);
       console.log("AI extraction successful!");
     } catch (e) {
       console.error("AI Extraction failed:", e.message);
@@ -931,19 +934,10 @@ export default async function handler(req, res) {
     // Normalize the extracted data
     extracted = normalizeExtractedData(extracted);
 
-    // If gender is still missing, try to infer it from the patient's name
-    if ((!extracted.gender || !String(extracted.gender).trim()) && patientName) {
-      const inferred = await inferGenderFromName(patientName);
-      if (inferred) {
-        extracted.gender = inferred;
-      }
-    }
-
     // Validate medical values (reject impossible values)
     extracted = validateMedicalData(extracted);
 
-    // Only use the clinical summary as the medical notes content
-    extracted.notes = clean(extracted.clinicalSummary || extracted.notes || "");
+    extracted.notes = buildNotes(extracted);
 
     return res.status(200).json({
       ok: true,
