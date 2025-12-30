@@ -77,25 +77,75 @@ export default function MedicalFileIntake({
       setSuccess("");
       setWarning("");
 
-      const idToken = await user.getIdToken();
+      // Force token refresh to ensure we have a valid token
+      const idToken = await user.getIdToken(true);
 
       const form = new FormData();
       form.append("patientId", String(patientId));
       form.append("file", file);
 
-      const res = await fetch("/api/intake-medical-file", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: form,
-      });
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+
+      let res;
+      try {
+        res = await fetch("/api/intake-medical-file", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: form,
+          signal: controller.signal,
+        });
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error(
+            t("Upload timeout. Please check your connection and try again.", "انتهت مهلة الرفع. يرجى التحقق من الاتصال والمحاولة مرة أخرى.")
+          );
+        }
+        if (fetchError.message?.includes('Failed to fetch') || fetchError.message?.includes('NetworkError')) {
+          throw new Error(
+            t("Network error. Please check your internet connection and try again.", "خطأ في الشبكة. يرجى التحقق من اتصال الإنترنت والمحاولة مرة أخرى.")
+          );
+        }
+        throw fetchError;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      // Check if response is ok before trying to parse JSON
+      if (!res.ok) {
+        let errorMessage = t("Server error while processing file.", "خطأ من الخادم أثناء معالجة الملف.");
+        try {
+          const errorData = await res.json();
+          errorMessage = errorData?.error || errorMessage;
+          
+          // Provide more specific error messages
+          if (res.status === 401) {
+            errorMessage = t("Authentication failed. Please log in again.", "فشل المصادقة. يرجى تسجيل الدخول مرة أخرى.");
+          } else if (res.status === 413) {
+            errorMessage = t("File is too large. Maximum size is 20MB.", "الملف كبير جداً. الحد الأقصى 20 ميجابايت.");
+          } else if (res.status === 400) {
+            errorMessage = errorData?.error || t("Invalid file format or missing data.", "تنسيق الملف غير صالح أو بيانات مفقودة.");
+          }
+        } catch {
+          // If JSON parsing fails, use status-based message
+          if (res.status === 401) {
+            errorMessage = t("Authentication failed. Please log in again.", "فشل المصادقة. يرجى تسجيل الدخول مرة أخرى.");
+          } else if (res.status >= 500) {
+            errorMessage = t("Server error. Please try again later.", "خطأ في الخادم. يرجى المحاولة لاحقاً.");
+          }
+        }
+        throw new Error(errorMessage);
+      }
 
       const data = await res.json().catch(() => null);
 
-      if (!res.ok || !data) {
+      if (!data) {
         throw new Error(
-          data?.error || t("Server error while processing file.", "خطأ من الخادم أثناء معالجة الملف.")
+          t("Server error while processing file.", "خطأ من الخادم أثناء معالجة الملف.")
         );
       }
 
@@ -128,7 +178,7 @@ export default function MedicalFileIntake({
       setLoading(false);
 
     } catch (e) {
-      console.error(e);
+      console.error("Upload error:", e);
       setError(e.message || t("Upload failed", "فشل رفع الملف"));
       setLoading(false);
     }
@@ -324,7 +374,33 @@ export default function MedicalFileIntake({
                 id="medical-file-input"
                 type="file"
                 accept=".pdf,.doc,.docx,.txt"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  const selectedFile = e.target.files?.[0] || null;
+                  if (selectedFile) {
+                    // Check file size (20MB limit)
+                    const maxSize = 20 * 1024 * 1024; // 20MB
+                    if (selectedFile.size > maxSize) {
+                      setError(t("File size exceeds 20MB limit. Please choose a smaller file.", "حجم الملف يتجاوز الحد الأقصى 20 ميجابايت. يرجى اختيار ملف أصغر."));
+                      setFile(null);
+                      // Reset input
+                      e.target.value = '';
+                      return;
+                    }
+                    // Check file type
+                    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+                    const validExtensions = ['.pdf', '.doc', '.docx', '.txt'];
+                    const fileName = selectedFile.name.toLowerCase();
+                    const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+                    if (!hasValidExtension && !validTypes.includes(selectedFile.type)) {
+                      setError(t("Invalid file type. Please upload PDF, Word, or TXT files only.", "نوع الملف غير صالح. يرجى رفع ملفات PDF أو Word أو TXT فقط."));
+                      setFile(null);
+                      e.target.value = '';
+                      return;
+                    }
+                    setError(""); // Clear any previous errors
+                  }
+                  setFile(selectedFile);
+                }}
               />
             </Paper>
           </Stack>

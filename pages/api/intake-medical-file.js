@@ -80,11 +80,33 @@ function parseMultipart(req) {
     const form = formidable({
       multiples: false,
       keepExtensions: true,
-      maxFileSize: 20 * 1024 * 1024
+      maxFileSize: 20 * 1024 * 1024, // 20MB
+      maxFields: 10,
+      maxFieldsSize: 10 * 1024, // 10KB for form fields
     });
 
+    // Set timeout for parsing (5 minutes)
+    const timeout = setTimeout(() => {
+      form.destroy();
+      reject(new Error("File upload timeout. The file may be too large or the connection is too slow."));
+    }, 5 * 60 * 1000);
+
     form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
+      clearTimeout(timeout);
+      
+      if (err) {
+        // Provide more specific error messages
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return reject(new Error("File size exceeds 20MB limit"));
+        }
+        if (err.code === 'LIMIT_FIELD_COUNT' || err.code === 'LIMIT_FIELD_VALUE') {
+          return reject(new Error("Form data limit exceeded"));
+        }
+        if (err.message?.includes('timeout') || err.message?.includes('TIMEOUT')) {
+          return reject(new Error("Upload timeout. Please try again with a smaller file or better connection."));
+        }
+        return reject(err);
+      }
 
       const patientId = Array.isArray(fields.patientId)
         ? fields.patientId[0]
@@ -93,14 +115,25 @@ function parseMultipart(req) {
       let file = files.file;
       if (Array.isArray(file)) file = file[0];
 
-      if (!file) return reject(new Error("File not found"));
+      if (!file) return reject(new Error("File not found in upload"));
       if (!file.filepath) return reject(new Error("Uploaded file has no filepath"));
 
       let fileBuffer;
       try {
         fileBuffer = fs.readFileSync(file.filepath);
+        // Clean up temp file after reading
+        try {
+          fs.unlinkSync(file.filepath);
+        } catch (unlinkErr) {
+          // Ignore cleanup errors
+          console.warn("Failed to cleanup temp file:", unlinkErr.message);
+        }
       } catch (e) {
-        return reject(new Error("Cannot read uploaded file"));
+        return reject(new Error("Cannot read uploaded file: " + e.message));
+      }
+
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return reject(new Error("Uploaded file is empty"));
       }
 
       resolve({
@@ -873,6 +906,13 @@ export default async function handler(req, res) {
       parseResult = await parseMultipart(req);
     } catch (e) {
       console.error("Multipart parse failed:", e.message);
+      // Provide more specific status codes
+      if (e.message?.includes("size") || e.message?.includes("LIMIT_FILE_SIZE")) {
+        return res.status(413).json({ error: e.message || "File too large" });
+      }
+      if (e.message?.includes("timeout") || e.message?.includes("TIMEOUT")) {
+        return res.status(408).json({ error: e.message || "Upload timeout" });
+      }
       return res.status(400).json({ error: "File upload failed: " + e.message });
     }
 
@@ -885,9 +925,18 @@ export default async function handler(req, res) {
     // 4. Extract Text
     let raw = "";
     try {
-      raw = await extractTextFromBuffer(fileBuffer, filename, mimeType);
+      // Set timeout for text extraction (2 minutes)
+      raw = await Promise.race([
+        extractTextFromBuffer(fileBuffer, filename, mimeType),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Text extraction timeout")), 2 * 60 * 1000)
+        )
+      ]);
     } catch (e) {
       console.error("Text extraction failed:", e.message);
+      if (e.message?.includes("timeout")) {
+        return res.status(408).json({ error: "File processing timeout. The file may be too complex or large." });
+      }
       return res.status(400).json({ error: "Failed to read file text: " + e.message });
     }
 
