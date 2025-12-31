@@ -129,6 +129,10 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
     if (e.target.closest('button') || e.target.closest('a')) {
       return;
     }
+    // Don't navigate for cancelled appointments (reference only)
+    if (cancelled) {
+      return;
+    }
     router.push(detailHref);
   };
 
@@ -143,16 +147,21 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         display: 'flex',
         alignItems: 'center',
         gap: 3,
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.95) 100%)',
+        background: cancelled 
+          ? 'linear-gradient(135deg, rgba(245,245,245,0.85) 0%, rgba(250,250,250,0.95) 100%)'
+          : 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.95) 100%)',
         backdropFilter: 'blur(20px) saturate(180%)',
         WebkitBackdropFilter: 'blur(20px) saturate(180%)',
         border: '1.5px solid',
-        borderColor: 'rgba(255,255,255,0.8)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
+        borderColor: cancelled ? 'rgba(200,200,200,0.5)' : 'rgba(255,255,255,0.8)',
+        boxShadow: cancelled 
+          ? '0 4px 16px rgba(0,0,0,0.03), 0 1px 4px rgba(0,0,0,0.02)'
+          : '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
         transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         position: 'relative',
         overflow: 'hidden',
-        cursor: 'pointer',
+        cursor: cancelled ? 'default' : 'pointer',
+        opacity: cancelled ? 0.7 : 1,
         '&::before': {
           content: '""',
           position: 'absolute',
@@ -194,14 +203,16 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
           transition: 'opacity 0.4s ease',
         },
         '&:hover': {
-          transform: 'translateY(-6px) scale(1.01)',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.08)',
-          borderColor: completed
+          transform: cancelled ? 'none' : 'translateY(-6px) scale(1.01)',
+          boxShadow: cancelled 
+            ? '0 4px 16px rgba(0,0,0,0.03), 0 1px 4px rgba(0,0,0,0.02)'
+            : '0 20px 40px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.08)',
+          borderColor: cancelled
+            ? 'rgba(200,200,200,0.5)'
+            : completed
             ? 'rgba(76, 175, 80, 0.3)'
             : confirmed
             ? 'rgba(33, 150, 243, 0.3)'
-            : cancelled
-            ? 'rgba(158, 158, 158, 0.3)'
             : 'rgba(255, 152, 0, 0.3)',
           '&::before': {
             width: '8px',
@@ -304,7 +315,7 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
           }}
         >
           <Typography variant="caption" fontWeight={800} fontSize="0.7rem" color={statusColor + '.main'}>
-            #{appt._queue ?? '—'}
+            {cancelled ? '—' : `#${appt._queue ?? '—'}`}
           </Typography>
         </Box>
       </Box>
@@ -453,65 +464,67 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         />
 
         {/* Actions */}
-        <Stack direction="row" spacing={1.5}>
-          {!completed && !confirmed && (
+        {!cancelled && (
+          <Stack direction="row" spacing={1.5}>
+            {!completed && !confirmed && (
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => onConfirm?.(appt.id)}
+                disabled={confirming}
+                sx={{
+                  borderRadius: 2.5,
+                  textTransform: 'none',
+                  fontWeight: 800,
+                  px: 2.5,
+                  py: 1,
+                  background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                  boxShadow: '0 4px 16px rgba(25, 118, 210, 0.4), inset 0 1px 2px rgba(255,255,255,0.3)',
+                  '&:hover': {
+                    background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
+                    boxShadow: '0 6px 20px rgba(25, 118, 210, 0.5), inset 0 1px 2px rgba(255,255,255,0.4)',
+                    transform: 'translateY(-2px) scale(1.02)',
+                  },
+                  '&:disabled': {
+                    background: 'linear-gradient(135deg, #90caf9 0%, #bbdefb 100%)',
+                  },
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                }}
+              >
+                {confirming ? (isArabic ? 'جارٍ التأكيد…' : 'Confirming…') : (isArabic ? 'تأكيد' : 'Confirm')}
+              </Button>
+            )}
             <Button
-              variant="contained"
+              component={Link}
+              href={detailHref}
               size="small"
-              onClick={() => onConfirm?.(appt.id)}
-              disabled={confirming}
+              variant="outlined"
               sx={{
                 borderRadius: 2.5,
                 textTransform: 'none',
                 fontWeight: 800,
                 px: 2.5,
                 py: 1,
-                background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                boxShadow: '0 4px 16px rgba(25, 118, 210, 0.4), inset 0 1px 2px rgba(255,255,255,0.3)',
+                borderWidth: 2,
+                borderColor: 'primary.main',
+                color: 'primary.main',
+                bgcolor: 'rgba(25, 118, 210, 0.04)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
                 '&:hover': {
-                  background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                  boxShadow: '0 6px 20px rgba(25, 118, 210, 0.5), inset 0 1px 2px rgba(255,255,255,0.4)',
+                  borderWidth: 2.5,
+                  borderColor: 'primary.dark',
+                  bgcolor: 'rgba(25, 118, 210, 0.08)',
                   transform: 'translateY(-2px) scale(1.02)',
-                },
-                '&:disabled': {
-                  background: 'linear-gradient(135deg, #90caf9 0%, #bbdefb 100%)',
+                  boxShadow: '0 6px 20px rgba(25, 118, 210, 0.2)',
                 },
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             >
-              {confirming ? (isArabic ? 'جارٍ التأكيد…' : 'Confirming…') : (isArabic ? 'تأكيد' : 'Confirm')}
+              {isArabic ? 'فتح' : 'Open'}
             </Button>
-          )}
-          <Button
-            component={Link}
-            href={detailHref}
-            size="small"
-            variant="outlined"
-            sx={{
-              borderRadius: 2.5,
-              textTransform: 'none',
-              fontWeight: 800,
-              px: 2.5,
-              py: 1,
-              borderWidth: 2,
-              borderColor: 'primary.main',
-              color: 'primary.main',
-              bgcolor: 'rgba(25, 118, 210, 0.04)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              '&:hover': {
-                borderWidth: 2.5,
-                borderColor: 'primary.dark',
-                bgcolor: 'rgba(25, 118, 210, 0.08)',
-                transform: 'translateY(-2px) scale(1.02)',
-                boxShadow: '0 6px 20px rgba(25, 118, 210, 0.2)',
-              },
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-            }}
-          >
-            {isArabic ? 'فتح' : 'Open'}
-          </Button>
-        </Stack>
+          </Stack>
+        )}
       </Stack>
     </Paper>
   );
@@ -714,9 +727,20 @@ export default function AppointmentsPage() {
       ? todayRows
       : todayRows.filter((r) => (r.clinicId || r.clinicID || '') === selectedClinicId);
 
-    // sort by time, then assign queue numbers for the *visible* list
-    const sorted = [...base].sort((a, b) => (a._dt?.getTime() || 0) - (b._dt?.getTime() || 0));
-    return sorted.map((r, i) => ({ ...r, _queue: i + 1 }));
+    // Separate cancelled and active appointments
+    const active = base.filter((r) => normStatus(r?.status) !== 'cancelled');
+    const cancelled = base.filter((r) => normStatus(r?.status) === 'cancelled');
+
+    // sort by time, then assign queue numbers only for active appointments
+    const sortedActive = [...active].sort((a, b) => (a._dt?.getTime() || 0) - (b._dt?.getTime() || 0));
+    const withQueue = sortedActive.map((r, i) => ({ ...r, _queue: i + 1 }));
+    
+    // Append cancelled appointments without queue numbers (for reference only)
+    const cancelledWithoutQueue = cancelled.map((r) => ({ ...r, _queue: null }));
+    
+    // Return active appointments first, then cancelled (sorted by time)
+    const sortedCancelled = [...cancelledWithoutQueue].sort((a, b) => (a._dt?.getTime() || 0) - (b._dt?.getTime() || 0));
+    return [...withQueue, ...sortedCancelled];
   }, [todayRows, selectedClinicId]);
 
   const newHref = `/appointments/new${isArabic ? '?lang=ar' : ''}`;
