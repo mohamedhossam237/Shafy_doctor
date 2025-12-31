@@ -63,6 +63,16 @@ function toDate(val) {
   try { return new Date(val); } catch { return null; }
 }
 
+function normStatus(x) {
+  const s = String(x || '').toLowerCase().trim();
+  if (['complete', 'completed', 'done', 'finished'].includes(s)) return 'completed';
+  if (['confirm', 'confirmed'].includes(s)) return 'confirmed';
+  if (['cancel', 'cancelled', 'canceled'].includes(s)) return 'cancelled';
+  if (['no_show', 'noshow', 'missed', 'absent'].includes(s)) return 'no_show';
+  if (['pending', 'scheduled', 'new'].includes(s)) return 'pending';
+  return s || 'pending';
+}
+
 function isToday(d) {
   if (!d) return false;
   const now = new Date();
@@ -108,10 +118,11 @@ const sanitizeClinics = (arr) =>
 function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel }) {
   const router = useRouter();
   const d = apptDate(appt);
-  const status = String(appt?.status || 'pending').toLowerCase();
+  const status = normStatus(appt?.status);
   const completed = status === 'completed';
   const confirmed = status === 'confirmed';
-  const statusColor = completed ? 'success' : confirmed ? 'info' : 'warning';
+  const cancelled = status === 'cancelled';
+  const statusColor = completed ? 'success' : confirmed ? 'info' : cancelled ? 'default' : 'warning';
 
   const handleCardClick = (e) => {
     // Don't navigate if clicking on buttons or interactive elements
@@ -153,12 +164,16 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
             ? 'linear-gradient(180deg, #4caf50 0%, #66bb6a 50%, #81c784 100%)'
             : confirmed 
             ? 'linear-gradient(180deg, #2196f3 0%, #42a5f5 50%, #64b5f6 100%)'
+            : cancelled
+            ? 'linear-gradient(180deg, #9e9e9e 0%, #bdbdbd 50%, #e0e0e0 100%)'
             : 'linear-gradient(180deg, #ff9800 0%, #ffb74d 50%, #ffcc80 100%)',
           transition: 'all 0.4s ease',
           boxShadow: completed
             ? '0 0 20px rgba(76, 175, 80, 0.3)'
             : confirmed
             ? '0 0 20px rgba(33, 150, 243, 0.3)'
+            : cancelled
+            ? '0 0 20px rgba(158, 158, 158, 0.3)'
             : '0 0 20px rgba(255, 152, 0, 0.3)',
         },
         '&::after': {
@@ -172,6 +187,8 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
             ? 'radial-gradient(circle, rgba(76, 175, 80, 0.05) 0%, transparent 70%)'
             : confirmed
             ? 'radial-gradient(circle, rgba(33, 150, 243, 0.05) 0%, transparent 70%)'
+            : cancelled
+            ? 'radial-gradient(circle, rgba(158, 158, 158, 0.05) 0%, transparent 70%)'
             : 'radial-gradient(circle, rgba(255, 152, 0, 0.05) 0%, transparent 70%)',
           opacity: 0,
           transition: 'opacity 0.4s ease',
@@ -183,6 +200,8 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
             ? 'rgba(76, 175, 80, 0.3)'
             : confirmed
             ? 'rgba(33, 150, 243, 0.3)'
+            : cancelled
+            ? 'rgba(158, 158, 158, 0.3)'
             : 'rgba(255, 152, 0, 0.3)',
           '&::before': {
             width: '8px',
@@ -190,6 +209,8 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
               ? '0 0 30px rgba(76, 175, 80, 0.5)'
               : confirmed
               ? '0 0 30px rgba(33, 150, 243, 0.5)'
+              : cancelled
+              ? '0 0 30px rgba(158, 158, 158, 0.5)'
               : '0 0 30px rgba(255, 152, 0, 0.5)',
           },
           '&::after': {
@@ -390,10 +411,10 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         <Chip
           label={
             isArabic
-              ? completed ? 'منجز' : confirmed ? 'مؤكد' : 'قيد الانتظار'
-              : completed ? 'Completed' : confirmed ? 'Confirmed' : 'Pending'
+              ? completed ? 'منجز' : confirmed ? 'مؤكد' : cancelled ? 'ملغي' : 'قيد الانتظار'
+              : completed ? 'Completed' : confirmed ? 'Confirmed' : cancelled ? 'Cancelled' : 'Pending'
           }
-          color={completed ? 'success' : confirmed ? 'info' : 'warning'}
+          color={completed ? 'success' : confirmed ? 'info' : cancelled ? 'default' : 'warning'}
           sx={{
             fontWeight: 800,
             fontSize: '0.8rem',
@@ -403,11 +424,15 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
               ? '0 4px 12px rgba(76, 175, 80, 0.3), inset 0 1px 2px rgba(255,255,255,0.3)'
               : confirmed
               ? '0 4px 12px rgba(33, 150, 243, 0.3), inset 0 1px 2px rgba(255,255,255,0.3)'
+              : cancelled
+              ? '0 4px 12px rgba(158, 158, 158, 0.3), inset 0 1px 2px rgba(255,255,255,0.3)'
               : '0 4px 12px rgba(255, 152, 0, 0.3), inset 0 1px 2px rgba(255,255,255,0.3)',
             background: completed
               ? 'linear-gradient(135deg, #4caf50 0%, #66bb6a 50%, #81c784 100%)'
               : confirmed
               ? 'linear-gradient(135deg, #2196f3 0%, #42a5f5 50%, #64b5f6 100%)'
+              : cancelled
+              ? 'linear-gradient(135deg, #9e9e9e 0%, #bdbdbd 50%, #e0e0e0 100%)'
               : 'linear-gradient(135deg, #ff9800 0%, #ffb74d 50%, #ffcc80 100%)',
             color: 'white',
             border: 'none',
@@ -420,6 +445,8 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
                 ? '0 6px 16px rgba(76, 175, 80, 0.4), inset 0 1px 2px rgba(255,255,255,0.4)'
                 : confirmed
                 ? '0 6px 16px rgba(33, 150, 243, 0.4), inset 0 1px 2px rgba(255,255,255,0.4)'
+                : cancelled
+                ? '0 6px 16px rgba(158, 158, 158, 0.4), inset 0 1px 2px rgba(255,255,255,0.4)'
                 : '0 6px 16px rgba(255, 152, 0, 0.4), inset 0 1px 2px rgba(255,255,255,0.4)',
             },
           }}
@@ -564,7 +591,7 @@ export default function AppointmentsPage() {
         // Auto-complete confirmed appointments that have passed their time
         const now = new Date();
         const toUpdate = todayOnly.filter((r) => {
-          const status = String(r?.status || 'pending').toLowerCase();
+          const status = normStatus(r?.status);
           if (status !== 'confirmed') return false;
           const dt = r._dt;
           if (!dt || !(dt instanceof Date)) return false;
@@ -622,7 +649,7 @@ export default function AppointmentsPage() {
       const buffer = 5 * 60 * 1000; // 5 minutes in milliseconds
 
       const toUpdate = currentRows.filter((r) => {
-        const status = String(r?.status || 'pending').toLowerCase();
+        const status = normStatus(r?.status);
         if (status !== 'confirmed') return false;
         const dt = r._dt;
         if (!dt || !(dt instanceof Date)) return false;
@@ -732,10 +759,11 @@ export default function AppointmentsPage() {
 
   // Statistics
   const stats = React.useMemo(() => {
-    const pending = todayRows.filter((r) => String(r?.status || 'pending').toLowerCase() === 'pending').length;
-    const confirmed = todayRows.filter((r) => String(r?.status || 'pending').toLowerCase() === 'confirmed').length;
-    const completed = todayRows.filter((r) => String(r?.status || 'pending').toLowerCase() === 'completed').length;
-    return { pending, confirmed, completed, total: todayRows.length };
+    const pending = todayRows.filter((r) => normStatus(r?.status) === 'pending').length;
+    const confirmed = todayRows.filter((r) => normStatus(r?.status) === 'confirmed').length;
+    const completed = todayRows.filter((r) => normStatus(r?.status) === 'completed').length;
+    const cancelled = todayRows.filter((r) => normStatus(r?.status) === 'cancelled').length;
+    return { pending, confirmed, completed, cancelled, total: todayRows.length };
   }, [todayRows]);
 
   return (

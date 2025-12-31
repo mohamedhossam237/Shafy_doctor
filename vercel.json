@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "pages/api/intake-medical-file.js": {
+      "maxDuration": 300
+    }
+  }
+}
+
