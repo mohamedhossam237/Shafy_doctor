@@ -1114,7 +1114,7 @@ export default function NewPrescriptionPage() {
         <title>${t('Prescription', 'وصفة طبية')}</title>
         <style>
           @page {
-            size: A5;
+            size: 165mm 250mm;
             margin: 15mm;
           }
           * {

@@ -165,6 +165,7 @@ export default function NewAppointmentPage() {
   /* doctor & clinic */
   const [doctor, setDoctor] = React.useState(null);
   const [clinics, setClinics] = React.useState([]);
+  const [extraServices, setExtraServices] = React.useState([]); // Loaded from doctor.extraServices
   const [selectedClinicId, setSelectedClinicId] = React.useState("");
   const [hours, setHours] = React.useState(null);
   const [slotMinutes, setSlotMinutes] = React.useState(30);
@@ -175,6 +176,7 @@ export default function NewAppointmentPage() {
   const [note, setNote] = React.useState("");
   const [appointmentType, setAppointmentType] = React.useState("checkup"); // checkup | followup
   const [additionalFees, setAdditionalFees] = React.useState("");
+  const [extraServiceName, setExtraServiceName] = React.useState(""); // Service name/reason (mandatory if fees > 0)
   const [totalAmount, setTotalAmount] = React.useState(0);
 
   /* available slots */
@@ -196,6 +198,9 @@ export default function NewAppointmentPage() {
         const d = { id: snap.id, ...snap.data() };
         setDoctor(d);
         setClinics(d.clinics || []);
+        // Load extra services (filter active ones)
+        const services = (d.extraServices || []).filter((s) => s.active !== false);
+        setExtraServices(services);
         if (d.clinics?.length === 1) setSelectedClinicId(d.clinics[0].id);
         setHours(normalizeHoursFromAny(d));
         setSlotMinutes(deriveDurationMinutes(d));
@@ -330,15 +335,35 @@ export default function NewAppointmentPage() {
       return;
     }
 
+    // Validate extra service name if additional fees are provided
+    const feesAmount = Number(additionalFees || 0);
+    if (feesAmount > 0 && !extraServiceName.trim()) {
+      setError(isArabic ? "الرجاء إدخال سبب الرسوم الإضافية" : "Please enter the reason for additional fees");
+      return;
+    }
+
     try {
       setSubmitting(true);
+      
+      // Prepare extra fees as an array (matching the format used elsewhere)
+      const extraFeesData = feesAmount > 0 && extraServiceName.trim()
+        ? [{
+            name: extraServiceName.trim(),
+            name_ar: extraServiceName.trim(), // For backward compatibility
+            name_en: extraServiceName.trim(),
+            amount: feesAmount,
+            price: feesAmount, // Also save as price for consistency
+          }]
+        : [];
+
       await addDoc(collection(db, "appointments"), {
         doctorId: user.uid,
         doctorName_ar: doctor?.name_ar || "",
         doctorName_en: doctor?.name_en || "",
         doctorPrice: appointmentType === "checkup" ? (doctor?.checkupPrice || 0) : (doctor?.followUpPrice || 0),
         appointmentType,
-        additionalFees: Number(additionalFees || 0),
+        additionalFees: feesAmount, // Keep for backward compatibility
+        extraFees: extraFeesData, // Save as extra services array
         totalAmount,
         clinicId: selectedClinicId,
         date: dateStr,
@@ -348,6 +373,7 @@ export default function NewAppointmentPage() {
         patientPhone,
         note: note.trim(),
         status: "confirmed",
+        source: 'Doctor_app', // Tag to identify bookings from doctor app
         createdAt: serverTimestamp(),
       });
 
@@ -357,6 +383,7 @@ export default function NewAppointmentPage() {
       setNewPatientPhone("");
       setSelectedPatient(null);
       setAdditionalFees("");
+      setExtraServiceName("");
       setTimeStr("");
       setNote("");
       setSelectedClinicId("");
@@ -529,11 +556,52 @@ export default function NewAppointmentPage() {
                     label={isArabic ? "رسوم إضافية" : "Additional Fees"}
                     type="number"
                     value={additionalFees}
-                    onChange={(e) => setAdditionalFees(e.target.value)}
+                    onChange={(e) => {
+                      setAdditionalFees(e.target.value);
+                      // Clear service name if fees are cleared
+                      if (!e.target.value || Number(e.target.value) === 0) {
+                        setExtraServiceName("");
+                      }
+                    }}
                     InputProps={{
                       startAdornment: <InputAdornment position="start">EGP</InputAdornment>,
                     }}
                   />
+
+                  {/* Extra Service Name/Reason (mandatory if fees > 0) */}
+                  {Number(additionalFees || 0) > 0 && (
+                    <Autocomplete
+                      freeSolo
+                      options={extraServices.map((s) => (isArabic ? s.name_ar : s.name_en) || s.name_ar || s.name_en || "")}
+                      value={extraServiceName}
+                      onChange={(_, newValue) => {
+                        setExtraServiceName(newValue || "");
+                        // Auto-fill price if selecting from existing services
+                        if (newValue) {
+                          const selected = extraServices.find(
+                            (s) => (isArabic ? s.name_ar : s.name_en) === newValue || s.name_ar === newValue || s.name_en === newValue
+                          );
+                          if (selected && selected.price) {
+                            setAdditionalFees(String(selected.price));
+                          }
+                        }
+                      }}
+                      onInputChange={(_, newValue) => setExtraServiceName(newValue)}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={isArabic ? "سبب الرسوم الإضافية (مطلوب)" : "Reason for Additional Fees (Required)"}
+                          required
+                          error={!extraServiceName.trim()}
+                          helperText={
+                            !extraServiceName.trim()
+                              ? (isArabic ? "هذا الحقل مطلوب عند إضافة رسوم إضافية" : "This field is required when adding additional fees")
+                              : ""
+                          }
+                        />
+                      )}
+                    />
+                  )}
 
                   <TextField
                     label={isArabic ? "الإجمالي" : "Total"}
