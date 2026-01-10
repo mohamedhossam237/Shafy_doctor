@@ -267,6 +267,73 @@ function RowCard({ appt, isArabic, locale, clinicLabel }) {
                 }}
               />
             )}
+            {/* Source Badge */}
+            {(() => {
+              const source = String(appt?.source || '').trim();
+              const isDoctorApp = source === 'Doctor_app' || appt?.fromDoctorApp === true;
+              const isPatientApp = source === 'patient_app' || appt?.fromPatientApp === true;
+              
+              // Fallback for old data
+              const status = String(appt?.status || '').toLowerCase();
+              const isOldDataWithoutSource = !source && !appt?.fromDoctorApp && !appt?.fromPatientApp;
+              const isLikelyDoctorApp = isOldDataWithoutSource && status === 'confirmed';
+              
+              if (isDoctorApp || isLikelyDoctorApp) {
+                return (
+                  <Chip
+                    size="small"
+                    icon={<TagIcon sx={{ fontSize: 14 }} />}
+                    label={isArabic ? 'تطبيق الطبيب' : 'Doctor App'}
+                    sx={{
+                      borderRadius: 2.5,
+                      height: 28,
+                      bgcolor: 'rgba(93, 64, 66, 0.15)',
+                      color: '#5D4042',
+                      fontWeight: 800,
+                      border: '2px solid',
+                      borderColor: '#5D4042',
+                      fontSize: '0.75rem',
+                      boxShadow: '0 2px 8px rgba(93, 64, 66, 0.2)',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        bgcolor: 'rgba(93, 64, 66, 0.2)',
+                        transform: 'translateY(-1px)',
+                        boxShadow: '0 4px 12px rgba(93, 64, 66, 0.25)',
+                      },
+                    }}
+                  />
+                );
+              }
+              
+              if (isPatientApp) {
+                return (
+                  <Chip
+                    size="small"
+                    icon={<TagIcon sx={{ fontSize: 14 }} />}
+                    label={isArabic ? 'تطبيق المريض' : 'Patient App'}
+                    sx={{
+                      borderRadius: 2.5,
+                      height: 28,
+                      bgcolor: 'rgba(30, 78, 140, 0.15)',
+                      color: '#1E4E8C',
+                      fontWeight: 800,
+                      border: '2px solid',
+                      borderColor: '#1E4E8C',
+                      fontSize: '0.75rem',
+                      boxShadow: '0 2px 8px rgba(30, 78, 140, 0.2)',
+                      transition: 'all 0.2s ease',
+                      '&:hover': {
+                        bgcolor: 'rgba(30, 78, 140, 0.2)',
+                        transform: 'translateY(-1px)',
+                        boxShadow: '0 4px 12px rgba(30, 78, 140, 0.25)',
+                      },
+                    }}
+                  />
+                );
+              }
+              
+              return null;
+            })()}
           </Stack>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 0.5 }}>
             <LocalPhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />

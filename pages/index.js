@@ -21,6 +21,7 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import WavingHandIcon from '@mui/icons-material/WavingHand';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import TagIcon from '@mui/icons-material/Tag';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -424,13 +425,70 @@ function AppointmentItem({ appt, isArabic, withLang, index, isLast }) {
               />
             )}
           </Stack>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="caption" color="text.secondary">
               {isArabic ? 'كشف' : 'Consultation'}
             </Typography>
             {appt?.appointmentType === 'followup' && (
               <Chip label={isArabic ? 'إعادة' : 'Re-exam'} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
             )}
+            {/* Source Badge */}
+            {(() => {
+              const source = String(appt?.source || '').trim();
+              const isDoctorApp = source === 'Doctor_app' || appt?.fromDoctorApp === true;
+              const isPatientApp = source === 'patient_app' || appt?.fromPatientApp === true;
+              
+              // Fallback for old data: if no source and status is 'confirmed' directly, assume Doctor App
+              const status = String(appt?.status || '').toLowerCase();
+              const isOldDataWithoutSource = !source && !appt?.fromDoctorApp && !appt?.fromPatientApp;
+              const isLikelyDoctorApp = isOldDataWithoutSource && status === 'confirmed';
+              
+              if (isDoctorApp || isLikelyDoctorApp) {
+                return (
+                  <Chip
+                    size="small"
+                    icon={<TagIcon sx={{ fontSize: 12 }} />}
+                    label={isArabic ? 'تطبيق الطبيب' : 'Doctor App'}
+                    sx={{
+                      height: 20,
+                      fontSize: '0.65rem',
+                      bgcolor: 'rgba(93, 64, 66, 0.15)',
+                      color: '#5D4042',
+                      fontWeight: 700,
+                      border: '1px solid',
+                      borderColor: '#5D4042',
+                      '& .MuiChip-icon': {
+                        fontSize: '0.75rem',
+                      },
+                    }}
+                  />
+                );
+              }
+              
+              if (isPatientApp) {
+                return (
+                  <Chip
+                    size="small"
+                    icon={<TagIcon sx={{ fontSize: 12 }} />}
+                    label={isArabic ? 'تطبيق المريض' : 'Patient App'}
+                    sx={{
+                      height: 20,
+                      fontSize: '0.65rem',
+                      bgcolor: 'rgba(30, 78, 140, 0.15)',
+                      color: '#1E4E8C',
+                      fontWeight: 700,
+                      border: '1px solid',
+                      borderColor: '#1E4E8C',
+                      '& .MuiChip-icon': {
+                        fontSize: '0.75rem',
+                      },
+                    }}
+                  />
+                );
+              }
+              
+              return null;
+            })()}
           </Stack>
         </Box>
 

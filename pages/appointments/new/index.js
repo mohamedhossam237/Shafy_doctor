@@ -374,6 +374,7 @@ export default function NewAppointmentPage() {
         note: note.trim(),
         status: "confirmed",
         source: 'Doctor_app', // Tag to identify bookings from doctor app
+        fromDoctorApp: true, // Boolean flag for easy filtering
         createdAt: serverTimestamp(),
       });
 

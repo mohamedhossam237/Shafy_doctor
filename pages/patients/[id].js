@@ -27,6 +27,7 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import PrintIcon from '@mui/icons-material/Print';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import TagIcon from '@mui/icons-material/Tag';
 import HealthInfoSection from '@/components/patients/HealthInfoSection';
 import MedicalFileIntake from '@/components/patients/MedicalFileIntake';
 
@@ -1906,9 +1907,68 @@ export default function PatientDetailsPage() {
                               <Typography variant="subtitle1" fontWeight={700}>
                                 {fmtApptFull(a)}
                               </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {a?.doctorName_en || a?.doctorName_ar || label('Doctor', 'طبيب')}
-                              </Typography>
+                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {a?.doctorName_en || a?.doctorName_ar || label('Doctor', 'طبيب')}
+                                </Typography>
+                                {/* Source Badge */}
+                                {(() => {
+                                  const source = String(a?.source || '').trim();
+                                  const isDoctorApp = source === 'Doctor_app' || a?.fromDoctorApp === true;
+                                  const isPatientApp = source === 'patient_app' || a?.fromPatientApp === true;
+                                  
+                                  // Fallback for old data
+                                  const status = String(a?.status || '').toLowerCase();
+                                  const isOldDataWithoutSource = !source && !a?.fromDoctorApp && !a?.fromPatientApp;
+                                  const isLikelyDoctorApp = isOldDataWithoutSource && status === 'confirmed';
+                                  
+                                  if (isDoctorApp || isLikelyDoctorApp) {
+                                    return (
+                                      <Chip
+                                        size="small"
+                                        icon={<TagIcon sx={{ fontSize: 12 }} />}
+                                        label={isArabic ? 'تطبيق الطبيب' : 'Doctor App'}
+                                        sx={{
+                                          height: 20,
+                                          fontSize: '0.65rem',
+                                          bgcolor: 'rgba(93, 64, 66, 0.15)',
+                                          color: '#5D4042',
+                                          fontWeight: 700,
+                                          border: '1px solid',
+                                          borderColor: '#5D4042',
+                                          '& .MuiChip-icon': {
+                                            fontSize: '0.75rem',
+                                          },
+                                        }}
+                                      />
+                                    );
+                                  }
+                                  
+                                  if (isPatientApp) {
+                                    return (
+                                      <Chip
+                                        size="small"
+                                        icon={<TagIcon sx={{ fontSize: 12 }} />}
+                                        label={isArabic ? 'تطبيق المريض' : 'Patient App'}
+                                        sx={{
+                                          height: 20,
+                                          fontSize: '0.65rem',
+                                          bgcolor: 'rgba(30, 78, 140, 0.15)',
+                                          color: '#1E4E8C',
+                                          fontWeight: 700,
+                                          border: '1px solid',
+                                          borderColor: '#1E4E8C',
+                                          '& .MuiChip-icon': {
+                                            fontSize: '0.75rem',
+                                          },
+                                        }}
+                                      />
+                                    );
+                                  }
+                                  
+                                  return null;
+                                })()}
+                              </Stack>
                             </Box>
                             <Stack alignItems="flex-end" spacing={1}>
                               <Chip
