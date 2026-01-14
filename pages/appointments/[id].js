@@ -98,6 +98,12 @@ const buildStatusMessage = ({ isAr, appt, newStatus, clinicLabel }) => {
   return map[newStatus] || map.pending;
 };
 
+// Get patient ID from appointment (checking all possible field names)
+function getPatientId(appt) {
+  if (!appt) return null;
+  return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
+}
+
 /* ---------- main ---------- */
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
@@ -414,9 +420,41 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                         />
                       )}
                     </Stack>
-                    <Typography variant="h6" fontWeight={700}>
-                      {appt.patientName}
-                    </Typography>
+                    {(() => {
+                      const patientId = getPatientId(appt);
+                      const patientHref = patientId ? `/patients/${patientId}${isAr ? '?lang=ar' : ''}` : null;
+                      
+                      if (patientHref) {
+                        return (
+                          <Link href={patientHref} style={{ textDecoration: 'none' }}>
+                            <Typography 
+                              variant="h6" 
+                              fontWeight={700}
+                              sx={{
+                                cursor: 'pointer',
+                                color: 'primary.main',
+                                display: 'inline-block',
+                                transition: 'all 0.2s ease',
+                                borderBottom: '2px solid transparent',
+                                '&:hover': {
+                                  opacity: 0.85,
+                                  borderBottomColor: 'primary.main',
+                                  transform: 'translateY(-1px)',
+                                },
+                              }}
+                            >
+                              {appt.patientName}
+                            </Typography>
+                          </Link>
+                        );
+                      }
+                      
+                      return (
+                        <Typography variant="h6" fontWeight={700}>
+                          {appt.patientName}
+                        </Typography>
+                      );
+                    })()}
                     {appt.patientPhone && (
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                         <PhoneIcon sx={{ fontSize: 14 }} />

@@ -120,6 +120,12 @@ const sanitizeClinics = (arr) =>
       active: c.active !== false,
     }));
 
+// Get patient ID from appointment (checking all possible field names)
+function getPatientId(appt) {
+  if (!appt) return null;
+  return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
+}
+
 /* ---------------- row card ---------------- */
 
 function RowCard({ appt, isArabic, locale, clinicLabel }) {
@@ -219,20 +225,54 @@ function RowCard({ appt, isArabic, locale, clinicLabel }) {
         </Box>
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }} useFlexGap>
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              noWrap
-              title={appt?.patientName || ''}
-              sx={{
-                background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              {appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed')}
-            </Typography>
+            {(() => {
+              const patientId = getPatientId(appt);
+              const patientName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
+              const patientHref = patientId ? `/patients/${patientId}${isArabic ? '?lang=ar' : ''}` : null;
+              
+              if (patientHref) {
+                return (
+                  <Link href={patientHref} style={{ textDecoration: 'none' }}>
+                    <Typography
+                      variant="h6"
+                      fontWeight={700}
+                      noWrap
+                      title={appt?.patientName || ''}
+                      sx={{
+                        background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                        backgroundClip: 'text',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          opacity: 0.8,
+                          textDecoration: 'underline',
+                        },
+                      }}
+                    >
+                      {patientName}
+                    </Typography>
+                  </Link>
+                );
+              }
+              
+              return (
+                <Typography
+                  variant="h6"
+                  fontWeight={700}
+                  noWrap
+                  title={appt?.patientName || ''}
+                  sx={{
+                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }}
+                >
+                  {patientName}
+                </Typography>
+              );
+            })()}
             {/* Appointment Type Badge */}
             {appt?.appointmentType === 'followup' ? (
               <Chip

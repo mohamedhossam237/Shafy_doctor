@@ -592,9 +592,11 @@ export default function PatientDetailsPage() {
           query(col, where('doctorId', '==', user.uid), where('patientId', '==', pid)),
           query(col, where('doctorId', '==', user.uid), where('patientUID', '==', pid)),
           query(col, where('doctorId', '==', user.uid), where('patientID', '==', pid)),
+          query(col, where('doctorId', '==', user.uid), where('patientUid', '==', pid)),
           query(col, where('doctorUID', '==', user.uid), where('patientId', '==', pid)),
           query(col, where('doctorUID', '==', user.uid), where('patientUID', '==', pid)),
           query(col, where('doctorUID', '==', user.uid), where('patientID', '==', pid)),
+          query(col, where('doctorUID', '==', user.uid), where('patientUid', '==', pid)),
         ];
         const snaps = await Promise.all(queries.map((q) => getDocs(q)));
         const map = new Map();

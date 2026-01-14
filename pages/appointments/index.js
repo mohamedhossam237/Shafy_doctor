@@ -113,6 +113,12 @@ const sanitizeClinics = (arr) =>
       active: c.active !== false,
     }));
 
+// Get patient ID from appointment (checking all possible field names)
+function getPatientId(appt) {
+  if (!appt) return null;
+  return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
+}
+
 /* ---------------- row/card ---------------- */
 
 function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel }) {
@@ -324,20 +330,54 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1, flexWrap: 'wrap' }} useFlexGap>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <PersonIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-            <Typography
-              variant="h6"
-              fontWeight={700}
-              noWrap
-              title={appt?.patientName || ''}
-              sx={{
-                background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              {appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed')}
-            </Typography>
+            {(() => {
+              const patientId = getPatientId(appt);
+              const patientName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
+              const patientHref = patientId ? `/patients/${patientId}${isArabic ? '?lang=ar' : ''}` : null;
+              
+              if (patientHref) {
+                return (
+                  <Link href={patientHref} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
+                    <Typography
+                      variant="h6"
+                      fontWeight={700}
+                      noWrap
+                      title={appt?.patientName || ''}
+                      sx={{
+                        background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                        backgroundClip: 'text',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          opacity: 0.8,
+                          textDecoration: 'underline',
+                        },
+                      }}
+                    >
+                      {patientName}
+                    </Typography>
+                  </Link>
+                );
+              }
+              
+              return (
+                <Typography
+                  variant="h6"
+                  fontWeight={700}
+                  noWrap
+                  title={appt?.patientName || ''}
+                  sx={{
+                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }}
+                >
+                  {patientName}
+                </Typography>
+              );
+            })()}
           </Box>
           {/* Appointment Type Badge */}
           {appt?.appointmentType === 'followup' ? (

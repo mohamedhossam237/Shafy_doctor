@@ -413,7 +413,19 @@ function AppointmentItem({ appt, isArabic, withLang, index, isLast }) {
 
         <Box sx={{ flex: 1, minWidth: 0, textAlign: isArabic ? 'right' : 'left' }}>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Typography variant="subtitle1" fontWeight={700} noWrap sx={{ color: 'text.primary' }}>
+            <Typography 
+              variant="subtitle1" 
+              fontWeight={700} 
+              noWrap 
+              sx={{ 
+                color: 'primary.main',
+                cursor: 'pointer',
+                '&:hover': {
+                  opacity: 0.8,
+                  textDecoration: 'underline',
+                },
+              }}
+            >
               {patientName}
             </Typography>
             {isStartingSoon && (
