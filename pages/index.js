@@ -22,6 +22,9 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import WavingHandIcon from '@mui/icons-material/WavingHand';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import TagIcon from '@mui/icons-material/Tag';
+import ArticleIcon from '@mui/icons-material/Article';
+import ImageIcon from '@mui/icons-material/Image';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
@@ -112,7 +115,7 @@ function getRelativeTime(date, isArabic) {
 const MotionPaper = motion(Paper);
 const MotionBox = motion(Box);
 
-function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddReport, onStats, remainingAppts }) {
+function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddReport, onStats, onMarketing, remainingAppts }) {
   const theme = useTheme();
   const greeting = getGreeting(isArabic);
 
@@ -123,45 +126,41 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
       transition={{ duration: 0.5 }}
       elevation={0}
       sx={{
-        p: { xs: 4, md: 6 },
-        minHeight: 220,
-        borderRadius: 5,
+        p: { xs: 3, sm: 4, md: 6 },
+        borderRadius: { xs: 3, md: 5 },
         background: `linear-gradient(120deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
         color: 'white',
         position: 'relative',
         overflow: 'hidden',
         boxShadow: '0 20px 40px -10px rgba(0,0,0,0.3)',
-        display: 'flex',
-        flexDirection: { xs: 'column', md: 'row' },
-        alignItems: { xs: 'flex-start', md: 'center' },
-        justifyContent: 'space-between',
-        gap: { xs: 4, md: 10 }
       }}
     >
       {/* Decorative circles */}
       <Box sx={{ position: 'absolute', top: -20, right: -20, width: 150, height: 150, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
       <Box sx={{ position: 'absolute', bottom: -40, left: 10, width: 100, height: 100, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
 
-      <Stack direction="row" alignItems="center" spacing={3} sx={{ position: 'relative', zIndex: 1 }}>
+      {/* Welcome Message */}
+      <Stack direction="row" alignItems="center" spacing={{ xs: 2, sm: 3 }} sx={{ position: 'relative', zIndex: 1, mb: { xs: 3, md: 4 } }}>
         <Avatar
           sx={{
-            width: 72, height: 72,
+            width: { xs: 56, sm: 64, md: 72 },
+            height: { xs: 56, sm: 64, md: 72 },
             bgcolor: 'rgba(255,255,255,0.2)',
             color: 'white',
             border: '2px solid rgba(255,255,255,0.3)',
             boxShadow: '0 8px 16px rgba(0,0,0,0.2)'
           }}
         >
-          <WavingHandIcon sx={{ fontSize: 40 }} />
+          <WavingHandIcon sx={{ fontSize: { xs: 32, sm: 36, md: 40 } }} />
         </Avatar>
-        <Box>
-          <Typography variant="overline" sx={{ opacity: 0.9, letterSpacing: 1.5, fontWeight: 600 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="overline" sx={{ opacity: 0.9, letterSpacing: 1.5, fontWeight: 600, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
             {todayPretty}
           </Typography>
-          <Typography variant="h3" fontWeight={800} sx={{ mb: 1, textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+          <Typography variant="h3" fontWeight={800} sx={{ mb: 1, textShadow: '0 2px 4px rgba(0,0,0,0.1)', fontSize: { xs: '1.5rem', sm: '2rem', md: '2.5rem' } }}>
             {greeting}, {isArabic ? 'د.' : 'Dr.'} {doctorName}
           </Typography>
-          <Typography variant="h6" sx={{ opacity: 0.95, fontWeight: 500 }}>
+          <Typography variant="h6" sx={{ opacity: 0.95, fontWeight: 500, fontSize: { xs: '0.875rem', sm: '1rem', md: '1.25rem' } }}>
             {remainingAppts > 0
               ? (isArabic ? `لديك ${remainingAppts} مواعيد متبقية اليوم` : `You have ${remainingAppts} appointments remaining today`)
               : (isArabic ? 'لا توجد مواعيد متبقية اليوم' : 'No appointments remaining today')}
@@ -169,8 +168,15 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
         </Box>
       </Stack>
 
-      {/* Quick Actions in Banner */}
-      <Stack direction="row" spacing={3} sx={{ position: 'relative', zIndex: 1, width: { xs: '100%', md: 'auto' } }}>
+      {/* Quick Actions - Always below message */}
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={2.5}
+        sx={{ 
+          position: 'relative', 
+          zIndex: 1
+        }}
+      >
         <Button
           onClick={onAddPatient}
           variant="contained"
@@ -180,7 +186,7 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
             backdropFilter: 'blur(10px)',
             border: '1px solid rgba(255,255,255,0.2)',
             boxShadow: 'none',
-            minWidth: 130,
+            minWidth: { xs: '100%', sm: 130 },
             py: 1.5,
             px: 3,
             '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
@@ -198,7 +204,7 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
             backdropFilter: 'blur(10px)',
             border: '1px solid rgba(255,255,255,0.2)',
             boxShadow: 'none',
-            minWidth: 130,
+            minWidth: { xs: '100%', sm: 130 },
             py: 1.5,
             px: 3,
             '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
@@ -216,7 +222,7 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
             backdropFilter: 'blur(10px)',
             border: '1px solid rgba(255,255,255,0.2)',
             boxShadow: 'none',
-            minWidth: 130,
+            minWidth: { xs: '100%', sm: 130 },
             py: 1.5,
             px: 3,
             '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
@@ -225,6 +231,146 @@ function WelcomeBanner({ doctorName, isArabic, todayPretty, onAddPatient, onAddR
         >
           {isArabic ? 'إحصائيات' : 'Stats'}
         </Button>
+        <Button
+          onClick={onMarketing}
+          variant="contained"
+          sx={{
+            bgcolor: 'rgba(255,255,255,0.15)',
+            color: 'white',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            boxShadow: 'none',
+            minWidth: { xs: '100%', sm: 130 },
+            py: 1.5,
+            px: 3,
+            '&:hover': { bgcolor: 'rgba(255,255,255,0.25)', boxShadow: 'none' }
+          }}
+          startIcon={<ArticleIcon />}
+        >
+          {isArabic ? 'تسويق' : 'Marketing'}
+        </Button>
+      </Stack>
+    </MotionPaper>
+  );
+}
+
+function RecentArticlesList({ articles, isArabic, withLang }) {
+  const theme = useTheme();
+  return (
+    <MotionPaper
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.4 }}
+      elevation={0}
+      sx={{
+        p: 3,
+        borderRadius: 3,
+        bgcolor: 'background.paper',
+        border: '1px solid',
+        borderColor: 'divider',
+        height: '100%'
+      }}
+    >
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="h6" fontWeight={800} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ArticleIcon color="primary" />
+          {isArabic ? 'أحدث المقالات' : 'Latest Articles'}
+        </Typography>
+        <Link href={withLang('/marketing')} style={{ textDecoration: 'none' }}>
+          <Typography variant="body2" color="primary" fontWeight={700} sx={{ cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}>
+            {isArabic ? 'عرض الكل' : 'View All'}
+          </Typography>
+        </Link>
+      </Stack>
+      <Stack spacing={1}>
+        {articles.length === 0 ? (
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 3, sm: 4 },
+              textAlign: 'center',
+              borderRadius: 3,
+              bgcolor: 'background.paper',
+              border: '1px dashed',
+              borderColor: 'divider',
+              minHeight: 180,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Avatar
+              sx={{
+                width: 56,
+                height: 56,
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
+                color: 'primary.main',
+                mb: 2,
+              }}
+            >
+              <ArticleIcon />
+            </Avatar>
+            <Typography variant="body1" fontWeight={600} color="text.primary" sx={{ mb: 0.5 }}>
+              {isArabic ? 'لا توجد مقالات بعد' : 'No articles yet'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
+              {isArabic ? 'ابدأ بإنشاء محتوى للمدونة عبر صفحة التسويق' : 'Start creating content for the blog via the Marketing page'}
+            </Typography>
+            <Button
+              component={Link}
+              href={withLang('/marketing')}
+              variant="outlined"
+              size="small"
+              startIcon={<ArticleIcon />}
+              sx={{ textTransform: 'none' }}
+            >
+              {isArabic ? 'انتقل إلى التسويق' : 'Go to Marketing'}
+            </Button>
+          </Paper>
+        ) : (
+          articles.slice(0, 4).map((article) => (
+            <Button
+              key={article.id}
+              component={Link}
+              href={withLang('/marketing')}
+              sx={{
+                justifyContent: 'flex-start',
+                textAlign: 'left',
+                p: 1.5,
+                borderRadius: 2,
+                color: 'text.primary',
+                '&:hover': { bgcolor: 'action.hover' }
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={2} sx={{ width: '100%' }}>
+                <Avatar sx={{ bgcolor: 'secondary.light', color: 'secondary.dark', width: 40, height: 40 }}>
+                  {article.type === 'infographic' ? <ImageIcon fontSize="small" /> : <ArticleIcon fontSize="small" />}
+                </Avatar>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle2" fontWeight={700} noWrap>
+                    {isArabic ? (article.title_ar || article.title_en) : (article.title_en || article.title_ar)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {article.type === 'article'
+                      ? (isArabic ? 'مقال' : 'Article')
+                      : (isArabic ? 'إنفوجرافيك' : 'Infographic')}
+                  </Typography>
+                </Box>
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap', minWidth: 70, textAlign: 'end' }}>
+                  {getRelativeTime(
+                    article.publishedAt?.toDate
+                      ? article.publishedAt.toDate()
+                      : article.createdAt?.toDate
+                      ? article.createdAt.toDate()
+                      : article.publishedAt || article.createdAt,
+                    isArabic
+                  )}
+                </Typography>
+              </Stack>
+            </Button>
+          ))
+        )}
       </Stack>
     </MotionPaper>
   );
@@ -234,16 +380,17 @@ function StatTile({ icon, label, count, href, isArabic, withLang, color, delay }
   const theme = useTheme();
 
   return (
-    <Link href={withLang(href)} style={{ textDecoration: 'none' }}>
+    <Link href={withLang(href)} style={{ textDecoration: 'none', width: '100%' }}>
       <MotionPaper
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay }}
         elevation={0}
         sx={{
-          p: 3,
-          borderRadius: 4,
+          p: { xs: 3, sm: 4, md: 5 },
+          borderRadius: { xs: 3, md: 4 },
           height: '100%',
+          minHeight: { xs: 140, sm: 160, md: 180 },
           border: '1px solid',
           borderColor: 'divider',
           bgcolor: 'background.paper',
@@ -252,8 +399,8 @@ function StatTile({ icon, label, count, href, isArabic, withLang, color, delay }
           justifyContent: 'space-between',
           transition: 'all 0.3s ease',
           '&:hover': {
-            transform: 'translateY(-4px)',
-            boxShadow: '0 12px 24px -10px rgba(0,0,0,0.1)',
+            transform: 'translateY(-6px)',
+            boxShadow: '0 16px 32px -12px rgba(0,0,0,0.15)',
             borderColor: color,
           }
         }}
@@ -264,12 +411,90 @@ function StatTile({ icon, label, count, href, isArabic, withLang, color, delay }
             sx={{
               bgcolor: alpha(color, 0.1),
               color: color,
-              width: 56,
-              height: 56,
-              borderRadius: 3
+              width: { xs: 56, sm: 64, md: 72 },
+              height: { xs: 56, sm: 64, md: 72 },
+              borderRadius: 3,
+              '& svg': {
+                fontSize: { xs: '1.75rem', sm: '2rem', md: '2.25rem' }
+              }
             }}
           >
             {icon}
+          </Avatar>
+          <Box
+            sx={{
+              width: { xs: 32, md: 36 },
+              height: { xs: 32, md: 36 },
+              borderRadius: '50%',
+              display: 'grid',
+              placeItems: 'center',
+              color: 'text.disabled',
+              transition: 'color 0.2s',
+              '.MuiPaper-root:hover &': { color: color }
+            }}
+          >
+            <ArrowForwardIcon fontSize="small" sx={{ transform: isArabic ? 'rotate(180deg)' : 'none' }} />
+          </Box>
+        </Stack>
+
+        <Box sx={{ mt: { xs: 2, sm: 3, md: 4 }, textAlign: isArabic ? 'right' : 'left' }}>
+          <Typography variant="h3" fontWeight={800} sx={{ color: 'text.primary', mb: 0.5, fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' } }}>
+            {count}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ fontSize: { xs: '0.875rem', sm: '0.9375rem', md: '1rem' } }}>
+            {isArabic ? label.ar : label.en}
+          </Typography>
+        </Box>
+      </MotionPaper>
+    </Link>
+  );
+}
+
+function RevenueTile({ revenueDetails, isArabic, withLang, delay }) {
+  const theme = useTheme();
+  const color = '#e67e22';
+  const formatAmount = (amount) => {
+    return Number(amount || 0).toLocaleString(isArabic ? 'ar-EG' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  return (
+    <Link href={withLang('/clinic-reports')} style={{ textDecoration: 'none' }}>
+      <MotionPaper
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay }}
+        elevation={0}
+        sx={{
+          p: { xs: 3, sm: 4, md: 5 },
+          borderRadius: 4,
+          height: '100%',
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          transition: 'all 0.3s ease',
+          minHeight: { xs: 140, sm: 160, md: 180 },
+          '&:hover': {
+            transform: 'translateY(-6px)',
+            boxShadow: '0 16px 32px -12px rgba(0,0,0,0.15)',
+            borderColor: color,
+          }
+        }}
+      >
+        <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="flex-start">
+          <Avatar
+            variant="rounded"
+            sx={{
+              bgcolor: alpha(color, 0.1),
+              color: color,
+              width: { xs: 56, sm: 64, md: 72 },
+              height: { xs: 56, sm: 64, md: 72 },
+              borderRadius: 3
+            }}
+          >
+            <AttachMoneyIcon />
           </Avatar>
           <Box
             sx={{
@@ -287,13 +512,41 @@ function StatTile({ icon, label, count, href, isArabic, withLang, color, delay }
           </Box>
         </Stack>
 
-        <Box sx={{ mt: 3, textAlign: isArabic ? 'right' : 'left' }}>
-          <Typography variant="h3" fontWeight={800} sx={{ color: 'text.primary', mb: 0.5 }}>
-            {count}
+        <Box sx={{ mt: { xs: 2, sm: 3, md: 4 }, textAlign: isArabic ? 'right' : 'left' }}>
+          <Typography variant="h3" fontWeight={800} sx={{ color: 'text.primary', mb: 0.5, fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' } }}>
+            {formatAmount(revenueDetails.total)}
           </Typography>
-          <Typography variant="body2" color="text.secondary" fontWeight={600}>
-            {isArabic ? label.ar : label.en}
+          <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ fontSize: { xs: '0.875rem', sm: '0.9375rem', md: '1rem' }, mb: 1.5 }}>
+            {isArabic ? 'إيرادات اليوم' : "Today's Revenue"}
           </Typography>
+          
+          {/* Revenue Details */}
+          <Stack spacing={0.5} sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="center">
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' } }}>
+                {isArabic ? 'كشف' : 'Checkup'}
+              </Typography>
+              <Typography variant="caption" fontWeight={700} sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' }, color: color }}>
+                {formatAmount(revenueDetails.checkup)}
+              </Typography>
+            </Stack>
+            <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="center">
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' } }}>
+                {isArabic ? 'إعادة كشف' : 'Follow-up'}
+              </Typography>
+              <Typography variant="caption" fontWeight={700} sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' }, color: color }}>
+                {formatAmount(revenueDetails.followup)}
+              </Typography>
+            </Stack>
+            <Stack direction={isArabic ? 'row-reverse' : 'row'} justifyContent="space-between" alignItems="center">
+              <Typography variant="caption" color="text.secondary" sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' } }}>
+                {isArabic ? 'خدمات إضافية' : 'Additional'}
+              </Typography>
+              <Typography variant="caption" fontWeight={700} sx={{ fontSize: { xs: '0.7rem', sm: '0.75rem' }, color: color }}>
+                {formatAmount(revenueDetails.additional)}
+              </Typography>
+            </Stack>
+          </Stack>
         </Box>
       </MotionPaper>
     </Link>
@@ -571,6 +824,7 @@ function WeeklyChart({ data, isArabic }) {
 }
 
 function RecentPatientsList({ patients, isArabic, withLang }) {
+  const theme = useTheme();
   return (
     <MotionPaper
       initial={{ opacity: 0, y: 20 }}
@@ -591,9 +845,40 @@ function RecentPatientsList({ patients, isArabic, withLang }) {
       </Stack>
       <Stack spacing={1}>
         {patients.length === 0 ? (
-          <Typography color="text.secondary" variant="body2">
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 3, sm: 4 },
+              textAlign: 'center',
+              borderRadius: 3,
+              bgcolor: 'background.paper',
+              border: '1px dashed',
+              borderColor: 'divider',
+              minHeight: 160,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Avatar
+              sx={{
+                width: 56,
+                height: 56,
+                bgcolor: alpha(theme.palette.secondary.main, 0.1),
+                color: 'secondary.main',
+                mb: 2,
+              }}
+            >
+              <PeopleAltIcon />
+            </Avatar>
+            <Typography variant="body1" fontWeight={600} color="text.primary" sx={{ mb: 0.5 }}>
             {isArabic ? 'لا يوجد مرضى مؤخراً' : 'No recent patients'}
           </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {isArabic ? 'سيتم عرض المرضى الجدد هنا عند إضافتهم' : 'New patients will appear here when added'}
+            </Typography>
+          </Paper>
         ) : (
           patients.map((p) => (
             <Button
@@ -639,6 +924,7 @@ function RecentPatientsList({ patients, isArabic, withLang }) {
 }
 
 function RecentReportsList({ reports, isArabic, withLang }) {
+  const theme = useTheme();
   return (
     <MotionPaper
       initial={{ opacity: 0, y: 20 }}
@@ -659,9 +945,40 @@ function RecentReportsList({ reports, isArabic, withLang }) {
       </Stack>
       <Stack spacing={1}>
         {reports.length === 0 ? (
-          <Typography color="text.secondary" variant="body2">
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 3, sm: 4 },
+              textAlign: 'center',
+              borderRadius: 3,
+              bgcolor: 'background.paper',
+              border: '1px dashed',
+              borderColor: 'divider',
+              minHeight: 160,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Avatar
+              sx={{
+                width: 56,
+                height: 56,
+                bgcolor: alpha(theme.palette.info.main, 0.1),
+                color: 'info.main',
+                mb: 2,
+              }}
+            >
+              <AssessmentIcon />
+            </Avatar>
+            <Typography variant="body1" fontWeight={600} color="text.primary" sx={{ mb: 0.5 }}>
             {isArabic ? 'لا توجد تقارير مؤخراً' : 'No recent reports'}
           </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {isArabic ? 'سيتم عرض التقارير الجديدة هنا عند إنشائها' : 'New reports will appear here when created'}
+            </Typography>
+          </Paper>
         ) : (
           reports.map((r) => (
             <Button
@@ -717,7 +1034,9 @@ export default function DashboardIndexPage() {
   const [dailyRevenue, setDailyRevenue] = React.useState(0);
   const [recentPatients, setRecentPatients] = React.useState([]);
   const [recentReports, setRecentReports] = React.useState([]);
+  const [recentArticles, setRecentArticles] = React.useState([]);
   const [counts, setCounts] = React.useState({ appointments: 0, patients: 0, reports: 0 });
+  const [revenueDetails, setRevenueDetails] = React.useState({ total: 0, checkup: 0, followup: 0, additional: 0 });
   const [openAddPatient, setOpenAddPatient] = React.useState(false);
 
   const withLang = React.useCallback(
@@ -740,10 +1059,12 @@ export default function DashboardIndexPage() {
       try {
         const doctorUID = user.uid;
 
-        // doctor name
+        // doctor name and prices
         const dSnap = await getDoc(doc(db, 'doctors', doctorUID));
         const dData = dSnap.exists() ? dSnap.data() : {};
         setDoctorName(isArabic ? dData?.name_ar || 'الطبيب' : dData?.name_en || 'Doctor');
+        const checkupPrice = Number(dData.checkupPrice || 0);
+        const followUpPrice = Number(dData.followUpPrice || 0);
 
         // appointments
         const colAppt = collection(db, 'appointments');
@@ -785,7 +1106,7 @@ export default function DashboardIndexPage() {
 
         // Recent Patients
         const patientsCol = collection(db, 'patients');
-        const pQuery = query(patientsCol, where('registeredBy', '==', doctorUID), orderBy('createdAt', 'desc'), limit(5));
+        const pQuery = query(patientsCol, where('registeredBy', '==', doctorUID), orderBy('createdAt', 'desc'), limit(4));
         const pSnap = await getDocs(pQuery);
         setRecentPatients(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
@@ -816,7 +1137,25 @@ export default function DashboardIndexPage() {
         const repRows = Array.from(repMap.values());
         // Sort by date desc
         repRows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
-        setRecentReports(repRows.slice(0, 5));
+        setRecentReports(repRows.slice(0, 4));
+
+        // Recent Articles
+        try {
+          const articlesCol = collection(db, 'articles');
+          const articlesQuery = query(articlesCol, where('authorId', '==', doctorUID), limit(10));
+          const articlesSnap = await getDocs(articlesQuery);
+          const articlesRows = articlesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          // Sort by date desc
+          articlesRows.sort((a, b) => {
+            const aDate = toDate(a.publishedAt || a.createdAt || a.updatedAt);
+            const bDate = toDate(b.publishedAt || b.createdAt || b.updatedAt);
+            return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+          });
+          setRecentArticles(articlesRows.slice(0, 4));
+        } catch (e) {
+          console.error('Error loading articles:', e);
+          setRecentArticles([]);
+        }
 
         setCounts({
           appointments: todayAll.length,
@@ -824,14 +1163,69 @@ export default function DashboardIndexPage() {
           reports: repRows.length,
         });
 
-        const income = rows
-          .filter(r => isToday(r._dt))
-          .reduce((acc, r) => {
-            const price = Number(r.doctorPrice || 0);
-            const extra = Number(r.additionalFees || 0);
-            return acc + price + extra;
-          }, 0);
-        setDailyRevenue(income);
+        // Calculate detailed revenue for today
+        const todayAppointments = rows.filter(r => isToday(r._dt));
+        let checkupRevenue = 0;
+        let followupRevenue = 0;
+        let additionalRevenue = 0;
+
+        todayAppointments.forEach((r) => {
+          // Only count revenue for completed or confirmed appointments
+          const status = String(r.status || '').toLowerCase();
+          if (status !== 'completed' && status !== 'confirmed') {
+            return; // Skip non-revenue appointments
+          }
+
+          const appointmentType = String(r.appointmentType || '').toLowerCase();
+          const isFollowUp = appointmentType === 'followup' || appointmentType === 'recheck' || appointmentType === 'follow-up';
+          
+          // Calculate additional fees first
+          let extra = Number(r.additionalFees || 0);
+          
+          // Sum extra fees from extraFees array if exists
+          if (Array.isArray(r.extraFees)) {
+            extra += r.extraFees.reduce((sum, fee) => sum + Number(fee.amount || 0), 0);
+          } else if (typeof r.extraFees === 'number') {
+            extra += r.extraFees;
+          }
+          
+          // Get base price (consultation fee)
+          let basePrice = Number(r.doctorPrice || r.checkupFee || r.price || r.fee || 0);
+          
+          // If totalAmount exists and no base price found, extract base from total
+          if (basePrice === 0 && r.totalAmount && Number(r.totalAmount) > 0) {
+            const totalAmount = Number(r.totalAmount);
+            // If we have additional fees, subtract them to get base price
+            if (extra > 0) {
+              basePrice = Math.max(0, totalAmount - extra);
+            } else {
+              // No additional fees, so totalAmount is the base price
+              basePrice = totalAmount;
+            }
+          }
+          
+          // If still no price, use doctor's default price based on type
+          if (basePrice === 0) {
+            basePrice = isFollowUp ? followUpPrice : checkupPrice;
+          }
+          
+          // Add to revenue based on type
+          if (isFollowUp) {
+            followupRevenue += basePrice;
+          } else {
+            checkupRevenue += basePrice;
+          }
+          additionalRevenue += extra;
+        });
+
+        const totalIncome = checkupRevenue + followupRevenue + additionalRevenue;
+        setRevenueDetails({
+          total: totalIncome,
+          checkup: checkupRevenue,
+          followup: followupRevenue,
+          additional: additionalRevenue,
+        });
+        setDailyRevenue(totalIncome);
       } catch (e) {
         console.error(e);
         setErr(e?.message || 'Failed to load dashboard');
@@ -844,6 +1238,7 @@ export default function DashboardIndexPage() {
   const addPatient = () => setOpenAddPatient(true);
   const addReport = () => router.push(withLang('/patient-reports/new'));
   const openClinicReports = () => router.push(withLang('/clinic-reports'));
+  const openMarketing = () => router.push(withLang('/marketing'));
 
   if (!mounted) return null;
 
@@ -859,7 +1254,7 @@ export default function DashboardIndexPage() {
       />
 
       <Box dir={isArabic ? 'rtl' : 'ltr'} sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-        <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Container maxWidth={false} sx={{ py: 4, px: { xs: 2, sm: 3, md: 4 } }}>
 
           <Box sx={{ mb: 5 }}>
             <WelcomeBanner
@@ -869,6 +1264,7 @@ export default function DashboardIndexPage() {
               onAddPatient={addPatient}
               onAddReport={addReport}
               onStats={openClinicReports}
+              onMarketing={openMarketing}
               remainingAppts={appointments.filter(a => String(a.status).toLowerCase() !== 'completed').length}
             />
           </Box>
@@ -880,15 +1276,15 @@ export default function DashboardIndexPage() {
           ) : err ? (
             <Typography color="error" align="center" sx={{ mt: 4 }}>{err}</Typography>
           ) : (
-            <Grid container spacing={5} sx={{ mt: 1 }}>
+            <Grid container spacing={4} sx={{ mt: 1 }}>
 
-              {/* Stats Row */}
-              <Grid item xs={12}>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 2 }}>
+              {/* Stats Row - Centered in One Row */}
+              <Grid item xs={12} sx={{ mb: 4 }}>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 3, textAlign: 'center' }}>
                   {isArabic ? 'نظرة عامة' : 'Overview'}
                 </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={3}>
+                <Grid container spacing={3} justifyContent="center" sx={{ maxWidth: { xs: '100%', md: 1400 }, mx: 'auto' }}>
+                  <Grid item xs={12} sm={6} md={3}>
                     <StatTile
                       icon={<CalendarTodayIcon />}
                       label={{ en: "Today's Appts", ar: 'مواعيد اليوم' }}
@@ -900,7 +1296,7 @@ export default function DashboardIndexPage() {
                       delay={0.1}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={3}>
+                  <Grid item xs={12} sm={6} md={3}>
                     <StatTile
                       icon={<PeopleAltIcon />}
                       label={{ en: 'Total Patients', ar: 'إجمالي المرضى' }}
@@ -912,7 +1308,7 @@ export default function DashboardIndexPage() {
                       delay={0.2}
                     />
                   </Grid>
-                  <Grid item xs={12} sm={3}>
+                  <Grid item xs={12} sm={6} md={3}>
                     <StatTile
                       icon={<AnalyticsIcon />}
                       label={{ en: 'Total Reports', ar: 'التقارير' }}
@@ -924,32 +1320,26 @@ export default function DashboardIndexPage() {
                       delay={0.3}
                     />
                   </Grid>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <RevenueTile
+                      revenueDetails={revenueDetails}
+                      isArabic={isArabic}
+                      withLang={withLang}
+                      delay={0.4}
+                    />
+                  </Grid>
                 </Grid>
               </Grid>
 
-              {/* Left Column: Chart & Recent Data */}
-              <Grid item xs={12} md={8}>
-                {/* Weekly Chart */}
-                <Box sx={{ mb: 4 }}>
+              {/* Weekly Chart - Directly under Stats in Separate Row */}
+              <Grid item xs={12} sx={{ width: '100%' }}>
+                <Box>
                   <WeeklyChart data={weeklyData} isArabic={isArabic} />
                 </Box>
-
-                {/* Recent Lists (Side-by-side) */}
-                <Grid container spacing={3}>
-                  <Grid item xs={12} md={6}>
-                    <RecentPatientsList patients={recentPatients} isArabic={isArabic} withLang={withLang} />
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <RecentReportsList reports={recentReports} isArabic={isArabic} withLang={withLang} />
-                  </Grid>
-                </Grid>
               </Grid>
 
-              {/* Right Column: Stats, Actions, Upcoming */}
-              <Grid item xs={12} md={4}>
-                <Stack spacing={4}>
-
-                  {/* Upcoming Appointments */}
+              {/* Upcoming Appointments & Recent Reports - Side by Side */}
+              <Grid item xs={12} md={6}>
                   <Box>
                     <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
                       <Typography variant="h6" fontWeight={800}>
@@ -967,18 +1357,36 @@ export default function DashboardIndexPage() {
                         <Paper
                           elevation={0}
                           sx={{
-                            p: 4,
+                          p: { xs: 3, sm: 4 },
                             textAlign: 'center',
                             borderRadius: 3,
                             bgcolor: 'background.paper',
                             border: '1px dashed',
-                            borderColor: 'divider'
+                          borderColor: 'divider',
+                          minHeight: 180,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Avatar
+                          sx={{
+                            width: 56,
+                            height: 56,
+                            bgcolor: alpha(theme.palette.primary.main, 0.1),
+                            color: 'primary.main',
+                            mb: 2,
                           }}
                         >
-                          <CalendarTodayIcon sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />
-                          <Typography color="text.secondary">
+                          <CalendarTodayIcon />
+                        </Avatar>
+                        <Typography variant="body1" fontWeight={600} color="text.primary" sx={{ mb: 0.5 }}>
                             {isArabic ? 'لا توجد مواعيد قادمة اليوم' : 'No upcoming appointments today'}
                           </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {isArabic ? 'يمكنك إضافة مواعيد جديدة من صفحة المواعيد' : 'You can add new appointments from the Appointments page'}
+                        </Typography>
                         </Paper>
                       ) : (
                         appointments.map((appt, i) => (
@@ -994,8 +1402,21 @@ export default function DashboardIndexPage() {
                       )}
                     </Stack>
                   </Box>
+              </Grid>
 
-                </Stack>
+              <Grid item xs={12} md={6}>
+                <RecentReportsList reports={recentReports} isArabic={isArabic} withLang={withLang} />
+              </Grid>
+
+              {/* Main Content: Articles & Recent Patients */}
+              <Grid item xs={12} md={8}>
+                {/* Recent Articles */}
+                <RecentArticlesList articles={recentArticles} isArabic={isArabic} withLang={withLang} />
+              </Grid>
+
+              <Grid item xs={12} md={4}>
+                {/* Recent Patients */}
+                <RecentPatientsList patients={recentPatients} isArabic={isArabic} withLang={withLang} />
               </Grid>
 
             </Grid>
