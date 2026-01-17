@@ -49,11 +49,14 @@ import ImageSearchIcon from '@mui/icons-material/ImageSearch';
 import SummarizeIcon from '@mui/icons-material/Summarize';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db, storage } from '@/lib/firebase';
+import AddArticleDialog from '@/components/blogs/AddArticleDialog';
+import AddInfographicDialog from '@/components/blogs/AddInfographicDialog';
 import {
   collection,
   getDocs,
@@ -127,8 +130,9 @@ export default function MarketingPage() {
   const [articles, setArticles] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [snack, setSnack] = React.useState({ open: false, severity: 'info', msg: '' });
+  const loadingRef = React.useRef(false); // Prevent multiple simultaneous loads
 
-  // Article form dialog
+  // Article form dialog - using new component for adding
   const [articleDialogOpen, setArticleDialogOpen] = React.useState(false);
   const [editingArticle, setEditingArticle] = React.useState(null);
   const [articleForm, setArticleForm] = React.useState({
@@ -143,7 +147,7 @@ export default function MarketingPage() {
   const [articleSaving, setArticleSaving] = React.useState(false);
   const [aiGenerating, setAiGenerating] = React.useState({ type: null, field: null });
 
-  // Infographic form dialog
+  // Infographic form dialog - using new component for adding
   const [infographicDialogOpen, setInfographicDialogOpen] = React.useState(false);
   const [editingInfographic, setEditingInfographic] = React.useState(null);
   const [infographicForm, setInfographicForm] = React.useState({
@@ -164,51 +168,128 @@ export default function MarketingPage() {
   /* ---------- load articles ---------- */
   React.useEffect(() => {
     let isMounted = true;
+    let abortController = new AbortController();
     
     if (!user?.uid || !mounted) {
       if (isMounted && mounted) {
         setLoading(false);
         setArticles([]);
       }
-      return;
+      return () => {
+        isMounted = false;
+        abortController.abort();
+      };
+    }
+    
+    // Prevent multiple simultaneous loads
+    if (loadingRef.current) {
+      return () => {
+        isMounted = false;
+        abortController.abort();
+      };
     }
     
     (async () => {
       try {
+        loadingRef.current = true;
         setLoading(true);
-        // Simplified approach: Get all without orderBy first
-        let q = query(
-          collection(db, ARTICLE_COLLECTION),
-          where('authorId', '==', user.uid),
-          limit(100)
-        );
+        setSnack({ open: false, severity: 'info', msg: '' });
+
+        // Helper function to fetch with timeout (increased timeout for Firestore queries)
+        const fetchWithTimeout = async (url, timeout = 30000) => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), timeout);
+          
+          try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            return response;
+          } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+              throw new Error('Request timeout - API took too long to respond');
+            }
+            throw error;
+          }
+        };
+
+        // Fetch articles and infographics from API (same as admin)
+        // Use Promise.allSettled to handle partial failures gracefully
+        const [articlesResult, infographicsResult] = await Promise.allSettled([
+          fetchWithTimeout(`/api/articles?authorId=${user.uid}`, 30000),
+          fetchWithTimeout(`/api/infographics?authorId=${user.uid}`, 30000),
+        ]);
         
-        const snap = await getDocs(q);
+        // Check if component is still mounted and not aborted
+        if (!isMounted || abortController.signal.aborted) return;
+
         if (!isMounted) return;
         
-        const items = snap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        // Process articles
+        let articlesData = [];
+        if (articlesResult.status === 'fulfilled' && articlesResult.value.ok) {
+          try {
+            const data = await articlesResult.value.json();
+            if (data.success) {
+              articlesData = data.articles || [];
+            } else {
+              console.error('Failed to fetch articles:', data.error);
+            }
+          } catch (e) {
+            console.error('Error parsing articles response:', e);
+          }
+        } else if (articlesResult.status === 'rejected') {
+          console.error('Error fetching articles:', articlesResult.reason);
+        } else if (articlesResult.value && !articlesResult.value.ok) {
+          console.error(`Articles API returned ${articlesResult.value.status}`);
+        }
+
+        // Process infographics
+        let infographicsData = [];
+        if (infographicsResult.status === 'fulfilled' && infographicsResult.value.ok) {
+          try {
+            const data = await infographicsResult.value.json();
+            if (data.success) {
+              infographicsData = data.infographics || [];
+            } else {
+              console.error('Failed to fetch infographics:', data.error);
+            }
+          } catch (e) {
+            console.error('Error parsing infographics response:', e);
+          }
+        } else if (infographicsResult.status === 'rejected') {
+          console.error('Error fetching infographics:', infographicsResult.reason);
+        } else if (infographicsResult.value && !infographicsResult.value.ok) {
+          console.error(`Infographics API returned ${infographicsResult.value.status}`);
+        }
+
+        // Combine articles and infographics (both are in articles collection with type field)
+        const allItems = [...articlesData, ...infographicsData];
         
         // Sort client-side by date (most recent first)
-        items.sort((a, b) => {
+        allItems.sort((a, b) => {
           const aDate = toDate(a.publishedAt || a.createdAt || a.updatedAt);
           const bDate = toDate(b.publishedAt || b.createdAt || b.updatedAt);
           return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
         });
         
-        if (isMounted) {
-          setArticles(items);
+        if (isMounted && !abortController.signal.aborted) {
+          setArticles(allItems);
         }
       } catch (e) {
         console.error('Error loading articles:', e);
-        if (isMounted) {
-          setSnack({ open: true, severity: 'error', msg: t('Failed to load articles', 'فشل تحميل المقالات') });
-          setArticles([]); // Set empty array on error
+        if (isMounted && !abortController.signal.aborted) {
+          // Check if we have any articles loaded, if not show error
+          // The articles state might have previous data, so we check if the error is critical
+          const errorMsg = e.message?.includes('timeout') 
+            ? (isAr ? 'انتهت مهلة الطلب. قد لا تكون بعض البيانات قد تم تحميلها. يرجى تحديث الصفحة.' : 'Request timeout. Some data may not have loaded. Please refresh the page.')
+            : (isAr ? 'فشل تحميل بعض المقالات. يرجى تحديث الصفحة.' : 'Failed to load some articles. Please refresh the page.');
+          setSnack({ open: true, severity: 'warning', msg: errorMsg });
+          // Don't clear articles on error - keep what we have
         }
       } finally {
-        if (isMounted) {
+        loadingRef.current = false;
+        if (isMounted && !abortController.signal.aborted) {
           setLoading(false);
         }
       }
@@ -216,8 +297,10 @@ export default function MarketingPage() {
     
     return () => {
       isMounted = false;
+      loadingRef.current = false;
+      abortController.abort();
     };
-  }, [user?.uid, mounted, t]);
+  }, [user?.uid, mounted, isAr]); // Added isAr instead of t to prevent infinite loop
 
   /* ---------- AI content generation ---------- */
   const generateAIContent = async (type, field, topic, language = 'ar') => {
@@ -278,6 +361,7 @@ export default function MarketingPage() {
   /* ---------- article handlers ---------- */
   const openArticleDialog = (article = null) => {
     if (article) {
+      // For editing, use the old dialog
       setEditingArticle(article);
       setArticleForm({
         title_ar: article.title_ar || '',
@@ -288,19 +372,12 @@ export default function MarketingPage() {
         summary_en: article.summary_en || '',
         tags: article.tags || [],
       });
+      setArticleDialogOpen(true);
     } else {
+      // For adding, use the new component
       setEditingArticle(null);
-      setArticleForm({
-        title_ar: '',
-        title_en: '',
-        content_ar: '',
-        content_en: '',
-        summary_ar: '',
-        summary_en: '',
-        tags: [],
-      });
-    }
     setArticleDialogOpen(true);
+    }
   };
 
   const closeArticleDialog = () => {
@@ -344,25 +421,39 @@ export default function MarketingPage() {
         setSnack({ open: true, severity: 'success', msg: t('Article published', 'تم نشر المقال') });
       }
 
-      // Reload articles
-      const q = query(
-        collection(db, ARTICLE_COLLECTION),
-        where('authorId', '==', user.uid),
-        orderBy('publishedAt', 'desc'),
-        limit(100)
-      );
+      // Reload articles using API (same pattern as initial load)
       try {
-        const snap = await getDocs(q);
-        setArticles(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      } catch {
-        const q2 = query(collection(db, ARTICLE_COLLECTION), where('authorId', '==', user.uid), limit(100));
-        const snap2 = await getDocs(q2);
-        const items = snap2.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setArticles(items.sort((a, b) => {
+        const [articlesRes, infographicsRes] = await Promise.all([
+          fetch(`/api/articles?authorId=${user.uid}`),
+          fetch(`/api/infographics?authorId=${user.uid}`),
+        ]);
+        
+        let articlesData = [];
+        if (articlesRes.ok) {
+          const data = await articlesRes.json();
+          if (data.success) {
+            articlesData = data.articles || [];
+          }
+        }
+        
+        let infographicsData = [];
+        if (infographicsRes.ok) {
+          const data = await infographicsRes.json();
+          if (data.success) {
+            infographicsData = data.infographics || [];
+          }
+        }
+        
+        const allItems = [...articlesData, ...infographicsData];
+        allItems.sort((a, b) => {
           const aDate = toDate(a.publishedAt || a.createdAt);
           const bDate = toDate(b.publishedAt || b.createdAt);
           return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
-        }));
+        });
+        setArticles(allItems);
+      } catch (e) {
+        console.error('Error reloading articles:', e);
+        // On error, just show success message - data will reload on next page visit
       }
 
       closeArticleDialog();
@@ -377,6 +468,7 @@ export default function MarketingPage() {
   /* ---------- infographic handlers ---------- */
   const openInfographicDialog = (infographic = null) => {
     if (infographic) {
+      // For editing, use the old dialog
       setEditingInfographic(infographic);
       setInfographicForm({
         title_ar: infographic.title_ar || '',
@@ -385,17 +477,12 @@ export default function MarketingPage() {
         description_en: infographic.description_en || '',
         imageUrl: infographic.imageUrl || '',
       });
+      setInfographicDialogOpen(true);
     } else {
+      // For adding, use the new component
       setEditingInfographic(null);
-      setInfographicForm({
-        title_ar: '',
-        title_en: '',
-        description_ar: '',
-        description_en: '',
-        imageUrl: '',
-      });
-    }
     setInfographicDialogOpen(true);
+    }
   };
 
   const closeInfographicDialog = () => {
@@ -466,25 +553,39 @@ export default function MarketingPage() {
         setSnack({ open: true, severity: 'success', msg: t('Infographic published', 'تم نشر الإنفوجرافيك') });
       }
 
-      // Reload articles
-      const q = query(
-        collection(db, ARTICLE_COLLECTION),
-        where('authorId', '==', user.uid),
-        orderBy('publishedAt', 'desc'),
-        limit(100)
-      );
+      // Reload articles using API (same pattern as initial load)
       try {
-        const snap = await getDocs(q);
-        setArticles(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-      } catch {
-        const q2 = query(collection(db, ARTICLE_COLLECTION), where('authorId', '==', user.uid), limit(100));
-        const snap2 = await getDocs(q2);
-        const items = snap2.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setArticles(items.sort((a, b) => {
+        const [articlesRes, infographicsRes] = await Promise.all([
+          fetch(`/api/articles?authorId=${user.uid}`),
+          fetch(`/api/infographics?authorId=${user.uid}`),
+        ]);
+        
+        let articlesData = [];
+        if (articlesRes.ok) {
+          const data = await articlesRes.json();
+          if (data.success) {
+            articlesData = data.articles || [];
+          }
+        }
+        
+        let infographicsData = [];
+        if (infographicsRes.ok) {
+          const data = await infographicsRes.json();
+          if (data.success) {
+            infographicsData = data.infographics || [];
+          }
+        }
+        
+        const allItems = [...articlesData, ...infographicsData];
+        allItems.sort((a, b) => {
           const aDate = toDate(a.publishedAt || a.createdAt);
           const bDate = toDate(b.publishedAt || b.createdAt);
           return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
-        }));
+        });
+        setArticles(allItems);
+      } catch (e) {
+        console.error('Error reloading articles:', e);
+        // On error, just show success message - data will reload on next page visit
       }
 
       closeInfographicDialog();
@@ -577,14 +678,25 @@ export default function MarketingPage() {
                     {t('Publish articles and infographics on Shafy blogs', 'انشر المقالات والإنفوجرافيك على مدونة شافي')}
                   </Typography>
                 </Box>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => (tab === 0 ? openArticleDialog() : openInfographicDialog())}
-                  sx={{ textTransform: 'none', fontWeight: 600 }}
-                >
-                  {t(tab === 0 ? 'New Article' : 'New Infographic', tab === 0 ? 'مقال جديد' : 'إنفوجرافيك جديد')}
-                </Button>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <Button
+                    variant="outlined"
+                    startIcon={<MenuBookIcon />}
+                    endIcon={<OpenInNewIcon />}
+                    onClick={() => window.open('https://notebooklm.google.com', '_blank')}
+                    sx={{ textTransform: 'none', borderRadius: 2 }}
+                  >
+                    {t('Open NotebookLM', 'افتح NotebookLM')}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => (tab === 0 ? openArticleDialog() : openInfographicDialog())}
+                    sx={{ textTransform: 'none', fontWeight: 600 }}
+                  >
+                    {t(tab === 0 ? 'New Article' : 'New Infographic', tab === 0 ? 'مقال جديد' : 'إنفوجرافيك جديد')}
+                  </Button>
+                </Stack>
               </Stack>
 
               {/* Tabs */}
@@ -737,7 +849,49 @@ export default function MarketingPage() {
             </Stack>
           </Container>
 
-          {/* Article Dialog */}
+          {/* Article Dialog - New component for adding, old dialog for editing */}
+          {!editingArticle ? (
+            <AddArticleDialog
+              open={articleDialogOpen}
+              onClose={closeArticleDialog}
+              onCreated={async () => {
+                // Reload articles using API (same pattern as initial load)
+                try {
+                  const [articlesRes, infographicsRes] = await Promise.all([
+                    fetch(`/api/articles?authorId=${user.uid}`),
+                    fetch(`/api/infographics?authorId=${user.uid}`),
+                  ]);
+                  
+                  let articlesData = [];
+                  if (articlesRes.ok) {
+                    const data = await articlesRes.json();
+                    if (data.success) {
+                      articlesData = data.articles || [];
+                    }
+                  }
+                  
+                  let infographicsData = [];
+                  if (infographicsRes.ok) {
+                    const data = await infographicsRes.json();
+                    if (data.success) {
+                      infographicsData = data.infographics || [];
+                    }
+                  }
+                  
+                  const allItems = [...articlesData, ...infographicsData];
+                  allItems.sort((a, b) => {
+                    const aDate = toDate(a.publishedAt || a.createdAt);
+                    const bDate = toDate(b.publishedAt || b.createdAt);
+                    return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+                  });
+                  setArticles(allItems);
+                } catch (e) {
+                  console.error('Error reloading articles:', e);
+                }
+                closeArticleDialog();
+              }}
+            />
+          ) : (
           <Dialog
             open={articleDialogOpen}
             onClose={closeArticleDialog}
@@ -882,8 +1036,51 @@ export default function MarketingPage() {
               </Button>
             </DialogActions>
           </Dialog>
+          )}
 
-          {/* Infographic Dialog */}
+          {/* Infographic Dialog - New component for adding, old dialog for editing */}
+          {!editingInfographic ? (
+            <AddInfographicDialog
+              open={infographicDialogOpen}
+              onClose={closeInfographicDialog}
+              onCreated={async () => {
+                // Reload articles using API (same pattern as initial load)
+                try {
+                  const [articlesRes, infographicsRes] = await Promise.all([
+                    fetch(`/api/articles?authorId=${user.uid}`),
+                    fetch(`/api/infographics?authorId=${user.uid}`),
+                  ]);
+                  
+                  let articlesData = [];
+                  if (articlesRes.ok) {
+                    const data = await articlesRes.json();
+                    if (data.success) {
+                      articlesData = data.articles || [];
+                    }
+                  }
+                  
+                  let infographicsData = [];
+                  if (infographicsRes.ok) {
+                    const data = await infographicsRes.json();
+                    if (data.success) {
+                      infographicsData = data.infographics || [];
+                    }
+                  }
+                  
+                  const allItems = [...articlesData, ...infographicsData];
+                  allItems.sort((a, b) => {
+                    const aDate = toDate(a.publishedAt || a.createdAt);
+                    const bDate = toDate(b.publishedAt || b.createdAt);
+                    return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+                  });
+                  setArticles(allItems);
+                } catch (e) {
+                  console.error('Error reloading articles:', e);
+                }
+                closeInfographicDialog();
+              }}
+            />
+          ) : (
           <Dialog
             open={infographicDialogOpen}
             onClose={closeInfographicDialog}
@@ -1026,6 +1223,7 @@ export default function MarketingPage() {
               </Button>
             </DialogActions>
           </Dialog>
+          )}
 
           {/* Actions Menu */}
           <Menu anchorEl={anchorEl} open={menuOpen} onClose={handleMenuClose}>
