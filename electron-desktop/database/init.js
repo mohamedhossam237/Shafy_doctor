@@ -154,6 +154,22 @@ function createTables() {
     )
   `);
   
+  // Auth cache table (stores authentication info for offline access)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_cache (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      uid TEXT UNIQUE NOT NULL,
+      email TEXT,
+      displayName TEXT,
+      photoURL TEXT,
+      emailVerified INTEGER DEFAULT 0,
+      lastLoginAt TEXT,
+      cachedAt TEXT DEFAULT (datetime('now')),
+      token TEXT,
+      expiresAt TEXT
+    )
+  `);
+  
   // Create indexes for better performance
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_patients_registeredBy ON patients(registeredBy);

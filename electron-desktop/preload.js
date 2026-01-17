@@ -52,6 +52,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     enableAutoSync: (enabled) => ipcRenderer.invoke('articles:enableAutoSync', enabled),
   },
   
+  // Authentication
+  auth: {
+    getCurrentUser: () => ipcRenderer.invoke('auth:getCurrentUser'),
+    emailLogin: (email, password) => ipcRenderer.invoke('auth:emailLogin', email, password),
+    googleLogin: () => ipcRenderer.invoke('auth:googleLogin'),
+    signOut: () => ipcRenderer.invoke('auth:signOut'),
+    isOnline: () => ipcRenderer.invoke('auth:isOnline'),
+  },
+  
+  // Network
+  network: {
+    getStatus: () => ipcRenderer.invoke('network:getStatus'),
+    onStatusChanged: (callback) => {
+      ipcRenderer.on('network-status-changed', (event, data) => callback(data));
+    },
+  },
+  
   // System
   platform: process.platform,
   version: app.getVersion(),

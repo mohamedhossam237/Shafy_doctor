@@ -1,6 +1,7 @@
 const { ipcMain } = require('electron');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, getDocs, addDoc, updateDoc, doc } = require('firebase/firestore');
+const { checkInternetConnectivity } = require('./auth-service');
 
 let firebaseApp = null;
 let db = null;
@@ -38,6 +39,12 @@ function setupAppointmentSync(database) {
   // IPC handler to sync appointments from online
   ipcMain.handle('appointments:syncFromOnline', async (event, doctorUID) => {
     try {
+      // Check internet connectivity
+      const online = await checkInternetConnectivity();
+      if (!online) {
+        return { success: false, error: 'No internet connection. Cannot sync appointments.', offline: true };
+      }
+      
       if (!doctorUID) {
         return { success: false, error: 'Doctor UID is required' };
       }
@@ -127,6 +134,12 @@ function setupAppointmentSync(database) {
   // IPC handler to sync appointments to online
   ipcMain.handle('appointments:syncToOnline', async (event, doctorUID) => {
     try {
+      // Check internet connectivity
+      const online = await checkInternetConnectivity();
+      if (!online) {
+        return { success: false, error: 'No internet connection. Cannot sync appointments.', offline: true };
+      }
+      
       if (!doctorUID) {
         return { success: false, error: 'Doctor UID is required' };
       }

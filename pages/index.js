@@ -454,7 +454,7 @@ function RevenueTile({ revenueDetails, isArabic, withLang, delay }) {
   const theme = useTheme();
   const color = '#e67e22';
   const formatAmount = (amount) => {
-    return Number(amount || 0).toLocaleString(isArabic ? 'ar-EG' : 'en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return Number(amount || 0).toLocaleString('en-US-u-nu-latn', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
 
   return (

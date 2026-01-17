@@ -7,3 +7,6 @@ build/
 database/*.db
 database/*.db-wal
 database/*.db-shm
+.next/
+public/
+package.json

@@ -3,16 +3,18 @@
   "version": "1.0.0",
   "description": "Shafy Doctor Desktop Application",
   "main": "main.js",
+  "author": "Shafy",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:react\" \"wait-on http://localhost:3000 && electron .\"",
     "dev:react": "cd ../ && npm run dev",
+    "prebuild": "node copy-build-files.js",
     "build": "npm run build:react && npm run build:electron",
     "build:react": "cd ../ && npm run build",
     "build:electron": "electron-builder",
     "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "pack": "npm run prebuild && electron-builder --dir",
+    "dist": "npm run prebuild && electron-builder",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -26,10 +28,20 @@
       "main.js",
       "preload.js",
       "database/**/*",
-      "../.next/**/*",
-      "../public/**/*",
-      "../node_modules/**/*",
-      "!../node_modules/.cache/**/*"
+      "services/**/*",
+      ".next/**/*",
+      "public/**/*",
+      "node_modules/next/**/*",
+      "node_modules/react/**/*",
+      "node_modules/react-dom/**/*",
+      "node_modules/@emotion/**/*",
+      "node_modules/@mui/**/*",
+      "package.json",
+      "!node_modules/**/.cache/**/*"
+    ],
+    "asarUnpack": [
+      ".next/**/*",
+      "node_modules/next/**/*"
     ],
     "win": {
       "target": ["nsis", "portable"],
@@ -45,12 +57,12 @@
     }
   },
   "dependencies": {
-    "electron": "^32.2.6",
     "better-sqlite3": "^11.7.0",
     "firebase": "^12.1.0",
     "electron-store": "^10.1.0"
   },
   "devDependencies": {
+    "electron": "^32.2.6",
     "concurrently": "^9.1.0",
     "electron-builder": "^25.1.8",
     "wait-on": "^8.0.1"
