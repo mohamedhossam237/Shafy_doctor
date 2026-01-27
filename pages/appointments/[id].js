@@ -6,11 +6,9 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import {
   Box, Container, Paper, Stack, Typography, Button, Chip,
-  Divider, CircularProgress, IconButton, Alert, Snackbar, Tooltip
+  Divider, CircularProgress, Alert, Snackbar
 } from '@mui/material';
-import { motion } from 'framer-motion';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import EventIcon from '@mui/icons-material/Event';
 import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import PersonIcon from '@mui/icons-material/Person';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -19,8 +17,10 @@ import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PlaceIcon from '@mui/icons-material/Place';
+import PhoneIcon from '@mui/icons-material/Phone';
+import DescriptionIcon from '@mui/icons-material/Description';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import AppLayout from '@/components/AppLayout';
-import AddReportDialog from '@/components/reports/AddReportDialog';
 import ReportViewDialog from '@/components/reports/ReportViewDialog';
 import UpdateAppointmentDialog from '@/components/reports/UpdateAppointmentDialog';
 import ExtraFeeDialog from '@/components/reports/ExtraFeeDialog';
@@ -33,7 +33,21 @@ import {
 
 /* ---------- helpers ---------- */
 const toDate = (v) => (v?.toDate ? v.toDate() : new Date(v));
-const toWaDigits = (raw) => String(raw || '').replace(/\D/g, '');
+// Format phone number for WhatsApp: always use +20 for Egyptian numbers
+const toWaDigits = (raw) => {
+  const phoneRaw = String(raw || '').replace(/\D/g, '');
+  if (!phoneRaw) return '';
+  
+  // Always treat as Egyptian number: +20 (Egypt country code for WhatsApp)
+  let phoneDigits = phoneRaw.replace(/^0+/, '');
+  if (phoneDigits.startsWith('20')) {
+    // Already starts with 20
+    return `+${phoneDigits}`;
+  } else {
+    // Add +20 (Egypt country code for WhatsApp)
+    return `+20${phoneDigits}`;
+  }
+};
 const safeNum = (v) => (Number.isFinite(+v) ? +v : 0);
 const currencyLabel = (isAr) => (isAr ? 'ج.م' : 'EGP');
 
@@ -84,6 +98,12 @@ const buildStatusMessage = ({ isAr, appt, newStatus, clinicLabel }) => {
   return map[newStatus] || map.pending;
 };
 
+// Get patient ID from appointment (checking all possible field names)
+function getPatientId(appt) {
+  if (!appt) return null;
+  return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
+}
+
 /* ---------- main ---------- */
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
@@ -102,7 +122,6 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const [snack, setSnack] = React.useState({ open: false, severity: 'info', msg: '' });
 
   // dialogs
-  const [reportOpen, setReportOpen] = React.useState(false);
   const [viewReport, setViewReport] = React.useState(null);
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [extraDialogOpen, setExtraDialogOpen] = React.useState(false);
@@ -202,180 +221,398 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   if (loading)
     return (
       <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
-        <Container sx={{ py: 4, textAlign: 'center' }}><CircularProgress /></Container>
+        <Box
+          sx={{
+            position: 'relative',
+            minHeight: '100vh',
+            background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.03) 0%, rgba(66, 165, 245, 0.01) 50%, rgba(255, 152, 0, 0.02) 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Container sx={{ py: 4, textAlign: 'center' }}>
+            <CircularProgress size={60} sx={{ color: 'primary.main' }} />
+          </Container>
+        </Box>
       </AppLayout>
     );
   if (err)
     return (
       <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
-        <Container sx={{ py: 4 }}><Alert severity="error">{err}</Alert></Container>
+        <Box
+          sx={{
+            position: 'relative',
+            minHeight: '100vh',
+            background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.03) 0%, rgba(66, 165, 245, 0.01) 50%, rgba(255, 152, 0, 0.02) 100%)',
+            py: 4,
+          }}
+        >
+          <Container>
+            <Alert severity="error" sx={{ borderRadius: 3, p: 3 }}>{err}</Alert>
+          </Container>
+        </Box>
       </AppLayout>
     );
 
+  const handleWhatsAppContact = () => {
+    if (!appt?.patientPhone) return;
+    const msg = buildStatusMessage({ isAr, appt, newStatus: status, clinicLabel });
+    const digits = toWaDigits(appt.patientPhone);
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
   return (
     <AppLayout themeMode={themeMode} setThemeMode={setThemeMode}>
-      <Container
-        maxWidth="md"
+      <Box
         sx={{
-          py: { xs: 2, md: 4 },
-          direction: isAr ? 'rtl' : 'ltr',
-          textAlign: isAr ? 'right' : 'left',
-          fontFamily: isAr ? 'Cairo, sans-serif' : undefined,
+          minHeight: '100vh',
+          pb: 4,
+          bgcolor: 'background.default',
         }}
       >
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -15 }} animate={{ opacity: 1, y: 0 }}>
-          <Box
-            sx={{
-              p: 3, mb: 3, color: 'white',
-              borderRadius: 3,
-              background: 'linear-gradient(135deg,#1E4E8C 0%,#A22727 100%)',
-              boxShadow: '0 4px 15px rgba(0,0,0,0.15)',
-            }}
-          >
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Stack>
-                <Typography variant="h5" fontWeight={900}>
-                  {t('Appointment Details', 'تفاصيل الموعد')}
-                </Typography>
-                {queueNo && (
-                  <Typography variant="body2" sx={{ mt: 0.3, color: 'rgba(255,255,255,0.9)' }}>
-                    {t('Serial Number', 'الرقم التسلسلي')}: #{formatNumber(queueNo, isAr)}
-                  </Typography>
-                )}
-                <Typography variant="body2" color="rgba(255,255,255,0.8)">
-                  {t('Status', 'الحالة')}: {translateStatus(status, isAr)}
-                </Typography>
+        <Container
+          maxWidth="md"
+          sx={{
+            py: { xs: 2, md: 4 },
+            direction: isAr ? 'rtl' : 'ltr',
+            textAlign: isAr ? 'right' : 'left',
+            fontFamily: isAr ? 'Cairo, sans-serif' : undefined,
+          }}
+        >
+          {/* Header */}
+          <Stack spacing={2} sx={{ mb: 3 }}>
+            <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} flexWrap="wrap">
+                <Stack spacing={0.5}>
+                  <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
+                    <Typography variant="h5" fontWeight={700}>
+                      {t('Appointment Details', 'تفاصيل الموعد')}
+                    </Typography>
+                    {appt?.appointmentType && (
+                      <Chip
+                        size="small"
+                        label={
+                          appt.appointmentType === 'followup'
+                            ? (isAr ? 'إعادة كشف' : 'Re-examination')
+                            : (isAr ? 'كشف' : 'Checkup')
+                        }
+                        color={appt.appointmentType === 'followup' ? 'secondary' : 'primary'}
+                        sx={{
+                          height: 28,
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                        }}
+                      />
+                    )}
+                  </Stack>
+                  {queueNo && (
+                    <Typography variant="body2" color="text.secondary">
+                      {t('Serial Number', 'الرقم التسلسلي')}: #{formatNumber(queueNo, isAr)}
+                    </Typography>
+                  )}
+                </Stack>
+                <Chip
+                  icon={<CheckCircleIcon />}
+                  label={translateStatus(status, isAr)}
+                  color={
+                    status === 'completed' ? 'success' :
+                    status === 'confirmed' ? 'info' :
+                    status === 'cancelled' ? 'default' : 'warning'
+                  }
+                  sx={{ fontWeight: 700, height: 36 }}
+                />
               </Stack>
-              <Chip
-                icon={<CheckCircleIcon />}
-                label={translateStatus(status, isAr)}
+            </Paper>
+
+            {/* WhatsApp Contact Button */}
+            {appt?.patientPhone && (
+              <Button
+                fullWidth
+                variant="contained"
+                startIcon={<WhatsAppIcon />}
+                onClick={handleWhatsAppContact}
                 sx={{
-                  bgcolor:
-                    status === 'completed'
-                      ? '#4caf50'
-                      : status === 'confirmed'
-                        ? '#0288d1'
-                        : status === 'cancelled'
-                          ? '#757575'
-                          : '#ff9800',
-                  color: '#fff', fontWeight: 700,
+                  py: 1.5,
+                  borderRadius: 2,
+                  bgcolor: '#25D366',
+                  fontWeight: 700,
+                  fontSize: '1rem',
+                  textTransform: 'none',
+                  boxShadow: '0 4px 12px rgba(37, 211, 102, 0.3)',
+                  '&:hover': {
+                    bgcolor: '#20BA5A',
+                    boxShadow: '0 6px 16px rgba(37, 211, 102, 0.4)',
+                    transform: 'translateY(-2px)',
+                  },
+                  transition: 'all 0.2s ease',
                 }}
-              />
-            </Stack>
-          </Box>
-        </motion.div>
-
-        {/* Main Card */}
-        <Paper sx={{ p: 3, borderRadius: 4, boxShadow: '0 3px 15px rgba(0,0,0,0.05)' }}>
-          <Stack spacing={2}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <LocalHospitalIcon color="primary" />
-              <Typography fontWeight={700}>{t('Doctor', 'الطبيب')}:</Typography>
-              <Typography>{isAr ? appt?.doctorName_ar || appt?.doctorName_en : appt?.doctorName_en || appt?.doctorName_ar}</Typography>
-            </Stack>
-
-            {clinicLabel && (
-              <Stack direction="row" spacing={1} alignItems="center">
-                <PlaceIcon color="action" />
-                <Typography fontWeight={700}>{t('Clinic', 'العيادة')}:</Typography>
-                <Typography>{clinicLabel}</Typography>
-              </Stack>
-            )}
-
-            <Stack direction="row" spacing={1} alignItems="center">
-              <EventIcon color="action" />
-              <Typography fontWeight={700}>{t('Date/Time', 'التاريخ / الوقت')}:</Typography>
-              <Typography color="text.secondary">{fmtDate(appt.appointmentDate || appt.date, isAr)}</Typography>
-            </Stack>
-
-            <Divider />
-
-            <Stack direction="row" spacing={1} alignItems="center">
-              <PersonIcon color="action" />
-              <Typography fontWeight={700}>{t('Patient', 'المريض')}:</Typography>
-              <Typography>{appt.patientName}</Typography>
-              {appt.patientPhone && (
-                <Tooltip title={t('Send WhatsApp message', 'إرسال واتساب')}>
-                  <IconButton
-                    color="success"
-                    onClick={() => {
-                      const msg = buildStatusMessage({ isAr, appt, newStatus: status, clinicLabel });
-                      const digits = toWaDigits(appt.patientPhone);
-                      window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, '_blank');
-                    }}
-                  >
-                    <WhatsAppIcon />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Stack>
-
-            <Divider />
-
-            <Stack spacing={1}>
-              <Typography fontWeight={700}>{t('Payment Details', 'تفاصيل الدفع')}</Typography>
-              <Stack direction="row" spacing={1}>
-                <PaymentIcon color="primary" />
-                <Typography>
-                  {t('Checkup Fee', 'رسوم الكشف')}: {formatNumber(price, isAr)} {currencyLabel(isAr)}
-                </Typography>
-              </Stack>
-              <Divider />
-              <Typography align={isAr ? 'left' : 'right'} variant="h6" fontWeight={900}>
-                {t('Grand Total', 'الإجمالي النهائي')}: {formatNumber(grandTotal, isAr)} {currencyLabel(isAr)}
-              </Typography>
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setExtraDialogOpen(true)}>
-                {t('Add Extra Fee', 'إضافة تكلفة')}
+              >
+                {t('Contact Patient via WhatsApp', 'التواصل مع المريض عبر واتساب')}
               </Button>
-            </Stack>
+            )}
+          </Stack>
 
-            <Divider />
+          {/* Main Card */}
+          <Paper elevation={2} sx={{ p: 3, borderRadius: 3 }}>
+            <Stack spacing={3}>
+              {/* Basic Information */}
+              <Stack spacing={2}>
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <LocalHospitalIcon color="primary" />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      {t('Doctor', 'الطبيب')}
+                    </Typography>
+                    <Typography variant="h6" fontWeight={700}>
+                      {isAr ? appt?.doctorName_ar || appt?.doctorName_en : appt?.doctorName_en || appt?.doctorName_ar}
+                    </Typography>
+                  </Box>
+                </Stack>
 
-            <Stack>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography fontWeight={900}>{t('Reports', 'التقارير')}</Typography>
-                <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setReportOpen(true)}>
-                  {t('Add Report', 'إضافة تقرير')}
+                {clinicLabel && (
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <PlaceIcon color="success" />
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                        {t('Clinic', 'العيادة')}
+                      </Typography>
+                      <Typography variant="h6" fontWeight={700}>
+                        {clinicLabel}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                )}
+
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <ScheduleIcon color="warning" />
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      {t('Date/Time', 'التاريخ / الوقت')}
+                    </Typography>
+                    <Typography variant="h6" fontWeight={700}>
+                      {fmtDate(appt.appointmentDate || appt.date, isAr)}
+                    </Typography>
+                  </Box>
+                </Stack>
+
+                <Stack direction="row" spacing={2} alignItems="center">
+                  <PersonIcon color="secondary" />
+                  <Box sx={{ flex: 1 }}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                        {t('Patient', 'المريض')}
+                      </Typography>
+                      {appt?.appointmentType && (
+                        <Chip
+                          size="small"
+                          label={
+                            appt.appointmentType === 'followup'
+                              ? (isAr ? 'إعادة كشف' : 'Re-examination')
+                              : (isAr ? 'كشف' : 'Checkup')
+                          }
+                          color={appt.appointmentType === 'followup' ? 'secondary' : 'primary'}
+                          sx={{
+                            height: 22,
+                            fontSize: '0.7rem',
+                            fontWeight: 700,
+                          }}
+                        />
+                      )}
+                    </Stack>
+                    {(() => {
+                      const patientId = getPatientId(appt);
+                      const patientHref = patientId ? `/patients/${patientId}${isAr ? '?lang=ar' : ''}` : null;
+                      
+                      if (patientHref) {
+                        return (
+                          <Link href={patientHref} style={{ textDecoration: 'none' }}>
+                            <Typography 
+                              variant="h6" 
+                              fontWeight={700}
+                              sx={{
+                                cursor: 'pointer',
+                                color: 'primary.main',
+                                display: 'inline-block',
+                                transition: 'all 0.2s ease',
+                                borderBottom: '2px solid transparent',
+                                '&:hover': {
+                                  opacity: 0.85,
+                                  borderBottomColor: 'primary.main',
+                                  transform: 'translateY(-1px)',
+                                },
+                              }}
+                            >
+                              {appt.patientName}
+                            </Typography>
+                          </Link>
+                        );
+                      }
+                      
+                      return (
+                        <Typography variant="h6" fontWeight={700}>
+                          {appt.patientName}
+                        </Typography>
+                      );
+                    })()}
+                    {appt.patientPhone && (
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <PhoneIcon sx={{ fontSize: 14 }} />
+                        {appt.patientPhone}
+                      </Typography>
+                    )}
+                  </Box>
+                </Stack>
+              </Stack>
+
+              <Divider />
+
+              {/* Payment Details */}
+              <Stack spacing={2}>
+                <Typography variant="h6" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <PaymentIcon color="primary" />
+                  {t('Payment Details', 'تفاصيل الدفع')}
+                </Typography>
+                <Stack spacing={1.5}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography fontWeight={600}>
+                      {t('Checkup Fee', 'رسوم الكشف')}:
+                    </Typography>
+                    <Typography fontWeight={700} color="primary.main">
+                      {formatNumber(price, isAr)} {currencyLabel(isAr)}
+                    </Typography>
+                  </Stack>
+                  {extraFees.length > 0 && (
+                    <Stack spacing={1}>
+                      {extraFees.map((fee, idx) => (
+                        <Stack key={idx} direction="row" justifyContent="space-between">
+                          <Typography variant="body2" color="text.secondary">
+                            {fee.description || t('Extra Fee', 'تكلفة إضافية')}:
+                          </Typography>
+                          <Typography variant="body2" fontWeight={600}>
+                            {formatNumber(safeNum(fee.amount), isAr)} {currencyLabel(isAr)}
+                          </Typography>
+                        </Stack>
+                      ))}
+                    </Stack>
+                  )}
+                  <Divider />
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6" fontWeight={700}>
+                      {t('Grand Total', 'الإجمالي النهائي')}:
+                    </Typography>
+                    <Typography variant="h5" fontWeight={800} color="primary.main">
+                      {formatNumber(grandTotal, isAr)} {currencyLabel(isAr)}
+                    </Typography>
+                  </Stack>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={() => setExtraDialogOpen(true)}
+                    fullWidth
+                    sx={{ mt: 1 }}
+                  >
+                    {t('Add Extra Fee', 'إضافة تكلفة')}
+                  </Button>
+                </Stack>
+              </Stack>
+
+              <Divider />
+
+              {/* Reports Section */}
+              <Stack spacing={2}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Typography variant="h6" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <DescriptionIcon color="info" />
+                    {t('Reports', 'التقارير')}
+                  </Typography>
+                  <Button
+                    component={Link}
+                    href={`/prescription/new?appointmentId=${id}${(appt?.patientId || appt?.patientUID || appt?.patientID) ? `&patientId=${appt.patientId || appt.patientUID || appt.patientID}` : ''}${isAr ? '&lang=ar' : ''}`}
+                    variant="outlined"
+                    size="small"
+                    startIcon={<AddIcon />}
+                  >
+                    {t('Add Report', 'إضافة تقرير')}
+                  </Button>
+                </Stack>
+                {reportsLoading ? (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : reports.length === 0 ? (
+                  <Paper variant="outlined" sx={{ p: 3, textAlign: 'center', borderRadius: 2 }}>
+                    <DescriptionIcon sx={{ fontSize: 32, color: 'text.disabled', mb: 1 }} />
+                    <Typography color="text.secondary">
+                      {t('No reports yet', 'لا توجد تقارير بعد')}
+                    </Typography>
+                  </Paper>
+                ) : (
+                  <Stack spacing={1.5}>
+                    {reports.map((r) => (
+                      <Paper
+                        key={r.id}
+                        variant="outlined"
+                        sx={{
+                          p: 2,
+                          borderRadius: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          '&:hover': {
+                            bgcolor: 'action.hover',
+                          },
+                        }}
+                      >
+                        <Stack spacing={0.5}>
+                          <Typography fontWeight={700}>
+                            {r.titleAr || r.titleEn || '—'}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {fmtDate(r.date, isAr)}
+                          </Typography>
+                        </Stack>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VisibilityIcon />}
+                          onClick={() => setViewReport(r)}
+                        >
+                          {t('View', 'عرض')}
+                        </Button>
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </Stack>
+
+              <Divider />
+
+              {/* Action Buttons */}
+              <Stack direction="row" spacing={2}>
+                <Button
+                  component={Link}
+                  href={`/appointments${isAr ? '?lang=ar' : ''}`}
+                  startIcon={<ArrowBackIcon />}
+                  variant="outlined"
+                  fullWidth
+                >
+                  {t('Back', 'رجوع')}
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<ScheduleIcon />}
+                  onClick={() => setUpdateOpen(true)}
+                  fullWidth
+                >
+                  {t('Update Appointment', 'تحديث الموعد')}
                 </Button>
               </Stack>
-              {reportsLoading ? (
-                <CircularProgress size={20} />
-              ) : reports.length === 0 ? (
-                <Typography color="text.secondary">{t('No reports yet', 'لا توجد تقارير بعد')}</Typography>
-              ) : (
-                <Stack spacing={1.25} mt={1}>
-                  {reports.map((r) => (
-                    <Paper
-                      key={r.id}
-                      variant="outlined"
-                      sx={{ p: 1.5, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                    >
-                      <Stack>
-                        <Typography fontWeight={700}>{r.titleAr || r.titleEn || '—'}</Typography>
-                        <Typography variant="body2" color="text.secondary">{fmtDate(r.date, isAr)}</Typography>
-                      </Stack>
-                      <Button onClick={() => setViewReport(r)}>{t('View', 'عرض')}</Button>
-                    </Paper>
-                  ))}
-                </Stack>
-              )}
             </Stack>
-
-            <Divider />
-            <Stack direction="row" justifyContent="space-between">
-              <Button component={Link} href={`/appointments${isAr ? '?lang=ar' : ''}`} startIcon={<ArrowBackIcon />}>
-                {t('Back', 'رجوع')}
-              </Button>
-              <Button variant="contained" startIcon={<ScheduleIcon />} onClick={() => setUpdateOpen(true)}>
-                {t('Update Appointment', 'تحديث الموعد')}
-              </Button>
-            </Stack>
-          </Stack>
-        </Paper>
+          </Paper>
 
         {/* Dialogs */}
-        <AddReportDialog open={reportOpen} onClose={() => setReportOpen(false)} appointmentId={id} isArabic={isAr} />
+        {/* AddReportDialog removed - now using /prescription/new page */}
         <ReportViewDialog open={Boolean(viewReport)} onClose={() => setViewReport(null)} report={viewReport} isAr={isAr} />
         <UpdateAppointmentDialog
           open={updateOpen}
@@ -387,10 +624,11 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
         <ExtraFeeDialog open={extraDialogOpen} onClose={() => setExtraDialogOpen(false)} isAr={isAr} />
         <WhatsAppNotifyDialog open={waOpen} onClose={() => setWaOpen(false)} isAr={isAr} message={waMsg} phoneDigits={waDigits} />
 
-        <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
-          <Alert severity={snack.severity}>{snack.msg}</Alert>
-        </Snackbar>
-      </Container>
+          <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
+            <Alert severity={snack.severity}>{snack.msg}</Alert>
+          </Snackbar>
+        </Container>
+      </Box>
     </AppLayout>
   );
 }

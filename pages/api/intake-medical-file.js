@@ -7,8 +7,12 @@ import Tesseract from "tesseract.js";
 
 export const config = {
   api: {
-    bodyParser: false
-  }
+    bodyParser: false,
+    responseLimit: false, // Disable response size limit
+    externalResolver: true, // Let Next.js handle the response
+  },
+  // Vercel serverless function configuration
+  maxDuration: 300, // 5 minutes (Pro plan) or 60 seconds (Hobby plan)
 };
 
 // ===============================================================
@@ -77,14 +81,53 @@ function safeExtractJson(text) {
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
+    // Use /tmp directory for Vercel serverless (only writable directory)
+    // In local dev, this will use OS temp directory
+    let uploadDir = undefined;
+    if (process.env.VERCEL) {
+      uploadDir = '/tmp';
+      // Ensure /tmp exists (it should, but just in case)
+      try {
+        if (!fs.existsSync('/tmp')) {
+          fs.mkdirSync('/tmp', { recursive: true });
+        }
+      } catch (mkdirErr) {
+        console.warn("Could not ensure /tmp exists:", mkdirErr.message);
+      }
+    }
+    
     const form = formidable({
       multiples: false,
       keepExtensions: true,
-      maxFileSize: 20 * 1024 * 1024
+      maxFileSize: 20 * 1024 * 1024, // 20MB
+      maxFields: 10,
+      maxFieldsSize: 10 * 1024, // 10KB for form fields
+      uploadDir: uploadDir, // Use /tmp on Vercel
+      createDirsFromUploads: true, // Create directories if needed
     });
 
+    // Set timeout for parsing (5 minutes)
+    const timeout = setTimeout(() => {
+      form.destroy();
+      reject(new Error("File upload timeout. The file may be too large or the connection is too slow."));
+    }, 5 * 60 * 1000);
+
     form.parse(req, (err, fields, files) => {
-      if (err) return reject(err);
+      clearTimeout(timeout);
+      
+      if (err) {
+        // Provide more specific error messages
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return reject(new Error("File size exceeds 20MB limit"));
+        }
+        if (err.code === 'LIMIT_FIELD_COUNT' || err.code === 'LIMIT_FIELD_VALUE') {
+          return reject(new Error("Form data limit exceeded"));
+        }
+        if (err.message?.includes('timeout') || err.message?.includes('TIMEOUT')) {
+          return reject(new Error("Upload timeout. Please try again with a smaller file or better connection."));
+        }
+        return reject(err);
+      }
 
       const patientId = Array.isArray(fields.patientId)
         ? fields.patientId[0]
@@ -93,14 +136,25 @@ function parseMultipart(req) {
       let file = files.file;
       if (Array.isArray(file)) file = file[0];
 
-      if (!file) return reject(new Error("File not found"));
+      if (!file) return reject(new Error("File not found in upload"));
       if (!file.filepath) return reject(new Error("Uploaded file has no filepath"));
 
       let fileBuffer;
       try {
         fileBuffer = fs.readFileSync(file.filepath);
+        // Clean up temp file after reading
+        try {
+          fs.unlinkSync(file.filepath);
+        } catch (unlinkErr) {
+          // Ignore cleanup errors
+          console.warn("Failed to cleanup temp file:", unlinkErr.message);
+        }
       } catch (e) {
-        return reject(new Error("Cannot read uploaded file"));
+        return reject(new Error("Cannot read uploaded file: " + e.message));
+      }
+
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return reject(new Error("Uploaded file is empty"));
       }
 
       resolve({
@@ -147,11 +201,32 @@ async function extractTextFromBuffer(fileBuffer, filename, mimeType) {
   if (mime.startsWith("image/") || name.match(/\.(jpg|jpeg|png|bmp|webp)$/)) {
     try {
       console.log("Starting OCR for image:", name);
-      const { data: { text } } = await Tesseract.recognize(fileBuffer, "eng+ara");
+      // Use worker with optimized settings for serverless
+      const worker = await Tesseract.createWorker("eng+ara", 1, {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            // Suppress verbose logging in production
+            if (process.env.NODE_ENV === "development") {
+              console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+            }
+          }
+        },
+      });
+      
+      // Set timeout for OCR (30 seconds max)
+      const ocrPromise = worker.recognize(fileBuffer);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("OCR timeout")), 30000)
+      );
+      
+      const { data: { text } } = await Promise.race([ocrPromise, timeoutPromise]);
+      await worker.terminate();
+      
       console.log("OCR Completed. Text length:", text.length);
       return text || "";
     } catch (e) {
-      console.error("OCR Failed:", e);
+      console.error("OCR Failed:", e.message);
+      // Return empty string instead of throwing - allow fallback extraction
       return "";
     }
   }
@@ -840,7 +915,13 @@ function fallbackExtraction(text) {
 // ===============================================================
 
 export default async function handler(req, res) {
-  console.log("Medical File Intake API called");
+  console.log("Medical File Intake API called", {
+    method: req.method,
+    hasBody: !!req.body,
+    vercel: !!process.env.VERCEL,
+    nodeEnv: process.env.NODE_ENV
+  });
+  
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
@@ -870,10 +951,41 @@ export default async function handler(req, res) {
     // 3. Parse File
     let parseResult;
     try {
+      // Ensure req is properly formatted for formidable
+      if (!req || typeof req !== 'object') {
+        throw new Error("Invalid request object");
+      }
+      
       parseResult = await parseMultipart(req);
     } catch (e) {
-      console.error("Multipart parse failed:", e.message);
-      return res.status(400).json({ error: "File upload failed: " + e.message });
+      console.error("Multipart parse failed:", e.message, {
+        errorCode: e.code,
+        stack: process.env.NODE_ENV === 'development' ? e.stack : undefined
+      });
+      
+      // Provide more specific status codes and messages
+      if (e.message?.includes("size") || e.message?.includes("LIMIT_FILE_SIZE") || e.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ 
+          ok: false,
+          error: e.message || "File too large. Maximum size is 20MB." 
+        });
+      }
+      if (e.message?.includes("timeout") || e.message?.includes("TIMEOUT") || e.code === 'ETIMEDOUT') {
+        return res.status(408).json({ 
+          ok: false,
+          error: e.message || "Upload timeout. Please try again with a smaller file." 
+        });
+      }
+      if (e.message?.includes("ENOENT") || e.message?.includes("no such file")) {
+        return res.status(500).json({ 
+          ok: false,
+          error: "Server configuration error. Please contact support." 
+        });
+      }
+      return res.status(400).json({ 
+        ok: false,
+        error: "File upload failed: " + (e.message || "Unknown error") 
+      });
     }
 
     const { patientId, fileBuffer, filename, mimeType } = parseResult;
@@ -885,9 +997,18 @@ export default async function handler(req, res) {
     // 4. Extract Text
     let raw = "";
     try {
-      raw = await extractTextFromBuffer(fileBuffer, filename, mimeType);
+      // Set timeout for text extraction (2 minutes)
+      raw = await Promise.race([
+        extractTextFromBuffer(fileBuffer, filename, mimeType),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Text extraction timeout")), 2 * 60 * 1000)
+        )
+      ]);
     } catch (e) {
       console.error("Text extraction failed:", e.message);
+      if (e.message?.includes("timeout")) {
+        return res.status(408).json({ error: "File processing timeout. The file may be too complex or large." });
+      }
       return res.status(400).json({ error: "Failed to read file text: " + e.message });
     }
 
@@ -946,9 +1067,20 @@ export default async function handler(req, res) {
 
   } catch (e) {
     console.error("SERVER ERROR:", e);
+    
+    // Provide more helpful error messages for common Vercel issues
+    let errorMessage = e.message || String(e);
+    if (errorMessage.includes("timeout") || errorMessage.includes("TIMEOUT")) {
+      errorMessage = "Processing timeout. The file may be too large or complex. Please try a smaller file or contact support.";
+    } else if (errorMessage.includes("ENOENT") || errorMessage.includes("no such file")) {
+      errorMessage = "File system error. Please try again.";
+    } else if (errorMessage.includes("memory") || errorMessage.includes("Memory")) {
+      errorMessage = "File too large to process. Please try a smaller file.";
+    }
+    
     return res.status(500).json({
       ok: false,
-      error: "Internal Server Error: " + (e.message || String(e))
+      error: errorMessage
     });
   }
 }

@@ -24,19 +24,41 @@ import HealthInfoSection from '@/components/patients/HealthInfoSection';
 const PHONE_RE = /^[\d\s+()-]{8,}$/;
 const DIGITS = /[^0-9]/g;
 
-function normalizePhoneForId(raw = '', { countryCode = '+974' } = {}) {
+// Normalize phone number for patient ID (always use +20 for Egyptian numbers)
+function normalizePhoneForId(raw = '', { countryCode = '+20' } = {}) {
   const s = String(raw).trim();
   if (!s) return '';
 
   if (s.startsWith('+')) return s.replace(/[^\d+]/g, '');
   const d = s.replace(DIGITS, '');
 
-  if (countryCode === '+974' && d.length === 8) return `${countryCode}${d}`;
-  if (countryCode === '+20' && d.length === 11 && d.startsWith('01')) {
-    return `${countryCode}${d.slice(1)}`;
+  // Always treat as Egyptian number: +20
+  if (d.startsWith('20')) {
+    // Already starts with 20
+    return `+${d}`;
+  } else {
+    // Add +20 (Egypt country code)
+    return `+20${d.replace(/^0+/, '')}`;
   }
-  if (d.startsWith('00')) return `+${d.slice(2)}`;
-  return d;
+}
+
+// Normalize phone number for display/storage (always use +20 for Egyptian numbers)
+function normalizePhoneForStorage(raw = '') {
+  const s = String(raw).trim();
+  if (!s) return '';
+
+  const d = s.replace(/\D/g, '');
+  if (!d) return '';
+
+  // Always treat as Egyptian number: +20
+  let phoneDigits = d.replace(/^0+/, '');
+  if (phoneDigits.startsWith('20')) {
+    // Already starts with 20
+    return `+${phoneDigits}`;
+  } else {
+    // Add +20 (Egypt country code)
+    return `+20${phoneDigits}`;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -141,7 +163,10 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
     try {
       setSubmitting(true);
-      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+974' });
+      // Normalize phone number with +20 (Egypt country code)
+      const normalizedPhone = normalizePhoneForStorage(form.phone);
+      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+20' });
+      
       if (!phoneId || !/^[+0-9]{8,}$/.test(phoneId)) {
         setSnack({ open: true, msg: t('Invalid phone format.', 'صيغة الهاتف غير صالحة.'), severity: 'error' });
         setSubmitting(false);
@@ -158,6 +183,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
         await setDoc(patientRef, {
           associatedDoctors: Array.from(assoc),
+          phone: normalizedPhone, // Update phone with normalized format
           updatedAt: serverTimestamp()
         }, { merge: true });
 
@@ -175,7 +201,7 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
       const payload = {
         ...form,
         name: form.name.trim(),
-        phone: form.phone.trim(),
+        phone: normalizedPhone, // Store with +20 format
         phoneId,
         age: form.age ? Number(form.age) : null,
         address: form.address?.trim() || null,

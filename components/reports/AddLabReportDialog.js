@@ -251,6 +251,15 @@ export default function AddLabReportDialog({
       fr.readAsDataURL(f);
     });
 
+  // Cleanup object URL on unmount
+  React.useEffect(() => {
+    return () => {
+      if (ocrPreviewURL) {
+        URL.revokeObjectURL(ocrPreviewURL);
+      }
+    };
+  }, [ocrPreviewURL]);
+
   // ---- OCR handlers ----
   const startOcrFromFile = async (f) => {
     if (!f) return;
@@ -259,22 +268,33 @@ export default function AddLabReportDialog({
 
     setOcrBusy(true);
     setOcrProgress(5);
+    
+    let isActive = true;
+    
     try {
       const Tesseract = (await import('tesseract.js')).default;
       const { data } = await Tesseract.recognize(f, 'eng+ara', {
         logger: (m) => {
+          if (!isActive) return;
           if (m.status === 'recognizing text' && typeof m.progress === 'number') {
             setOcrProgress(Math.round(m.progress * 100));
           }
         },
       });
+      
+      if (!isActive) return;
+      
       setOcrText(data?.text || '');
       setSnack({ open: true, severity: 'success', msg: t('OCR complete. You can use AI to fill the form.', 'اكتمل OCR. يمكنك استخدام الذكاء الاصطناعي لملء النموذج.') });
     } catch (e) {
       console.error(e);
-      setSnack({ open: true, severity: 'error', msg: t('OCR failed. Try a clearer photo.', 'فشل التعرف الضوئي. جرّب صورة أوضح.') });
+      if (isActive) {
+        setSnack({ open: true, severity: 'error', msg: t('OCR failed. Try a clearer photo.', 'فشل التعرف الضوئي. جرّب صورة أوضح.') });
+      }
     } finally {
-      setOcrBusy(false);
+      if (isActive) {
+        setOcrBusy(false);
+      }
     }
   };
 
@@ -284,8 +304,12 @@ export default function AddLabReportDialog({
       setSnack({ open: true, severity: 'warning', msg: t('Scan or upload a paper first.', 'قم بمسح/رفع الورقة أولاً.') });
       return;
     }
+    
     setAiBusy(true);
     setAiLastJSON(null);
+    
+    let isActive = true;
+    
     try {
       let imageDataURL = '';
       // if we still have the original file in preview blob, try to fetch it from the <input> capture,
@@ -344,6 +368,8 @@ OCR text:
       });
 
       const data = await r.json();
+      if (!isActive) return;
+      
       if (!r.ok || !data?.ok) {
         throw new Error(data?.error || 'AI request failed');
       }
@@ -358,6 +384,8 @@ OCR text:
         // fallback: try to salvage numbers table from OCR
         parsed = { tests: parseOcrToTests(ocrText || '') };
       }
+
+      if (!isActive) return;
 
       // Fill the form
       const dt = parseDateLoose(parsed?.resultDate);
@@ -389,21 +417,31 @@ OCR text:
       setSnack({ open: true, severity: 'success', msg: t('Form filled by AI. Review before saving.', 'تم ملء النموذج بالذكاء الاصطناعي. راجع قبل الحفظ.') });
     } catch (e) {
       console.error(e);
-      setTests(parseOcrToTests(ocrText || ''));
-      setSnack({ open: true, severity: 'error', msg: t('AI could not parse reliably. Used basic OCR instead.', 'تعذر على الذكاء الاصطناعي التحليل بدقة، تم استخدام OCR الأساسي.') });
+      if (isActive) {
+        setTests(parseOcrToTests(ocrText || ''));
+        setSnack({ open: true, severity: 'error', msg: t('AI could not parse reliably. Used basic OCR instead.', 'تعذر على الذكاء الاصطناعي التحليل بدقة، تم استخدام OCR الأساسي.') });
+      }
     } finally {
-      setAiBusy(false);
+      if (isActive) {
+        setAiBusy(false);
+      }
     }
   };
 
   // Load patients for this doctor
   React.useEffect(() => {
     if (!open || !user) return;
+    
+    let isMounted = true;
+    
     (async () => {
+      if (!isMounted) return;
       setPatientsLoading(true);
       try {
         const qRef = query(collection(db, 'patients'), where('registeredBy', '==', user.uid));
         const snap = await getDocs(qRef);
+        if (!isMounted) return;
+        
         const rows = snap.docs.map((d) => {
           const data = d.data() || {};
           return { id: d.id, name: String(data?.name ?? '').trim() || d.id, phone: data?.phone || data?.mobile || '' };
@@ -411,33 +449,48 @@ OCR text:
         rows.sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
-        setPatients(rows);
+        if (isMounted) {
+          setPatients(rows);
+        }
       } catch (e) {
         console.error(e);
-        setSnack({ open: true, severity: 'error', msg: t('Failed to load patients', 'فشل تحميل قائمة المرضى') });
+        if (isMounted) {
+          setSnack({ open: true, severity: 'error', msg: t('Failed to load patients', 'فشل تحميل قائمة المرضى') });
+        }
       } finally {
-        setPatientsLoading(false);
+        if (isMounted) {
+          setPatientsLoading(false);
+        }
       }
     })();
+    
+    return () => { isMounted = false; };
   }, [open, user, t]);
 
   // If opened from appointment, prefill patient
   React.useEffect(() => {
     if (!open || !appointmentId) return;
+    
+    let isMounted = true;
+    
     (async () => {
       try {
         const apptSnap = await getDoc(doc(db, 'appointments', String(appointmentId)));
+        if (!isMounted) return;
+        
         if (!apptSnap.exists()) return;
         const appt = apptSnap.data() || {};
         const pid = appt.patientUID || appt.patientId || appt.patientID || '';
         const pname = appt.patientName || '';
-        if (pid) {
+        if (pid && isMounted) {
           setForm((f) => ({ ...f, patientID: pid, patientName: pname }));
         }
       } catch (e) {
         console.error(e);
       }
     })();
+    
+    return () => { isMounted = false; };
   }, [open, appointmentId]);
 
   // Select the patient visually once options load

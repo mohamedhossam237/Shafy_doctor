@@ -14,6 +14,7 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Autocomplete,
 } from '@mui/material';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -97,110 +98,174 @@ export default function VitalsSection({ t, form = {}, setForm }) {
       <Grid container spacing={2}>
         {/* --- Blood Pressure --- */}
         <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            select
-            label={t('Blood Pressure', 'ضغط الدم')}
-            placeholder={t('Blood Pressure', 'ضغط الدم')}
-            value={vitals.bp}
-            onChange={handleChange('bp')}
-            fullWidth
-            sx={{
-              bgcolor: '#fafafa',
-              borderRadius: 2,
-              '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+          <Autocomplete
+            freeSolo
+            options={bpOptions}
+            value={vitals.bp || null}
+            onChange={(event, newValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsBP: newValue || '',
+              }));
             }}
-            InputProps={{
-              endAdornment: <InputAdornment position="end">mmHg</InputAdornment>,
+            onInputChange={(event, newInputValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsBP: newInputValue,
+              }));
             }}
-            helperText={t('Optional', 'اختياري')}
-          >
-            {bpOptions.map((v) => (
-              <MenuItem key={v} value={v}>
-                {v}
-              </MenuItem>
-            ))}
-          </TextField>
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('Blood Pressure', 'ضغط الدم')}
+                placeholder={t('Blood Pressure', 'ضغط الدم')}
+                helperText={t('Optional', 'اختياري')}
+                sx={{
+                  bgcolor: '#fafafa',
+                  borderRadius: 2,
+                  '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+                }}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {params.InputProps.endAdornment}
+                      <InputAdornment position="end">mmHg</InputAdornment>
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
         </Grid>
 
         {/* --- Heart Rate --- */}
         <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            select
-            label={t('Heart Rate', 'نبض القلب')}
-            placeholder={t('Heart Rate', 'نبض القلب')}
-            value={vitals.hr}
-            onChange={handleChange('hr')}
-            fullWidth
-            sx={{
-              bgcolor: '#fafafa',
-              borderRadius: 2,
-              '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+          <Autocomplete
+            freeSolo
+            options={hrOptions}
+            value={vitals.hr || null}
+            onChange={(event, newValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsHR: newValue || '',
+              }));
             }}
-            InputProps={{
-              endAdornment: <InputAdornment position="end">bpm</InputAdornment>,
+            onInputChange={(event, newInputValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsHR: newInputValue,
+              }));
             }}
-            helperText={t('Optional', 'اختياري')}
-          >
-            {hrOptions.map((v) => (
-              <MenuItem key={v} value={v}>
-                {v}
-              </MenuItem>
-            ))}
-          </TextField>
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('Heart Rate', 'نبض القلب')}
+                placeholder={t('Heart Rate', 'نبض القلب')}
+                helperText={t('Optional', 'اختياري')}
+                sx={{
+                  bgcolor: '#fafafa',
+                  borderRadius: 2,
+                  '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+                }}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {params.InputProps.endAdornment}
+                      <InputAdornment position="end">bpm</InputAdornment>
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
         </Grid>
 
         {/* --- Temperature --- */}
         <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            select
-            label={t('Temperature', 'درجة الحرارة')}
-            placeholder={t('Temperature', 'درجة الحرارة')}
-            value={vitals.temp}
-            onChange={handleChange('temp')}
-            fullWidth
-            sx={{
-              bgcolor: '#fafafa',
-              borderRadius: 2,
-              '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+          <Autocomplete
+            freeSolo
+            options={tempOptions}
+            value={vitals.temp || null}
+            onChange={(event, newValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsTemp: newValue || '',
+              }));
             }}
-            InputProps={{
-              endAdornment: <InputAdornment position="end">°C</InputAdornment>,
+            onInputChange={(event, newInputValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsTemp: newInputValue,
+              }));
             }}
-            helperText={t('Optional', 'اختياري')}
-          >
-            {tempOptions.map((v) => (
-              <MenuItem key={v} value={v}>
-                {v}
-              </MenuItem>
-            ))}
-          </TextField>
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('Temperature', 'درجة الحرارة')}
+                placeholder={t('Temperature', 'درجة الحرارة')}
+                helperText={t('Optional', 'اختياري')}
+                sx={{
+                  bgcolor: '#fafafa',
+                  borderRadius: 2,
+                  '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+                }}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {params.InputProps.endAdornment}
+                      <InputAdornment position="end">°C</InputAdornment>
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
         </Grid>
 
         {/* --- SpO2 --- */}
         <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            select
-            label={t('SpO₂', 'نسبة الأوكسجين')}
-            placeholder={t('SpO₂', 'نسبة الأوكسجين')}
-            value={vitals.spo2}
-            onChange={handleChange('spo2')}
-            fullWidth
-            sx={{
-              bgcolor: '#fafafa',
-              borderRadius: 2,
-              '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+          <Autocomplete
+            freeSolo
+            options={spo2Options}
+            value={vitals.spo2 || null}
+            onChange={(event, newValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsSpO2: newValue || '',
+              }));
             }}
-            InputProps={{
-              endAdornment: <InputAdornment position="end">%</InputAdornment>,
+            onInputChange={(event, newInputValue) => {
+              setForm((prev) => ({
+                ...prev,
+                vitalsSpO2: newInputValue,
+              }));
             }}
-            helperText={t('Optional', 'اختياري')}
-          >
-            {spo2Options.map((v) => (
-              <MenuItem key={v} value={v}>
-                {v}
-              </MenuItem>
-            ))}
-          </TextField>
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('SpO₂', 'نسبة الأوكسجين')}
+                placeholder={t('SpO₂', 'نسبة الأوكسجين')}
+                helperText={t('Optional', 'اختياري')}
+                sx={{
+                  bgcolor: '#fafafa',
+                  borderRadius: 2,
+                  '& .MuiInputBase-root': { fontSize: 16, height: 56 },
+                }}
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {params.InputProps.endAdornment}
+                      <InputAdornment position="end">%</InputAdornment>
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
         </Grid>
       </Grid>
 

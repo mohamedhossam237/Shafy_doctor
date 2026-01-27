@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+.env
+database/*.db
+database/*.db-wal
+database/*.db-shm
+.next/
+public/
+package.json

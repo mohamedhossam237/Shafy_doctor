@@ -27,7 +27,6 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import AppLayout from '@/components/AppLayout';
 import Protected from '@/components/Protected';
 
-import AddReportDialog from '@/components/reports/AddReportDialog';
 import AddLabReportDialog from '@/components/reports/AddLabReportDialog';
 
 function OptionCard({ onClick, icon, title, subtitle, color = 'primary', isArabic }) {
@@ -94,7 +93,6 @@ export default function NewPatientReportPage() {
     return q.appointmentId ? String(q.appointmentId) : '';
   }, [router.query]);
 
-  const [openClinic, setOpenClinic] = React.useState(false);
   const [openLab, setOpenLab] = React.useState(false);
 
   const [snack, setSnack] = React.useState({ open: false, severity: 'success', msg: '' });
@@ -154,10 +152,13 @@ export default function NewPatientReportPage() {
             <Grid container spacing={1.5}>
               <Grid item xs={12} sm={6}>
                 <OptionCard
-                  onClick={() => setOpenClinic(true)}
+                  onClick={() => {
+                    const href = `/prescription/new${isArabic ? '?lang=ar' : ''}${appointmentId ? `&appointmentId=${appointmentId}` : ''}`;
+                    router.push(href);
+                  }}
                   icon={<LocalHospitalIcon />}
-                  title={t('Clinical Report', 'تقرير سريري')}
-                  subtitle={t('Diagnosis, findings, medications, required tests & follow-up.', 'التشخيص، النتائج، الأدوية، الفحوصات المطلوبة والمتابعة.')}
+                  title={t('Prescription', 'وصفة طبية')}
+                  subtitle={t('Create a medical prescription with medications and required tests.', 'إنشاء وصفة طبية تحتوي على الأدوية والفحوصات المطلوبة.')}
                   color="primary"
                   isArabic={isArabic}
                 />
@@ -177,14 +178,6 @@ export default function NewPatientReportPage() {
         </Box>
 
         {/* Dialogs */}
-        <AddReportDialog
-          open={openClinic}
-          onClose={() => setOpenClinic(false)}
-          isArabic={isArabic}
-          onSaved={onSaved}
-          appointmentId={appointmentId}
-        />
-
         <AddLabReportDialog
           open={openLab}
           onClose={() => setOpenLab(false)}

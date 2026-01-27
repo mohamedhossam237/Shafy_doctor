@@ -4,10 +4,14 @@ import { useRouter } from 'next/router';
 import {
   Container, Stack, Typography, Grid, Snackbar, Alert, Skeleton,
   Button, Dialog, DialogTitle, DialogContent, DialogActions,
-  TextField, Autocomplete
+  TextField, Autocomplete, Paper, Box
 } from '@mui/material';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import MailOutlineIcon from '@mui/icons-material/MailOutline';
+import PeopleIcon from '@mui/icons-material/People';
+import PersonIcon from '@mui/icons-material/Person';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
@@ -106,6 +110,36 @@ export default function PatientsIndexPage() {
   }, [patients, queryText]);
 
   /* ------------------------------------------------------------ */
+  /* 📊 Statistics                                                */
+  /* ------------------------------------------------------------ */
+  const stats = React.useMemo(() => {
+    const total = patients.length;
+    const now = new Date();
+    const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
+    // Patients added in last 24 hours
+    const addedLast24Hours = patients.filter((p) => {
+      if (!p.createdAt) return false;
+      const createdAt = p.createdAt?.toDate ? p.createdAt.toDate() : new Date(p.createdAt);
+      return createdAt >= last24Hours;
+    }).length;
+
+    // Patients added this week
+    const addedThisWeek = patients.filter((p) => {
+      if (!p.createdAt) return false;
+      const createdAt = p.createdAt?.toDate ? p.createdAt.toDate() : new Date(p.createdAt);
+      return createdAt >= last7Days;
+    }).length;
+
+    return {
+      total,
+      addedLast24Hours,
+      addedThisWeek,
+    };
+  }, [patients]);
+
+  /* ------------------------------------------------------------ */
   /* 📩 Message Sending                                          */
   /* ------------------------------------------------------------ */
   const sendMessage = async () => {
@@ -194,77 +228,136 @@ export default function PatientsIndexPage() {
         </Dialog>
 
         {/* Main Content */}
-        <Container maxWidth="lg" sx={{ mt: 3 }}>
-          <Stack spacing={2}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h5" fontWeight={800}>
-                {isArabic ? 'قائمة المرضى' : 'Patients List'}
-              </Typography>
-              <Stack direction="row" spacing={1}>
-                <Button
-                  variant="contained"
-                  startIcon={<PersonAddAlt1Icon />}
-                  onClick={() => setOpenAddPatient(true)}
-                >
-                  {isArabic ? 'إضافة مريض' : 'Add Patient'}
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<MailOutlineIcon />}
-                  onClick={() => setOpenMsg(true)}
-                >
-                  {isArabic ? 'رسالة جديدة' : 'New Message'}
-                </Button>
-              </Stack>
+        <Box
+          sx={{
+            minHeight: '100vh',
+            pb: 4,
+            bgcolor: 'background.default',
+          }}
+        >
+          <Container maxWidth="lg" sx={{ mt: 3 }}>
+            <Stack spacing={3}>
+              {/* Header */}
+              <Paper elevation={1} sx={{ p: 3, borderRadius: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} flexWrap="wrap">
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <PeopleIcon sx={{ fontSize: 32, color: 'primary.main' }} />
+                    <Typography variant="h5" fontWeight={700}>
+                      {isArabic ? 'قائمة المرضى' : 'Patients List'}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1.5} flexWrap="wrap">
+                    <Button
+                      variant="contained"
+                      startIcon={<PersonAddAlt1Icon />}
+                      onClick={() => setOpenAddPatient(true)}
+                      sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
+                    >
+                      {isArabic ? 'إضافة مريض' : 'Add Patient'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<MailOutlineIcon />}
+                      onClick={() => setOpenMsg(true)}
+                      sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
+                    >
+                      {isArabic ? 'رسالة جديدة' : 'New Message'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Paper>
+
+              {/* Statistics Cards */}
+              {!loading && (
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
+                      <PersonIcon sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                      <Typography variant="h4" fontWeight={700} color="primary.main">
+                        {stats.total}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                        {isArabic ? 'إجمالي المرضى' : 'Total Patients'}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
+                      <AccessTimeIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
+                      <Typography variant="h4" fontWeight={700} color="success.main">
+                        {stats.addedLast24Hours}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                        {isArabic ? 'أضيف في آخر 24 ساعة' : 'Added Last 24 Hours'}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
+                      <TrendingUpIcon sx={{ fontSize: 32, color: 'info.main', mb: 1 }} />
+                      <Typography variant="h4" fontWeight={700} color="info.main">
+                        {stats.addedThisWeek}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                        {isArabic ? 'أضيف هذا الأسبوع' : 'Added This Week'}
+                      </Typography>
+                    </Paper>
+                  </Grid>
+                </Grid>
+              )}
+
+              {/* Search Bar */}
+              <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+                <PatientSearchBar
+                  isArabic={isArabic}
+                  value={queryText}
+                  onChange={(v) => setQueryText(v)}
+                  onAddNew={() => setOpenAddPatient(true)}
+                />
+              </Paper>
+
+              {/* Content */}
+              {loading ? (
+                <Grid container spacing={2}>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Grid key={i} item xs={12} sm={6} md={4} lg={3}>
+                      <Skeleton variant="rounded" height={140} sx={{ borderRadius: 2 }} />
+                    </Grid>
+                  ))}
+                </Grid>
+              ) : filtered.length === 0 ? (
+                <PatientListEmpty isArabic={isArabic} onAddNew={() => setOpenAddPatient(true)} />
+              ) : (
+                <Grid container spacing={2}>
+                  {filtered.map((p) => (
+                    <Grid key={p.id} item xs={12} sm={6} md={4} lg={3}>
+                      <PatientCard patient={p} isArabic={isArabic} />
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
             </Stack>
 
-            <PatientSearchBar
-              isArabic={isArabic}
-              value={queryText}
-              onChange={(v) => setQueryText(v)}
-              onAddNew={() => setOpenAddPatient(true)}
-            />
+            {/* Snackbars */}
+            <Snackbar
+              open={Boolean(error)}
+              autoHideDuration={4000}
+              onClose={() => setError('')}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+              <Alert severity="error" onClose={() => setError('')}>{error}</Alert>
+            </Snackbar>
 
-            {loading ? (
-              <Grid container spacing={2}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Grid key={i} item xs={12} sm={6} md={4} lg={3}>
-                    <Skeleton variant="rounded" height={120} />
-                  </Grid>
-                ))}
-              </Grid>
-            ) : filtered.length === 0 ? (
-              <PatientListEmpty isArabic={isArabic} onAddNew={() => setOpenAddPatient(true)} />
-            ) : (
-              <Grid container spacing={2}>
-                {filtered.map((p) => (
-                  <Grid key={p.id} item xs={12} sm={6} md={4} lg={3}>
-                    <PatientCard patient={p} isArabic={isArabic} />
-                  </Grid>
-                ))}
-              </Grid>
-            )}
-          </Stack>
-
-          {/* Snackbars */}
-          <Snackbar
-            open={Boolean(error)}
-            autoHideDuration={4000}
-            onClose={() => setError('')}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
-            <Alert severity="error" onClose={() => setError('')}>{error}</Alert>
-          </Snackbar>
-
-          <Snackbar
-            open={Boolean(okMsg)}
-            autoHideDuration={3000}
-            onClose={() => setOkMsg('')}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
-            <Alert severity="success" onClose={() => setOkMsg('')}>{okMsg}</Alert>
-          </Snackbar>
-        </Container>
+            <Snackbar
+              open={Boolean(okMsg)}
+              autoHideDuration={3000}
+              onClose={() => setOkMsg('')}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+              <Alert severity="success" onClose={() => setOkMsg('')}>{okMsg}</Alert>
+            </Snackbar>
+          </Container>
+        </Box>
       </AppLayout>
     </Protected>
   );

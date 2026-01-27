@@ -209,13 +209,26 @@ export default class ReportPDFManager {
 
   shareOnWhatsApp(patientName, diagnosis, number) {
     if (!number) return;
-    const formatted = number.replace(/[^0-9]/g, '');
+    const phoneRaw = String(number || '').replace(/\D/g, '');
+    if (!phoneRaw) return;
+    
+    // Always treat as Egyptian number: +20 (Egypt country code for WhatsApp)
+    let phoneDigits = phoneRaw.replace(/^0+/, '');
+    let formattedPhone;
+    if (phoneDigits.startsWith('20')) {
+      // Already starts with 20
+      formattedPhone = `+${phoneDigits}`;
+    } else {
+      // Add +20 (Egypt country code for WhatsApp)
+      formattedPhone = `+20${phoneDigits}`;
+    }
+    
     const msg = encodeURIComponent(
       `${this.t('Hello, this is your medical report.', 'مرحبًا، هذا تقريرك الطبي.')}\n\n${this.t(
         'Patient Name',
         'اسم المريض'
       )}: ${patientName}\n${this.t('Diagnosis', 'التشخيص')}: ${diagnosis}`
     );
-    window.open(`https://wa.me/2${formatted}?text=${msg}`, '_blank');
+    window.open(`https://wa.me/${formattedPhone}?text=${msg}`, '_blank');
   }
 }
