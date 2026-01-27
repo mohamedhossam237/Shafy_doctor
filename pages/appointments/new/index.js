@@ -258,7 +258,7 @@ export default function NewAppointmentPage() {
         setLoadingSlots(false);
       }
     })();
-  }, [doctor, dateStr, hours, user?.uid]);
+  }, [doctor, dateStr, hours, user?.uid, slotMinutes]);
 
   /* ---- Update total ---- */
   React.useEffect(() => {

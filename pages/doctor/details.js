@@ -129,7 +129,7 @@ export default function DoctorDetailsPage() {
     } finally {
       setSpecialtiesLoading(false);
     }
-  }, []); // eslint-disable-line
+  }, []);
 
   /* ---------- prefill (Arabic + images + payment + specialty + extras + clinics) ---------- */
   const loadData = React.useCallback(async () => {

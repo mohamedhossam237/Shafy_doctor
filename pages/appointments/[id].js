@@ -109,7 +109,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
   const { id } = router.query || {};
   const isAr = router.query?.lang === 'ar';
-  const t = (en, ar) => (isAr ? ar : en);
+  const t = React.useCallback((en, ar) => (isAr ? ar : en), [isAr]);
 
   const [appt, setAppt] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
