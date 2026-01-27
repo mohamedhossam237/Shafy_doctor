@@ -112,7 +112,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
     const q = router?.query || {};
     if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
     if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
-    return false;
+    return true;
   }, [router.query]);
   const t = React.useCallback((en, ar) => (isAr ? ar : en), [isAr]);
 

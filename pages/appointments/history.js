@@ -502,7 +502,7 @@ export default function AppointmentsHistoryPage() {
     const q = router?.query || {};
     if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
     if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
-    return false;
+    return true;
   }, [router.query]);
   const dir = isArabic ? 'rtl' : 'ltr';
   const locale = isArabic ? 'ar' : undefined;
