@@ -66,14 +66,8 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
 
-  // Load doctor info when dialog opens
-  useEffect(() => {
-    if (open && user?.uid && !doctorInfo) {
-      loadDoctorInfo();
-    }
-  }, [open, user?.uid]);
-
-  const loadDoctorInfo = async () => {
+  // Load doctor info
+  const loadDoctorInfo = useCallback(async () => {
     if (!user?.uid) return;
     
     setLoadingDoctor(true);
@@ -108,39 +102,17 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
     } finally {
       setLoadingDoctor(false);
     }
-  };
+  }, [user]);
 
-  // Handle drag and drop for cover image
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-  }, []);
-
-  const handleDrop = useCallback(async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-
-    const files = Array.from(e.dataTransfer.files || []);
-    const imageFiles = files.filter(file => file.type.startsWith('image/'));
-    
-    if (imageFiles.length > 0 && !coverImage) {
-      // If no cover image, set as cover image
-      await handleImageUpload(imageFiles[0], 'cover');
-    } else if (imageFiles.length > 0) {
-      // Add as image block
-      await handleImageUpload(imageFiles[0], 'block');
+  // Load doctor info when dialog opens
+  useEffect(() => {
+    if (open && user?.uid && !doctorInfo) {
+      loadDoctorInfo();
     }
-  }, [coverImage]);
+  }, [open, user?.uid, doctorInfo, loadDoctorInfo]);
 
-  const handleImageUpload = async (file, type = 'cover') => {
+
+  const handleImageUpload = useCallback(async (file, type = 'cover') => {
     const apiKey = process.env.NEXT_PUBLIC_IMGBB_KEY;
     if (!apiKey) {
       setErr('مفتاح API مفقود (NEXT_PUBLIC_IMGBB_KEY)');
@@ -176,14 +148,52 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
         setCoverImage(imageUrl);
       } else {
         // Add as image block
-        addContentBlock(CONTENT_BLOCK_TYPES.IMAGE, { imageUrl });
+        // We cannot verify stability of addContentBlock easily, but state setters are stable.
+        setContentBlocks((prev) => [
+          ...prev,
+          {
+            id: Date.now() + Math.random(),
+            type: CONTENT_BLOCK_TYPES.IMAGE,
+            imageUrl,
+          }
+        ]);
       }
     } catch (e2) {
       setErr(e2?.message || 'فشل تحميل الصورة');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files || []);
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    
+    if (imageFiles.length > 0 && !coverImage) {
+      // If no cover image, set as cover image
+      await handleImageUpload(imageFiles[0], 'cover');
+    } else if (imageFiles.length > 0) {
+      // Add as image block
+      await handleImageUpload(imageFiles[0], 'block');
+    }
+  }, [coverImage, handleImageUpload]);
+
 
   const onPickCoverImage = async (e) => {
     const files = Array.from(e.target.files || []);

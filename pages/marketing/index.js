@@ -1173,14 +1173,14 @@ export default function MarketingPage() {
                   <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
                     {t('Tip: Use NotebookLM to create infographics and then upload them here', 'نصيحة: استخدم NotebookLM لإنشاء الإنفوجرافيك ثم ارفعها هنا')}
                   </Typography>
-                  {infographicForm.imageUrl && (
-                    <Box sx={{ mb: 2 }}>
-                      <img
+                    {infographicForm.imageUrl && (
+                    <Box sx={{ mb: 2, position: 'relative', height: 400, width: '100%' }}>
+                      <Image
                         src={infographicForm.imageUrl}
                         alt="Preview"
+                        fill
+                        unoptimized
                         style={{
-                          width: '100%',
-                          maxHeight: '400px',
                           objectFit: 'contain',
                           borderRadius: '8px',
                           border: '1px solid #e0e0e0',

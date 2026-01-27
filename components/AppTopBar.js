@@ -87,7 +87,7 @@ const NavItem = ({ item, active, isArabic }) => {
   );
 };
 
-const AppTopBar = React.memo(({
+const AppTopBar = React.memo(function AppTopBar({
   navItems = [],
   logoSrc = '/logo.png',
   unreadMessages = 0,
@@ -97,7 +97,7 @@ const AppTopBar = React.memo(({
   onLogout,
   onOpenProfile,
   showBuiltInBadges = true,
-}) => {
+}) {
   const router = useRouter();
   const theme = useTheme();
   const pathname = (router?.asPath || '').split('?')[0];

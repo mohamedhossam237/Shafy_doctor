@@ -50,14 +50,8 @@ export default function AddInfographicDialog({ open, onClose, onCreated }) {
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
 
-  // Load doctor info when dialog opens
-  useEffect(() => {
-    if (open && user?.uid && !doctorInfo) {
-      loadDoctorInfo();
-    }
-  }, [open, user?.uid]);
-
-  const loadDoctorInfo = async () => {
+  // Load doctor info
+  const loadDoctorInfo = useCallback(async () => {
     if (!user?.uid) return;
     
     setLoadingDoctor(true);
@@ -92,7 +86,15 @@ export default function AddInfographicDialog({ open, onClose, onCreated }) {
     } finally {
       setLoadingDoctor(false);
     }
-  };
+  }, [user]);
+
+  // Load doctor info when dialog opens
+  useEffect(() => {
+    if (open && user?.uid && !doctorInfo) {
+      loadDoctorInfo();
+    }
+  }, [open, user?.uid, doctorInfo, loadDoctorInfo]);
+
 
   // Handle drag and drop for cover image
   const handleDragOver = useCallback((e) => {
