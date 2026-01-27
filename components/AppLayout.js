@@ -2,6 +2,7 @@
 'use client';
 import * as React from 'react';
 import { useRouter } from 'next/router';
+import Image from 'next/image';
 import {
   Box, Paper, BottomNavigation, BottomNavigationAction, AppBar, Toolbar, IconButton,
   Badge, Avatar, Menu, MenuItem, ListItemIcon,
@@ -20,14 +21,8 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import PersonIcon from '@mui/icons-material/Person';
 
 import AppTopBar from '@/components/AppTopBar';
-
-import { useAuth } from '@/providers/AuthProvider';
-import { db } from '@/lib/firebase';
-import {
-  collection, query, where, onSnapshot, limit as qLimit, collectionGroup,
-  // ⬇️ add these for the role gate
-  doc, getDoc, getDocs,
-} from 'firebase/firestore';
+import DoctorRouteGuard from '@/components/DoctorRouteGuard';
+import { useUnreadCounts } from '@/hooks/useUnreadCounts';
 
 const MOBILE_NAV_H = 64;
 const MOBILE_TOP_H = 56;
@@ -48,9 +43,16 @@ const NAV_EN = [
     label: 'Ask Shafy',
     href: '/ask-shafy',
     icon: (
-      <Box component="img" src="/Ai_logo.png" alt="Ask Shafy"
-           sx={{ width: 40, height: 40, objectFit: 'contain', transition: 'transform 0.3s ease-in-out',
-                 '&:hover': { transform: 'scale(1.25)' }, ...pulseAnimation }} />
+      <Box sx={{ width: 40, height: 40, position: 'relative', transition: 'transform 0.3s ease-in-out',
+                 '&:hover': { transform: 'scale(1.25)' }, ...pulseAnimation }}>
+        <Image
+          src="/Ai_logo.png"
+          alt="Ask Shafy"
+          fill
+          sizes="40px"
+          style={{ objectFit: 'contain' }}
+        />
+      </Box>
     ),
   },
   { label: 'Patients', href: '/patients', icon: <PeopleAltIcon /> },
@@ -61,15 +63,23 @@ const NAV_AR = [
   { label: 'لوحة التحكم', href: '/',             icon: <SpaceDashboardIcon /> },
   { label: 'المواعيد',    href: '/appointments', icon: <CalendarMonthIcon /> },
   { label: 'اسأل شافي',   href: '/ask-shafy',
-    icon: (
-      <Box component="img" src="/Ai_logo.png" alt="اسأل شافي"
-           sx={{ width: 40, height: 40, objectFit: 'contain', transition: 'transform 0.3s ease-in-out',
-                 '&:hover': { transform: 'scale(1.25)' }, ...pulseAnimation }} />
+     icon: (
+      <Box sx={{ width: 40, height: 40, position: 'relative', transition: 'transform 0.3s ease-in-out',
+                 '&:hover': { transform: 'scale(1.25)' }, ...pulseAnimation }}>
+        <Image
+          src="/Ai_logo.png"
+          alt="اسأل شافي"
+          fill
+          sizes="40px"
+          style={{ objectFit: 'contain' }}
+        />
+      </Box>
     ),
   },
   { label: 'المرضى', href: '/patients', icon: <PeopleAltIcon /> },
   { label: 'المزيد', href: '/more',     icon: <MenuIcon /> },
 ];
+
 
 function isActive(pathname, href) {
   if (!pathname) return false;
@@ -84,14 +94,16 @@ export default function AppLayout({
   maxWidth = 'lg',
   disableTopBar = false,
   logoSrc = '/logo.png',
-  unread,                        // ← NO DEFAULT HERE
+  unread,                        // Default is now handled by the hook if not provided
   showBackOnMobile = false,
 }) {
   const theme = useTheme();
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const router = useRouter();
   const pathname = (router?.asPath || '').split('?')[0];
-  const { user } = useAuth();
+  
+  // Use the custom hook for live counts
+  const liveUnread = useUnreadCounts();
 
   const isArabic = React.useMemo(() => {
     const q = router?.query || {};
@@ -143,95 +155,8 @@ export default function AppLayout({
     await router.replace({ pathname: '/login', query: q });
   };
 
-  /* ========= ROLE GATE: doctor-only =========
-     If the current session is not a doctor, logout and push to /login.
-     Checks doctors by uid, then falls back to email. */
-  React.useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      // If there is no session yet, nothing to gate.
-      if (!user?.uid) return;
-
-      const uid = user.uid;
-      const email = (user.email || '').toLowerCase();
-
-      try {
-        // Check doctors/{uid}
-        const byUid = await getDoc(doc(db, 'doctors', uid));
-        let isDoctor = byUid.exists();
-
-        // Fallback: doctors where email == user.email
-        if (!isDoctor && email) {
-          const snap = await getDocs(
-            query(collection(db, 'doctors'), where('email', '==', email), qLimit(1))
-          );
-          isDoctor = !snap.empty;
-        }
-
-        if (!isDoctor && !cancelled) {
-          await doLogout(); // logs out + redirects to /login with lang
-        }
-      } catch {
-        if (!cancelled) {
-          await doLogout();
-        }
-      }
-    };
-    run();
-    return () => { cancelled = true; };
-    // Re-check when uid or email changes
-  }, [user?.uid, user?.email]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ======== LIVE UNREAD COUNTS ========
-  const [liveUnread, setLiveUnread] = React.useState({ notifications: 0, messages: 0 });
-
-  // messages: sum unreadCounts[uid]
-  React.useEffect(() => {
-    if (!user?.uid) { setLiveUnread((u) => ({ ...u, messages: 0 })); return; }
-    const qRef = query(
-      collection(db, 'messages_threads'),
-      where('participants', 'array-contains', user.uid),
-      qLimit(500)
-    );
-    const unsub = onSnapshot(qRef, (snap) => {
-      let total = 0;
-      snap.forEach((d) => {
-        const counts = (d.data() || {}).unreadCounts || {};
-        const n = Number(counts[user.uid] || 0);
-        if (!Number.isNaN(n)) total += n;
-      });
-      setLiveUnread((u) => ({ ...u, messages: total }));
-    }, () => setLiveUnread((u) => ({ ...u, messages: 0 })));
-    return () => unsub();
-  }, [user?.uid]);
-
-  // notifications: any 'notifications' subcollection, match current user & unread
-  const pathTargetsUser = (docRef, uid) => {
-    const p = String(docRef?.path || '');
-    return new RegExp(`/(doctors|users|patients|profiles)/${uid}/notifications/`, 'i').test(p);
-  };
-
-  React.useEffect(() => {
-    if (!user?.uid) { setLiveUnread((u) => ({ ...u, notifications: 0 })); return; }
-    const cgRef = collectionGroup(db, 'notifications');
-    const unsub = onSnapshot(cgRef, (snap) => {
-      let total = 0;
-      snap.forEach((d) => {
-        const n = d.data() || {};
-        const isRead = (typeof n.read === 'boolean' ? n.read : n.isRead) === true;
-        const recipientMatch =
-          [
-            'userUID','userId','doctorUID','doctorId','uid','toUID','toId',
-            'recipientUID','recipientId','ownerUID','ownerId',
-          ].some((k) => String(n?.[k] || '') === user.uid) || pathTargetsUser(d.ref, user.uid);
-        if (!isRead && recipientMatch) total += 1;
-      });
-      setLiveUnread((u) => ({ ...u, notifications: total }));
-    }, () => setLiveUnread((u) => ({ ...u, notifications: 0 })));
-    return () => unsub();
-  }, [user?.uid]);
-
-  // ✅ use nullish coalescing so live values win unless parent explicitly passes a number
+  
+  // Use live values if 'unread' prop is not explicitly passed (or merge logic if needed)
   const effectiveUnread = {
     notifications: unread?.notifications ?? liveUnread.notifications,
     messages: unread?.messages ?? liveUnread.messages,
@@ -243,7 +168,7 @@ export default function AppLayout({
   const openMenu = (e) => setAnchorEl(e.currentTarget);
   const closeMenu = () => setAnchorEl(null);
 
-  return (
+  const LayoutContent = (
     <Box dir={isArabic ? 'rtl' : 'ltr'} sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       {/* Desktop top bar */}
       {!disableTopBar && isMdUp && (
@@ -268,23 +193,25 @@ export default function AppLayout({
           <Toolbar sx={{ minHeight: MOBILE_TOP_H, gap: 0.5 }}>
             {/* ✅ Logo is now clickable → goes to '/' while keeping current lang */}
             <IconButton
+
               aria-label={isArabic ? 'الرئيسية' : 'Home'}
               onClick={() => go('/')}
               edge="start"
               sx={{ p: 0.25 }}
             >
-              <Box
-                component="img"
-                src={logoSrc || '/logo.png'}
-                alt="Shafy"
-                sx={{
-                  height: 44,
-                  width: 'auto',
-                  display: 'block',
-                  transform: 'scale(1.35)',
-                  transformOrigin: 'center',
-                }}
-              />
+              <Box sx={{ width: 44, height: 44, position: 'relative' }}>
+                <Image
+                  src={logoSrc || '/logo.png'}
+                  alt="Shafy"
+                  fill
+                  sizes="44px"
+                  style={{
+                    objectFit: 'contain',
+                    transform: 'scale(1.35)',
+                    transformOrigin: 'center',
+                  }}
+                />
+              </Box>
             </IconButton>
 
             {showBackOnMobile && (
@@ -292,6 +219,7 @@ export default function AppLayout({
                 <ArrowBackIosNewIcon />
               </IconButton>
             )}
+
             <Box sx={{ flex: 1 }} />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <IconButton aria-label={isArabic ? 'الرسائل' : 'Messages'} onClick={() => go('/messages')}>
@@ -356,5 +284,11 @@ export default function AppLayout({
         </Paper>
       )}
     </Box>
+  );
+
+  return (
+    <DoctorRouteGuard>
+        {LayoutContent}
+    </DoctorRouteGuard>
   );
 }
