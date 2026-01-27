@@ -108,7 +108,12 @@ function getPatientId(appt) {
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
   const { id } = router.query || {};
-  const isAr = router.query?.lang === 'ar';
+  const isAr = React.useMemo(() => {
+    const q = router?.query || {};
+    if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
+    if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
+    return false;
+  }, [router.query]);
   const t = React.useCallback((en, ar) => (isAr ? ar : en), [isAr]);
 
   const [appt, setAppt] = React.useState(null);

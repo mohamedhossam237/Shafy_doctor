@@ -498,10 +498,12 @@ export default function AppointmentsHistoryPage() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const isArabic =
-    String(router?.query?.lang || router?.query?.ar || '')
-      .toLowerCase()
-      .startsWith('ar');
+  const isArabic = React.useMemo(() => {
+    const q = router?.query || {};
+    if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
+    if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
+    return false;
+  }, [router.query]);
   const dir = isArabic ? 'rtl' : 'ltr';
   const locale = isArabic ? 'ar' : undefined;
   const t = React.useCallback((en, ar) => (isArabic ? ar : en), [isArabic]);

@@ -642,7 +642,12 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
 
 export default function AppointmentsPage() {
   const router = useRouter();
-  const isArabic = router?.query?.lang === 'ar' || router?.query?.ar === '1';
+  const isArabic = React.useMemo(() => {
+    const q = router?.query || {};
+    if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
+    if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
+    return false;
+  }, [router.query]);
   const { user } = useAuth();
 
   const [loading, setLoading] = React.useState(true);
