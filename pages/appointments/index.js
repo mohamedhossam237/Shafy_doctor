@@ -102,6 +102,35 @@ function apptDate(appt) {
   return null;
 }
 
+const normalizeHoursFromAny = (sourceObj) => {
+  if (!sourceObj || typeof sourceObj !== "object") {
+    return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+  }
+  const src =
+    sourceObj.working_hours ||
+    sourceObj.workingHours ||
+    (sourceObj.clinic &&
+      (sourceObj.clinic.working_hours || sourceObj.clinic.workingHours)) ||
+    null;
+  if (src && typeof src === "object" && typeof src.sun === "string") return src;
+  if (src && typeof src === "object" && typeof src.sun === "object") {
+    const out = {};
+    for (const k of ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]) {
+      // Helper to convert {start, end} object to string "start-end"
+      const day = src[k];
+      if (day && day.open !== false) {
+         const s = day.start || "09:00";
+         const e = day.end || "17:00";
+         out[k] = `${s}-${e}`;
+      } else {
+         out[k] = "";
+      }
+    }
+    return out;
+  }
+  return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+};
+
 // Normalize clinics from the doctor document
 const sanitizeClinics = (arr) =>
   (Array.isArray(arr) ? arr : [])
@@ -121,9 +150,22 @@ function getPatientId(appt) {
 
 /* ---------------- row/card ---------------- */
 
-function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel }) {
+function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel, hasAmHours }) {
   const router = useRouter();
   const d = apptDate(appt);
+  
+  // Smart AM/PM Logic:
+  // If the doctor/clinic has NO morning hours (hasAmHours === false),
+  // then any AM time (0-11) is likely a data entry error or simple format (3:00) meant to be PM.
+  // Force it to PM for display.
+  // If they DO have AM hours, we respect the original AM time.
+  if (d && !hasAmHours) {
+    const h = d.getHours();
+    if (h < 12) {
+       d.setHours(h + 12);
+    }
+  }
+
   const status = normStatus(appt?.status);
   const completed = status === 'completed';
   const confirmed = status === 'confirmed';
@@ -660,20 +702,43 @@ export default function AppointmentsPage() {
   // Clinics state (for toggle filter)
   const [clinics, setClinics] = React.useState([]);
   const [selectedClinicId, setSelectedClinicId] = React.useState('all');
+  const [hasAmHours, setHasAmHours] = React.useState(true); // Default to true (safe) until loaded
 
-  // Load doctor clinics (doc id == user.uid)
+  // Load doctor clinics (doc id == user.uid) & check working hours
   React.useEffect(() => {
     if (!user?.uid) return;
     (async () => {
       try {
         const snap = await getDoc(doc(db, 'doctors', user.uid));
         if (snap.exists()) {
-          const arr = sanitizeClinics(snap.data()?.clinics);
+          const data = snap.data();
+          const arr = sanitizeClinics(data?.clinics);
           setClinics(arr);
           // keep selectedClinicId if still present; else reset to 'all'
           if (selectedClinicId !== 'all' && !arr.some((c) => c.id === selectedClinicId)) {
             setSelectedClinicId('all');
           }
+
+          // Check for AM hours
+          const hours = normalizeHoursFromAny(data);
+          let foundAm = false;
+          // Check all days strings "09:00-17:00"
+          Object.values(hours).forEach(rangeStr => {
+             if (!rangeStr) return;
+             // Split by comma in case of multiple ranges "09:00-12:00,14:00-18:00"
+             const ranges = rangeStr.split(',');
+             ranges.forEach(r => {
+                const start = r.split('-')[0]; // "09:00"
+                if (start) {
+                   const [h] = start.split(':').map(n => parseInt(n, 10));
+                   if (Number.isFinite(h) && h < 12) {
+                      foundAm = true;
+                   }
+                }
+             });
+          });
+          setHasAmHours(foundAm);
+
         } else {
           setClinics([]);
           setSelectedClinicId('all');
@@ -707,7 +772,33 @@ export default function AppointmentsPage() {
         [...snapOld.docs, ...snapNew.docs].forEach((d) => {
           map.set(d.id, { id: d.id, ...d.data() });
         });
-        const rows = Array.from(map.values());
+        const initialRows = Array.from(map.values());
+
+        // Deduplicate logically: same patient + same time (user reported duplicates)
+        // We prefer 'confirmed' > 'completed' > others
+        const uniqueMap = new Map();
+        initialRows.forEach(row => {
+          const t = row.time || '00:00';
+          const pid = row.patientUid || row.patientId || 'unknown';
+          const key = `${t}_${pid}`;
+          
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, row);
+          } else {
+            // If exists, keep the one that is 'confirmed' or 'completed' if the existing one isn't
+            const existing = uniqueMap.get(key);
+            const statusNew = normStatus(row.status);
+            const statusOld = normStatus(existing.status);
+            // Priority: completed > confirmed > pending
+            // Simple check: if new is 'better' than old, replace
+            if (statusNew === 'completed' && statusOld !== 'completed') {
+               uniqueMap.set(key, row);
+            } else if (statusNew === 'confirmed' && statusOld !== 'completed' && statusOld !== 'confirmed') {
+               uniqueMap.set(key, row);
+            }
+          }
+        });
+        const rows = Array.from(uniqueMap.values());
 
         // Normalize date and keep only today (do not assign queue here; we'll do it after filtering)
         const todayOnly = rows
@@ -844,17 +935,31 @@ export default function AppointmentsPage() {
     const active = base.filter((r) => normStatus(r?.status) !== 'cancelled');
     const cancelled = base.filter((r) => normStatus(r?.status) === 'cancelled');
 
+    // Helper to get effective sort time
+    const getSortTime = (r) => {
+        let t = r._dt?.getTime() || 0;
+        // If sorting needs Smart PM adjustment:
+        if (!hasAmHours && r._dt) {
+            const h = r._dt.getHours();
+            if (h < 12) {
+                // Return time shifted by 12h
+                return t + (12 * 60 * 60 * 1000);
+            }
+        }
+        return t;
+    };
+
     // sort by time, then assign queue numbers only for active appointments
-    const sortedActive = [...active].sort((a, b) => (a._dt?.getTime() || 0) - (b._dt?.getTime() || 0));
+    const sortedActive = [...active].sort((a, b) => getSortTime(a) - getSortTime(b));
     const withQueue = sortedActive.map((r, i) => ({ ...r, _queue: i + 1 }));
     
     // Append cancelled appointments without queue numbers (for reference only)
     const cancelledWithoutQueue = cancelled.map((r) => ({ ...r, _queue: null }));
     
     // Return active appointments first, then cancelled (sorted by time)
-    const sortedCancelled = [...cancelledWithoutQueue].sort((a, b) => (a._dt?.getTime() || 0) - (b._dt?.getTime() || 0));
+    const sortedCancelled = [...cancelledWithoutQueue].sort((a, b) => getSortTime(a) - getSortTime(b));
     return [...withQueue, ...sortedCancelled];
-  }, [todayRows, selectedClinicId]);
+  }, [todayRows, selectedClinicId, hasAmHours]);
 
   const newHref = `/appointments/new${isArabic ? '?lang=ar' : ''}`;
   const historyHref = `/appointments/history${isArabic ? '?lang=ar' : ''}`;
@@ -1399,6 +1504,7 @@ export default function AppointmentsPage() {
                           onConfirm={confirmAppt}
                           detailHref={detailHref(appt.id)}
                           clinicLabel={clinicLabel}
+                          hasAmHours={hasAmHours}
                         />
                       </Box>
                     );

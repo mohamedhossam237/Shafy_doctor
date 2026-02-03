@@ -342,6 +342,32 @@ export default function NewAppointmentPage() {
       return;
     }
 
+    // Check for duplicates (same doctor, date, time)
+    try {
+      setSubmitting(true);
+      
+      const qDup = query(
+        collection(db, "appointments"),
+        where("doctorId", "==", user.uid),
+        where("date", "==", dateStr),
+        where("time", "==", timeStr),
+        where("status", "!=", "cancelled")
+      );
+      const snapDup = await getDocs(qDup);
+      if (!snapDup.empty) {
+        setSubmitting(false);
+        setError(isArabic ? "هذا الموعد محجوز بالفعل" : "This slot is already booked");
+        return;
+      }
+    } catch (err) {
+      console.error("Duplicate check error:", err);
+      // We continue if check fails? Better to stop to be safe, or warn? 
+      // Let's stop and show error.
+      setSubmitting(false);
+      setError(isArabic ? "حدث خطأ أثناء التحقق من الموعد" : "Error checking slot availability");
+      return;
+    }
+
     try {
       setSubmitting(true);
       

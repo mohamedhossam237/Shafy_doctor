@@ -97,10 +97,37 @@ function apptDate(appt) {
 
 function getGreeting(isArabic) {
   const hour = new Date().getHours();
-  if (hour < 12) return isArabic ? 'صباح الخير' : 'Good Morning';
   if (hour < 18) return isArabic ? 'مساء الخير' : 'Good Afternoon';
   return isArabic ? 'مساء الخير' : 'Good Evening';
 }
+
+const normalizeHoursFromAny = (sourceObj) => {
+  if (!sourceObj || typeof sourceObj !== "object") {
+    return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+  }
+  const src =
+    sourceObj.working_hours ||
+    sourceObj.workingHours ||
+    (sourceObj.clinic &&
+      (sourceObj.clinic.working_hours || sourceObj.clinic.workingHours)) ||
+    null;
+  if (src && typeof src === "object" && typeof src.sun === "string") return src;
+  if (src && typeof src === "object" && typeof src.sun === "object") {
+    const out = {};
+    for (const k of ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]) {
+      const day = src[k];
+      if (day && day.open !== false) {
+         const s = day.start || "09:00";
+         const e = day.end || "17:00";
+         out[k] = `${s}-${e}`;
+      } else {
+         out[k] = "";
+      }
+    }
+    return out;
+  }
+  return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
+};
 
 /* --------------------------- UI Components --------------------------- */
 
@@ -599,8 +626,14 @@ function ActionButton({ icon, label, onClick, color = 'primary', delay }) {
   );
 }
 
-function AppointmentItem({ appt, isArabic, withLang, index, isLast }) {
+function AppointmentItem({ appt, isArabic, withLang, index, isLast, hasAmHours }) {
   const d = apptDate(appt);
+  
+  if (d && !hasAmHours) {
+     const h = d.getHours();
+     if (h < 12) d.setHours(h + 12);
+  }
+
   const patientName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
   const status = String(appt?.status || '').toLowerCase();
   const completed = status === 'completed';
@@ -1037,6 +1070,7 @@ export default function DashboardIndexPage() {
   const [err, setErr] = React.useState('');
   const [doctorName, setDoctorName] = React.useState('Doctor');
   const [appointments, setAppointments] = React.useState([]);
+  const [hasAmHours, setHasAmHours] = React.useState(true); // Default true
   const [weeklyData, setWeeklyData] = React.useState([]);
   const [dailyRevenue, setDailyRevenue] = React.useState(0);
   const [recentPatients, setRecentPatients] = React.useState([]);
@@ -1073,6 +1107,22 @@ export default function DashboardIndexPage() {
         const checkupPrice = Number(dData.checkupPrice || 0);
         const followUpPrice = Number(dData.followUpPrice || 0);
 
+        // Check AM Hours
+        const hours = normalizeHoursFromAny(dData);
+        let foundAm = false;
+        Object.values(hours).forEach(rangeStr => {
+           if (!rangeStr) return;
+           const ranges = rangeStr.split(',');
+           ranges.forEach(r => {
+              const start = r.split('-')[0];
+              if (start) {
+                 const [h] = start.split(':').map(n => parseInt(n, 10));
+                 if (Number.isFinite(h) && h < 12) foundAm = true;
+              }
+           });
+        });
+        setHasAmHours(foundAm);
+
         // appointments
         const colAppt = collection(db, 'appointments');
         const [snapOld, snapNew] = await Promise.all([
@@ -1081,12 +1131,54 @@ export default function DashboardIndexPage() {
         ]);
         const apptMap = new Map();
         [...snapOld.docs, ...snapNew.docs].forEach((d) => apptMap.set(d.id, { id: d.id, ...d.data() }));
-        const rows = Array.from(apptMap.values()).map((r) => ({ ...r, _dt: apptDate(r) }));
+        let rows = Array.from(apptMap.values()).map((r) => ({ ...r, _dt: apptDate(r) }));
+
+        // Deduplicate
+        const uniqueMapDash = new Map();
+        rows.forEach(row => {
+          const t = row.time || '00:00';
+          const pid = row.patientUid || row.patientId || 'unknown';
+          const key = `${t}_${pid}`;
+          if (!uniqueMapDash.has(key)) {
+             uniqueMapDash.set(key, row);
+          } else {
+             const existing = uniqueMapDash.get(key);
+             const statusNew = String(row.status || '').toLowerCase();
+             const statusOld = String(existing.status || '').toLowerCase();
+             if (statusNew === 'completed' && statusOld !== 'completed') {
+                uniqueMapDash.set(key, row);
+             } else if (statusNew === 'confirmed' && statusOld !== 'completed' && statusOld !== 'confirmed') {
+                uniqueMapDash.set(key, row);
+             }
+          }
+        });
+        rows = Array.from(uniqueMapDash.values());
         const todayAll = rows.filter((r) => isToday(r._dt));
         const now = new Date();
+        
+        // Helper to get effective sort time (Smart PM Aware)
+        // If sorting needs Smart PM adjustment:
+        const getSortTime = (r) => {
+            let t = r._dt?.getTime() || 0;
+            if (!foundAm && r._dt) { // Use foundAm calculated above
+                const h = r._dt.getHours();
+                if (h < 12) {
+                    return t + (12 * 60 * 60 * 1000);
+                }
+            }
+            return t;
+        };
+
         const upcoming = todayAll
-          .filter((r) => r._dt && r._dt >= now)
-          .sort((a, b) => a._dt - b._dt)
+          .filter((r) => {
+              // For filtering 'future' appointments, we should also test against the adjusted time
+              // But 'r._dt' is raw. Let's compare adjusted vs now.
+              // Note: now is correct local time. 
+              // If we force 3am -> 3pm, we should compare 3pm vs now.
+              const t = getSortTime(r);
+              return t >= now.getTime();
+          })
+          .sort((a, b) => getSortTime(a) - getSortTime(b))
           .slice(0, 4);
         setAppointments(upcoming);
 
@@ -1404,6 +1496,7 @@ export default function DashboardIndexPage() {
                             withLang={withLang}
                             index={i}
                             isLast={i === appointments.length - 1}
+                            hasAmHours={hasAmHours}
                           />
                         ))
                       )}
