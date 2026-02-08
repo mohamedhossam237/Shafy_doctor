@@ -774,23 +774,22 @@ export default function AppointmentsPage() {
         });
         const initialRows = Array.from(map.values());
 
-        // Deduplicate logically: same patient + same time (user reported duplicates)
-        // We prefer 'confirmed' > 'completed' > others
+        // Deduplicate logically: same patient + same time
+        // We use a robust identity check to handle different field names (patientId, patientID, etc.)
         const uniqueMap = new Map();
         initialRows.forEach(row => {
           const t = row.time || '00:00';
-          const pid = row.patientUid || row.patientId || 'unknown';
+          const pid = getPatientId(row) || row.patientName || 'unknown';
           const key = `${t}_${pid}`;
           
           if (!uniqueMap.has(key)) {
             uniqueMap.set(key, row);
           } else {
-            // If exists, keep the one that is 'confirmed' or 'completed' if the existing one isn't
+            // Priority: completed > confirmed > pending
             const existing = uniqueMap.get(key);
             const statusNew = normStatus(row.status);
             const statusOld = normStatus(existing.status);
-            // Priority: completed > confirmed > pending
-            // Simple check: if new is 'better' than old, replace
+            
             if (statusNew === 'completed' && statusOld !== 'completed') {
                uniqueMap.set(key, row);
             } else if (statusNew === 'confirmed' && statusOld !== 'completed' && statusOld !== 'confirmed') {

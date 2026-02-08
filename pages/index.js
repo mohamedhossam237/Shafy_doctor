@@ -129,6 +129,12 @@ const normalizeHoursFromAny = (sourceObj) => {
   return { sun: "", mon: "", tue: "", wed: "", thu: "", fri: "", sat: "" };
 };
 
+// Get patient ID from appointment (checking all possible field names)
+function getPatientId(appt) {
+  if (!appt) return null;
+  return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
+}
+
 /* --------------------------- UI Components --------------------------- */
 
 // Helper for relative time
@@ -1133,11 +1139,11 @@ export default function DashboardIndexPage() {
         [...snapOld.docs, ...snapNew.docs].forEach((d) => apptMap.set(d.id, { id: d.id, ...d.data() }));
         let rows = Array.from(apptMap.values()).map((r) => ({ ...r, _dt: apptDate(r) }));
 
-        // Deduplicate
+        // Deduplicate logically: same patient + same time
         const uniqueMapDash = new Map();
         rows.forEach(row => {
           const t = row.time || '00:00';
-          const pid = row.patientUid || row.patientId || 'unknown';
+          const pid = getPatientId(row) || row.patientName || 'unknown';
           const key = `${t}_${pid}`;
           if (!uniqueMapDash.has(key)) {
              uniqueMapDash.set(key, row);
