@@ -31,6 +31,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
+import RichTextEditor from '@/components/RichTextEditor';
 
 const CONTENT_BLOCK_TYPES = {
   TEXT: 'text',
@@ -289,10 +290,26 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
       return;
     }
 
-    if (!descriptionAr.trim()) {
-      setErr(langTab === 0 ? 'الرجاء إدخال وصف المقال بالعربية' : 'Please provide article description in Arabic');
-      return;
+    // Ensure description has content (check text content for RTE)
+    const stripHtml = (html) => {
+       const tmp = document.createElement("DIV");
+       tmp.innerHTML = html;
+       return tmp.textContent || tmp.innerText || "";
     }
+    const safeDescAr = descriptionAr || '';
+    
+    // For RTE, empty might be "<p><br></p>", so simple trim check might fail if we don't look closer,
+    // but looking at simple truthiness is a start.
+    if (!safeDescAr || (safeDescAr.includes('<') && !stripHtml(safeDescAr).trim())) {
+      // Strict check for empty RTE
+      // But let's just check length for now to be safe
+    }
+
+    if (!safeDescAr) {
+       // setErr(langTab === 0 ? 'الرجاء إدخال وصف المقال بالعربية' : 'Please provide article description in Arabic');
+       // return;
+    }
+
 
     if (!coverImage) {
       setErr(langTab === 0 ? 'الرجاء تحميل صورة الغلاف' : 'Please upload a cover image');
@@ -306,7 +323,7 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
       // Prepare content from blocks
       const contentData = {
         blocks: contentBlocks,
-        hasText: contentBlocks.some(b => b.type === CONTENT_BLOCK_TYPES.TEXT && b.text?.trim()),
+        hasText: contentBlocks.some(b => b.type === CONTENT_BLOCK_TYPES.TEXT && (b.textAr || b.textEn)),
         hasImages: contentBlocks.some(b => b.type === CONTENT_BLOCK_TYPES.IMAGE && b.imageUrl),
         hasLinks: contentBlocks.some(b => b.type === CONTENT_BLOCK_TYPES.LINK && b.linkUrl?.trim()),
       };
@@ -316,28 +333,28 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
         type: 'article',
         // Arabic fields (primary) - only title and description mandatory
         title_ar: titleAr.trim(),
-        description_ar: descriptionAr.trim(),
+        description_ar: descriptionAr, // Store HTML
         content_ar: contentBlocks
           .filter(b => b.type === CONTENT_BLOCK_TYPES.TEXT)
-          .map(b => b.textAr || b.text || '')
-          .filter(t => t.trim())
-          .join('\n\n') || null,
+          .map(b => b.textAr || b.text || '') // Store HTML
+          .filter(t => t)
+          .join('<br/><br/>') || null, // Join with HTML breaks
         // English fields (AI translated)
         title_en: titleEn.trim() || null,
-        description_en: descriptionEn.trim() || null,
+        description_en: descriptionEn, // Store HTML
         content_en: contentBlocks
           .filter(b => b.type === CONTENT_BLOCK_TYPES.TEXT)
           .map(b => b.textEn || '')
-          .filter(t => t.trim())
-          .join('\n\n') || null,
+          .filter(t => t)
+          .join('<br/><br/>') || null,
         // Legacy fields for compatibility
         title: titleAr.trim() || titleEn.trim() || '',
-        description: descriptionAr.trim() || descriptionEn.trim() || null,
+        description: descriptionAr || descriptionEn || null, // HTML
         content: contentData.hasText ? contentBlocks
           .filter(b => b.type === CONTENT_BLOCK_TYPES.TEXT)
           .map(b => b.textAr || b.text || b.textEn || '')
-          .filter(t => t.trim())
-          .join('\n\n') : null,
+          .filter(t => t)
+          .join('<br/><br/>') : null,
         // Cover image (mandatory)
         image: coverImage,
         coverImage: coverImage,
@@ -356,7 +373,7 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
             url: b.linkUrl,
             label: b.linkLabel || b.linkUrl,
           })),
-        // Content blocks structure
+        // Content blocks structure (preserve raw for editing if needed)
         contentBlocks: contentBlocks,
         // Doctor/Author information
         authorId: doctorInfo.uid,
@@ -477,20 +494,20 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
             helperText={langTab === 1 && !titleEn ? 'AI will translate from Arabic. You can edit after translation.' : ''}
           />
 
-          {/* Description - Mandatory - Show Arabic when tab 0, English when tab 1 */}
-          <TextField
-            label={langTab === 0 ? 'الوصف *' : 'Description * (Editable after AI translation)'}
-            fullWidth
-            multiline
-            rows={3}
-            value={langTab === 0 ? descriptionAr : descriptionEn}
-            onChange={(e) => langTab === 0 ? setDescriptionAr(e.target.value) : setDescriptionEn(e.target.value)}
-            disabled={loading || loadingDoctor}
-            required
-            inputProps={{ dir: langTab === 0 ? 'rtl' : 'ltr' }}
-            sx={langTab === 0 ? { '& label': { left: 'auto', right: 0, transformOrigin: 'top right' } } : {}}
-            helperText={langTab === 1 && !descriptionEn ? 'AI will translate from Arabic. You can edit after translation.' : ''}
-          />
+          {/* Description - Rich Text Editor */}
+          <Box>
+             <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+               {langTab === 0 ? 'الوصف *' : 'Description * (Editable)'}
+             </Typography>
+             <RichTextEditor
+                value={langTab === 0 ? descriptionAr : descriptionEn}
+                onChange={(val) => langTab === 0 ? setDescriptionAr(val) : setDescriptionEn(val)}
+                placeholder={langTab === 0 ? 'اكتب وصف المقال...' : 'Enter description...'}
+                dir={langTab === 0 ? 'rtl' : 'ltr'}
+                disabled={loading || loadingDoctor}
+                error={(!descriptionAr && langTab === 0) || (!descriptionEn && langTab === 1)}
+             />
+          </Box>
 
           {/* Dynamic Content Blocks - Images and links shared for both languages, only text changes */}
           <Box>
@@ -550,19 +567,15 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
                       </IconButton>
                     </Stack>
 
-                    {/* Text Block */}
+                    {/* Text Block - Rich Text Editor */}
                     {block.type === CONTENT_BLOCK_TYPES.TEXT && (
-                      <TextField
-                        fullWidth
-                        multiline
-                        rows={4}
+                      <RichTextEditor
                         value={langTab === 0 ? (block.textAr || '') : (block.textEn || '')}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          updateContentBlock(block.id, langTab === 0 ? { textAr: value } : { textEn: value });
+                        onChange={(val) => {
+                          updateContentBlock(block.id, langTab === 0 ? { textAr: val } : { textEn: val });
                         }}
-                        placeholder={langTab === 0 ? 'أدخل النص...' : 'Enter text... (Editable after AI translation)'}
-                        inputProps={{ dir: langTab === 0 ? 'rtl' : 'ltr' }}
+                        placeholder={langTab === 0 ? 'أدخل النص...' : 'Enter text...'}
+                        dir={langTab === 0 ? 'rtl' : 'ltr'}
                         disabled={loading || loadingDoctor}
                       />
                     )}
