@@ -13,7 +13,10 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { useRouter } from 'next/router';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  doc, getDoc, getDocs, setDoc, addDoc, serverTimestamp,
+  collection, query, where
+} from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 import HealthInfoSection from '@/components/patients/HealthInfoSection';
 
@@ -103,8 +106,13 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
     isSmoker: false,
     drinksAlcohol: false,
     familyHistory: false,
-    isPregnant: false
+    isPregnant: false,
+    familyRelation: 'himself'
   });
+
+  const [relation, setRelation] = React.useState('himself');
+  const [linkedTo, setLinkedTo] = React.useState(null);
+  const [showRelationPicker, setShowRelationPicker] = React.useState(false);
 
   const [errors, setErrors] = React.useState({});
 
@@ -132,6 +140,9 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
       setErrors({});
       setSubmitting(false);
       setMoreOpen(false);
+      setRelation('himself');
+      setLinkedTo(null);
+      setShowRelationPicker(false);
     }
   }, [open]);
 
@@ -163,59 +174,71 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
 
     try {
       setSubmitting(true);
-      // Normalize phone number with +20 (Egypt country code)
       const normalizedPhone = normalizePhoneForStorage(form.phone);
-      const phoneId = normalizePhoneForId(form.phone, { countryCode: '+20' });
       
-      if (!phoneId || !/^[+0-9]{8,}$/.test(phoneId)) {
-        setSnack({ open: true, msg: t('Invalid phone format.', 'صيغة الهاتف غير صالحة.'), severity: 'error' });
-        setSubmitting(false);
-        return;
-      }
-
-      const patientRef = doc(db, 'patients', phoneId);
-      const existing = await getDoc(patientRef);
-
-      if (existing.exists()) {
-        const data = existing.data();
-        const assoc = new Set(data.associatedDoctors || []);
-        assoc.add(user.uid);
-
-        await setDoc(patientRef, {
-          associatedDoctors: Array.from(assoc),
-          phone: normalizedPhone, // Update phone with normalized format
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-
+      // 1. Check if a patient with the same name already exists for this doctor
+      // (This is to prevent duplicates with the exact same name for the same doctor)
+      const patientsCol = collection(db, 'patients');
+      const nameQuery = query(
+        patientsCol,
+        where('associatedDoctors', 'array-contains', user.uid),
+        where('name', '==', form.name.trim())
+      );
+      const nameSnap = await getDocs(nameQuery);
+      
+      if (!nameSnap.empty) {
         setSnack({
           open: true,
-          msg: t('Existing patient linked to your list.', 'تم ربط المريض الموجود بقائمتك.'),
-          severity: 'info'
+          msg: t('A patient with this name already exists in your list.', 'يوجد مريض بهذا الاسم بالفعل في قائمتك.'),
+          severity: 'error'
         });
-        onSaved?.(patientRef.id);
-        onClose?.();
         setSubmitting(false);
         return;
       }
 
+      // 2. Check if the phone number already exists for this doctor
+      const phoneQuery = query(
+        patientsCol,
+        where('associatedDoctors', 'array-contains', user.uid),
+        where('phone', '==', normalizedPhone)
+      );
+      const phoneSnap = await getDocs(phoneQuery);
+
+      // If phone exists but we haven't asked for relationship yet, show picker
+      if (!phoneSnap.empty && !showRelationPicker) {
+        // Find the primary holder (usually the one with 'himself' or just the first one)
+        const primary = phoneSnap.docs.find(d => d.data().familyRelation === 'himself') || phoneSnap.docs[0];
+        setLinkedTo(primary.id);
+        setShowRelationPicker(true);
+        setSubmitting(false);
+        return;
+      }
+
+      // 3. Create new patient profile
       const payload = {
         ...form,
         name: form.name.trim(),
-        phone: normalizedPhone, // Store with +20 format
-        phoneId,
+        phone: normalizedPhone,
         age: form.age ? Number(form.age) : null,
         address: form.address?.trim() || null,
         email: form.email?.trim() || null,
         lastVisit: null,
         registeredBy: user.uid,
         associatedDoctors: [user.uid],
+        familyRelation: relation,
+        linkedTo: linkedTo || null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
 
-      await setDoc(patientRef, payload);
-      setSnack({ open: true, msg: t('Patient added successfully.', 'تم إضافة المريض بنجاح.'), severity: 'success' });
-      onSaved?.(patientRef.id);
+      const docRef = await addDoc(collection(db, 'patients'), payload);
+      
+      setSnack({
+        open: true,
+        msg: t('Patient added successfully.', 'تم إضافة المريض بنجاح.'),
+        severity: 'success'
+      });
+      onSaved?.(docRef.id);
       onClose?.();
     } catch (e) {
       console.error(e);
@@ -266,6 +289,36 @@ export default function AddPatientDialog({ open, onClose, onSaved, isArabic: isA
               />
             </Grid>
           </Grid>
+
+          {showRelationPicker && (
+            <Box
+              sx={{
+                p: 2,
+                borderRadius: 2,
+                bgcolor: 'rgba(255, 152, 0, 0.05)',
+                border: '1.5px solid',
+                borderColor: 'warning.light',
+              }}
+            >
+              <Typography variant="subtitle2" fontWeight={700} color="warning.main" gutterBottom>
+                {t('This phone number is already registered. What is the relationship of this new person to the phone holder?', 'رقم الهاتف هذا مسجل بالفعل. ما هي علاقة هذا الشخص الجديد بصاحب الهاتف؟')}
+              </Typography>
+              <FormControl fullWidth size="small">
+                <InputLabel>{t('Relationship', 'العلاقة')}</InputLabel>
+                <Select
+                  value={relation}
+                  label={t('Relationship', 'العلاقة')}
+                  onChange={(e) => setRelation(e.target.value)}
+                >
+                  <MenuItem value="himself">{t('Himself (New record)', 'نفسه (سجل جديد)')}</MenuItem>
+                  <MenuItem value="son">{t('Son', 'ابن')}</MenuItem>
+                  <MenuItem value="wife">{t('Wife', 'زوجة')}</MenuItem>
+                  <MenuItem value="mom">{t('Mom', 'أم')}</MenuItem>
+                  <MenuItem value="dad">{t('Dad', 'أب')}</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+          )}
 
           {/* Optional Section */}
           <Box

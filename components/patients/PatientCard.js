@@ -151,6 +151,28 @@ export default function PatientCard({ patient, isArabic, onDeleted, onUpdated })
                   }}
                 />
               )}
+              {(() => {
+                const r = patient.familyRelation;
+                if (!r || r === 'himself') return null;
+                const relLabel = (() => {
+                  if (!isArabic) return r.charAt(0).toUpperCase() + r.slice(1);
+                  const map = { son: 'ابن', wife: 'زوجة', mom: 'أم', dad: 'أب' };
+                  return map[r] || r;
+                })();
+                return (
+                  <Chip
+                    size="small"
+                    label={relLabel}
+                    color="secondary"
+                    variant="outlined"
+                    sx={{
+                      height: 20,
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                    }}
+                  />
+                );
+              })()}
             </Stack>
           </Stack>
 

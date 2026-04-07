@@ -161,6 +161,9 @@ export default function NewAppointmentPage() {
   const [addNewPatient, setAddNewPatient] = React.useState(false);
   const [newPatientName, setNewPatientName] = React.useState("");
   const [newPatientPhone, setNewPatientPhone] = React.useState("");
+  const [newPatientRelation, setNewPatientRelation] = React.useState("himself");
+  const [newPatientLinkedTo, setNewPatientLinkedTo] = React.useState(null);
+  const [showRelationPicker, setShowRelationPicker] = React.useState(false);
 
   /* doctor & clinic */
   const [doctor, setDoctor] = React.useState(null);
@@ -286,27 +289,7 @@ export default function NewAppointmentPage() {
         setError(isArabic ? "الرجاء إدخال اسم ورقم المريض" : "Please enter name and phone");
         return;
       }
-      const pRef = await addDoc(collection(db, "patients"), {
-        name: newPatientName.trim(),
-        phone: (() => {
-          // Normalize phone number with +20 (Egypt country code)
-          const s = String(newPatientPhone || '').trim();
-          if (!s) return '';
-          const d = s.replace(/\D/g, '');
-          if (!d) return '';
-          let phoneDigits = d.replace(/^0+/, '');
-          if (phoneDigits.startsWith('20')) {
-            return `+${phoneDigits}`;
-          } else {
-            return `+20${phoneDigits}`;
-          }
-        })(),
-        registeredBy: user.uid,
-        createdAt: serverTimestamp(),
-      });
-      patientId = pRef.id;
-      patientName = newPatientName.trim();
-      // Normalize phone number with +20 (Egypt country code)
+      
       const normalizePhone = (raw = '') => {
         const s = String(raw || '').trim();
         if (!s) return '';
@@ -319,7 +302,50 @@ export default function NewAppointmentPage() {
           return `+20${phoneDigits}`;
         }
       };
-      patientPhone = normalizePhone(newPatientPhone);
+      const normalizedPhone = normalizePhone(newPatientPhone);
+
+      // Check if a patient with the same name already exists for this doctor
+      const patientsCol = collection(db, 'patients');
+      const nameQuery = query(
+        patientsCol,
+        where('associatedDoctors', 'array-contains', user.uid),
+        where('name', '==', newPatientName.trim())
+      );
+      const nameSnap = await getDocs(nameQuery);
+      
+      if (!nameSnap.empty) {
+        setError(isArabic ? 'يوجد مريض بهذا الاسم بالفعل في قائمتك.' : 'A patient with this name already exists in your list.');
+        return;
+      }
+
+      // Check if the phone number already exists for this doctor
+      const phoneQuery = query(
+        patientsCol,
+        where('associatedDoctors', 'array-contains', user.uid),
+        where('phone', '==', normalizedPhone)
+      );
+      const phoneSnap = await getDocs(phoneQuery);
+
+      if (!phoneSnap.empty && !showRelationPicker) {
+        const primary = phoneSnap.docs.find(d => d.data().familyRelation === 'himself') || phoneSnap.docs[0];
+        setNewPatientLinkedTo(primary.id);
+        setShowRelationPicker(true);
+        return;
+      }
+
+      const pRef = await addDoc(collection(db, "patients"), {
+        name: newPatientName.trim(),
+        phone: normalizedPhone,
+        familyRelation: newPatientRelation,
+        linkedTo: newPatientLinkedTo || null,
+        registeredBy: user.uid,
+        associatedDoctors: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      patientId = pRef.id;
+      patientName = newPatientName.trim();
+      patientPhone = normalizedPhone;
     } else if (!selectedPatient) {
       setError(isArabic ? "الرجاء اختيار مريض" : "Please select a patient");
       return;
@@ -371,6 +397,8 @@ export default function NewAppointmentPage() {
         patientUid: patientId,
         patientName,
         patientPhone,
+        familyRelation: addNewPatient ? newPatientRelation : (selectedPatient?.familyRelation || 'himself'),
+        patientId, // Added for new data schema
         note: note.trim(),
         status: "confirmed",
         source: 'Doctor_app', // Tag to identify bookings from doctor app
@@ -382,6 +410,9 @@ export default function NewAppointmentPage() {
       setAddNewPatient(false);
       setNewPatientName("");
       setNewPatientPhone("");
+      setNewPatientRelation("himself");
+      setNewPatientLinkedTo(null);
+      setShowRelationPicker(false);
       setSelectedPatient(null);
       setAdditionalFees("");
       setExtraServiceName("");
@@ -430,7 +461,17 @@ export default function NewAppointmentPage() {
                       onOpen={loadPatients}
                       options={patients}
                       loading={loadingPatients}
-                      getOptionLabel={(o) => String(o?.name ?? o?.id ?? "")}
+                      getOptionLabel={(o) => {
+                        const name = o.name || (isArabic ? 'بدون اسم' : 'Unnamed');
+                        const r = o.familyRelation;
+                        if (!r || r === 'himself') return name;
+                        const relLabel = (() => {
+                          if (!isArabic) return r.charAt(0).toUpperCase() + r.slice(1);
+                          const map = { son: 'ابن', wife: 'زوجة', mom: 'أم', dad: 'أب' };
+                          return map[r] || r;
+                        })();
+                        return `${name} (${relLabel})`;
+                      }}
                       isOptionEqualToValue={(a, b) => a?.id === b?.id}
                       value={selectedPatient}
                       onChange={(_, v) => setSelectedPatient(v)}
@@ -463,6 +504,26 @@ export default function NewAppointmentPage() {
                         value={newPatientPhone}
                         onChange={(e) => setNewPatientPhone(e.target.value)}
                       />
+                      {showRelationPicker && (
+                        <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'rgba(255, 152, 0, 0.05)', border: '1px solid', borderColor: 'warning.light' }}>
+                          <Typography variant="caption" fontWeight={700} color="warning.main" display="block" gutterBottom>
+                            {isArabic ? 'رقم الهاتف مسجل بالفعل. ما صلة القرابة؟' : 'Phone already registered. What is the relation?'}
+                          </Typography>
+                          <TextField
+                            select
+                            fullWidth
+                            size="small"
+                            value={newPatientRelation}
+                            onChange={(e) => setNewPatientRelation(e.target.value)}
+                          >
+                            <MenuItem value="himself">{isArabic ? 'نفسه' : 'Himself'}</MenuItem>
+                            <MenuItem value="son">{isArabic ? 'ابن' : 'Son'}</MenuItem>
+                            <MenuItem value="wife">{isArabic ? 'زوجة' : 'Wife'}</MenuItem>
+                            <MenuItem value="mom">{isArabic ? 'أم' : 'Mom'}</MenuItem>
+                            <MenuItem value="dad">{isArabic ? 'أب' : 'Dad'}</MenuItem>
+                          </TextField>
+                        </Box>
+                      )}
                     </Stack>
                   )}
 

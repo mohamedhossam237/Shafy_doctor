@@ -104,6 +104,18 @@ function getPatientId(appt) {
   return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
 }
 
+function getRelationLabel(relation, isArabic) {
+  if (!relation || relation === 'himself') return '';
+  const map = {
+    son: isArabic ? 'ابن' : 'Son',
+    wife: isArabic ? 'زوجة' : 'Wife',
+    mom: isArabic ? 'أم' : 'Mom',
+    dad: isArabic ? 'أب' : 'Dad',
+  };
+  const label = map[relation] || relation;
+  return ` (${label})`;
+}
+
 /* ---------- main ---------- */
 export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
   const router = useRouter();
@@ -428,7 +440,10 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     {(() => {
                       const patientId = getPatientId(appt);
                       const patientHref = patientId ? `/patients/${patientId}${isAr ? '?lang=ar' : ''}` : null;
-                      
+                      const baseName = appt.patientName || (isAr ? 'بدون اسم' : 'Unnamed');
+                      const relationLabel = getRelationLabel(appt.familyRelation, isAr);
+                      const patientName = `${baseName}${relationLabel}`;
+
                       if (patientHref) {
                         return (
                           <Link href={patientHref} style={{ textDecoration: 'none' }}>
@@ -448,7 +463,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                                 },
                               }}
                             >
-                              {appt.patientName}
+                              {patientName}
                             </Typography>
                           </Link>
                         );
@@ -456,7 +471,7 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                       
                       return (
                         <Typography variant="h6" fontWeight={700}>
-                          {appt.patientName}
+                          {patientName}
                         </Typography>
                       );
                     })()}

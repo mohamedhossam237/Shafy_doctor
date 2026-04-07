@@ -67,19 +67,23 @@ async function startNextServer() {
   
   if (isPackaged) {
     // In packaged app, files are in resources/app.asar.unpacked
-    // Check multiple possible locations for .next
+    // The .next directory should be unpacked (not in asar)
     const possiblePaths = [
-      path.join(process.resourcesPath, 'app.asar.unpacked'), // Unpacked files
-      path.join(process.resourcesPath, 'app'), // Packed in asar
-      path.dirname(__dirname), // electron-desktop directory (after copy)
+      path.join(process.resourcesPath, 'app.asar.unpacked'), // Unpacked files (most likely)
+      path.join(process.resourcesPath, 'app'), // Packed in asar (unlikely but check)
+      path.join(process.resourcesPath), // Root of resources
+      path.dirname(process.execPath), // Directory where executable is
+      path.join(path.dirname(process.execPath), 'resources', 'app.asar.unpacked'), // Alternative path
     ];
     
     // Find which path has .next
     let foundPath = null;
     for (const testPath of possiblePaths) {
       const testNextPath = path.join(testPath, '.next');
+      console.log(`Checking path: ${testNextPath}`);
       if (fs.existsSync(testNextPath)) {
         foundPath = testPath;
+        console.log(`✓ Found .next at: ${testNextPath}`);
         break;
       }
     }
@@ -87,8 +91,9 @@ async function startNextServer() {
     if (foundPath) {
       appPath = foundPath;
     } else {
-      // Default to app.asar.unpacked
+      // Default to app.asar.unpacked - this is where electron-builder puts unpacked files
       appPath = path.join(process.resourcesPath, 'app.asar.unpacked');
+      console.log(`Using default app path: ${appPath}`);
     }
     nextPath = path.join(appPath, '.next');
   } else {
@@ -108,12 +113,14 @@ async function startNextServer() {
   }
 
   // Check if .next directory exists
-  
-  console.log('Checking paths:');
+  console.log('\n=== Checking Next.js Build ===');
   console.log('  isPackaged:', isPackaged);
   console.log('  appPath:', appPath);
   console.log('  nextPath:', nextPath);
   console.log('  __dirname:', __dirname);
+  console.log('  process.execPath:', process.execPath);
+  console.log('  process.resourcesPath:', process.resourcesPath);
+  console.log('  electronApp.getAppPath():', electronApp.getAppPath());
   
   if (!fs.existsSync(nextPath)) {
     // Try alternative paths (more comprehensive search)
@@ -145,7 +152,15 @@ async function startNextServer() {
     
     if (!foundPath) {
       const allPaths = [...altPaths, nextPath];
-      throw new Error(`Next.js build not found. Checked:\n${allPaths.join('\n')}\n\nPlease run 'npm run build' first.\n\nCurrent app path: ${electronApp.getAppPath()}\nResources path: ${process.resourcesPath}`);
+      const errorMessage = `Next.js build not found. Checked:\n${allPaths.join('\n')}\n\n` +
+        `To fix this:\n` +
+        `1. In the project root directory, run: npm run build\n` +
+        `2. Then run: cd electron-desktop && npm run prebuild\n` +
+        `3. Finally, build the Electron app: npm run build:electron\n\n` +
+        `Current app path: ${electronApp.getAppPath()}\n` +
+        `Resources path: ${process.resourcesPath || 'N/A'}\n` +
+        `__dirname: ${__dirname}`;
+      throw new Error(errorMessage);
     }
   }
   

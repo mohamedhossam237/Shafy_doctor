@@ -40,9 +40,18 @@ app.whenReady().then(async () => {
         console.log(`Next.js server started at ${serverUrl}`);
       } catch (error) {
         console.error('Failed to start Next.js server:', error);
+        const errorMessage = error.message || 'Unknown error';
         dialog.showErrorBox(
           'Server Start Failed',
-          `Failed to start Next.js server:\n\n${error.message}\n\nPlease ensure the Next.js build exists.`
+          `Failed to start Next.js server:\n\n${errorMessage}\n\n` +
+          `To fix this issue:\n` +
+          `1. Make sure you've built the Next.js app first:\n` +
+          `   Run "npm run build" in the project root\n\n` +
+          `2. Copy the build files:\n` +
+          `   Run "cd electron-desktop && npm run prebuild"\n\n` +
+          `3. Then build the Electron app:\n` +
+          `   Run "npm run build:electron"\n\n` +
+          `If you're in development mode, make sure the Next.js dev server is running on port 3000.`
         );
         app.quit();
         return;

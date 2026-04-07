@@ -119,6 +119,18 @@ function getPatientId(appt) {
   return appt.patientId || appt.patientUID || appt.patientID || appt.patientUid || null;
 }
 
+function getRelationLabel(relation, isArabic) {
+  if (!relation || relation === 'himself') return '';
+  const map = {
+    son: isArabic ? 'ابن' : 'Son',
+    wife: isArabic ? 'زوجة' : 'Wife',
+    mom: isArabic ? 'أم' : 'Mom',
+    dad: isArabic ? 'أب' : 'Dad',
+  };
+  const label = map[relation] || relation;
+  return ` (${label})`;
+}
+
 /* ---------------- row/card ---------------- */
 
 function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, clinicLabel }) {
@@ -332,7 +344,9 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
             <PersonIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
             {(() => {
               const patientId = getPatientId(appt);
-              const patientName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
+              const baseName = appt?.patientName || (isArabic ? 'بدون اسم' : 'Unnamed');
+              const relationLabel = getRelationLabel(appt?.familyRelation, isArabic);
+              const patientName = `${baseName}${relationLabel}`;
               const patientHref = patientId ? `/patients/${patientId}${isArabic ? '?lang=ar' : ''}` : null;
               
               if (patientHref) {
@@ -342,7 +356,7 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
                       variant="h6"
                       fontWeight={700}
                       noWrap
-                      title={appt?.patientName || ''}
+                      title={patientName}
                       sx={{
                         background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
                         backgroundClip: 'text',
@@ -366,7 +380,7 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
                   variant="h6"
                   fontWeight={700}
                   noWrap
-                  title={appt?.patientName || ''}
+                  title={patientName}
                   sx={{
                     background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
                     backgroundClip: 'text',

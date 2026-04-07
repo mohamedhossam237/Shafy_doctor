@@ -12,6 +12,20 @@ console.log('Copying build files...');
 console.log('Root directory:', rootDir);
 console.log('Electron directory:', electronDir);
 
+// Check if .next directory exists in root
+const nextBuildPath = path.join(rootDir, '.next');
+if (!fs.existsSync(nextBuildPath)) {
+  console.error('\n❌ ERROR: .next build directory not found!');
+  console.error(`Expected location: ${nextBuildPath}`);
+  console.error('\nTo fix this:');
+  console.error('1. Make sure you are in the project root directory');
+  console.error('2. Run: npm run build');
+  console.error('3. Then run: cd electron-desktop && npm run prebuild');
+  process.exit(1);
+}
+
+console.log('✓ Found .next build directory');
+
 // Files/directories to copy
 // Note: We don't copy package.json because it would overwrite the Electron package.json
 const itemsToCopy = [

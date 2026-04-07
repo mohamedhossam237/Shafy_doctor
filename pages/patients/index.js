@@ -198,7 +198,17 @@ export default function PatientsIndexPage() {
             <Stack spacing={2}>
               <Autocomplete
                 options={patients}
-                getOptionLabel={(o) => o.name || 'بدون اسم'}
+                getOptionLabel={(o) => {
+                  const name = o.name || (isArabic ? 'بدون اسم' : 'Unnamed');
+                  const r = o.familyRelation;
+                  if (!r || r === 'himself') return name;
+                  const relLabel = (() => {
+                    if (!isArabic) return r.charAt(0).toUpperCase() + r.slice(1);
+                    const map = { son: 'ابن', wife: 'زوجة', mom: 'أم', dad: 'أب' };
+                    return map[r] || r;
+                  })();
+                  return `${name} (${relLabel})`;
+                }}
                 value={msgPatient}
                 onChange={(_, v) => setMsgPatient(v)}
                 renderInput={(params) => (
