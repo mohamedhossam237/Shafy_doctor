@@ -7,6 +7,7 @@ import {
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import dayjs from 'dayjs';
+import { getRelationLabel, format12h, APPOINTMENT_TYPES } from '../lib/utils';
 
 export default function AppointmentDetailScreen({ route, navigation }) {
   const { appointmentId } = route.params;
@@ -68,7 +69,10 @@ export default function AppointmentDetailScreen({ route, navigation }) {
           <View style={styles.patientInfo}>
             <Avatar.Text label={initials} size={50} />
             <View style={styles.patientNameContainer}>
-              <Text variant="titleLarge" style={styles.patientName}>{appointment.patientName}</Text>
+              <Text variant="titleLarge" style={styles.patientName}>
+                {appointment.patientName}
+                {getRelationLabel(appointment.familyRelation) ? ` (${getRelationLabel(appointment.familyRelation)})` : ''}
+              </Text>
               <Text variant="bodyMedium" style={styles.patientPhone}>{appointment.patientPhone}</Text>
             </View>
             <IconButton icon="chevron-right" onPress={() => navigation.navigate('PatientDetail', { patientId: appointment.patientId })} />
@@ -89,7 +93,7 @@ export default function AppointmentDetailScreen({ route, navigation }) {
             <IconButton icon="clock-outline" style={styles.icon} />
             <View>
               <Text variant="labelSmall" style={styles.label}>Time</Text>
-              <Text variant="bodyLarge">{appointment.time}</Text>
+              <Text variant="bodyLarge">{format12h(appointment.time, true)}</Text>
             </View>
           </View>
           <Divider style={styles.divider} />
@@ -97,7 +101,19 @@ export default function AppointmentDetailScreen({ route, navigation }) {
             <IconButton icon="medical-bag" style={styles.icon} />
             <View>
               <Text variant="labelSmall" style={styles.label}>Service</Text>
-              <Text variant="bodyLarge" style={{ textTransform: 'capitalize' }}>{appointment.appointmentType || 'Consultation'}</Text>
+              {(() => {
+                const type = appointment.bookingType || appointment.type || appointment.appointmentType;
+                const typeInfo = APPOINTMENT_TYPES[type] || { label: type || 'كشف', color: '#757575', bg: '#f5f5f5' };
+                return (
+                  <Chip 
+                    mode="flat" 
+                    style={{ backgroundColor: typeInfo.bg, alignSelf: 'flex-start', marginTop: 4 }}
+                    textStyle={{ color: typeInfo.color, fontSize: 12, fontWeight: 'bold' }}
+                  >
+                    {typeInfo.label}
+                  </Chip>
+                );
+              })()}
             </View>
           </View>
         </Surface>

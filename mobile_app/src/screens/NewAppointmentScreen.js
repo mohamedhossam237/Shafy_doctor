@@ -148,6 +148,8 @@ export default function NewAppointmentScreen({ navigation, route }) {
         date: dateStr,
         time: timeStr,
         appointmentType: type,
+        bookingType: type,
+        type: type,
         patientId: selectedPatient.id,
         patientName: selectedPatient.name,
         patientPhone: selectedPatient.phone,

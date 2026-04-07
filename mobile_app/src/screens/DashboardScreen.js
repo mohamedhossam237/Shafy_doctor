@@ -51,7 +51,8 @@ export default function DashboardScreen({ navigation }) {
     const initials = item.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
     const relLabel = getRelationLabel(item.familyRelation);
     const displayTitle = relLabel ? `${item.patientName} (${relLabel})` : item.patientName;
-    const typeInfo = APPOINTMENT_TYPES[item.appointmentType] || { label: item.appointmentType || 'Consultation', color: '#757575', bg: '#f5f5f5' };
+    const type = item.bookingType || item.type || item.appointmentType;
+    const typeInfo = APPOINTMENT_TYPES[type] || { label: type || 'كشف', color: '#757575', bg: '#f5f5f5' };
     
     return (
       <Card key={item.id} style={styles.appointmentCard}>
