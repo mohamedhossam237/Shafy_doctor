@@ -10,7 +10,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import dayjs from 'dayjs';
 import EditPatientModal from '../components/EditPatientModal';
-import { getRelationLabel } from '../lib/utils';
+import { getRelationLabel, getAppointmentTypeInfo } from '../lib/utils';
 
 export default function PatientDetailScreen({ route, navigation }) {
   const { patientId } = route.params;
@@ -133,20 +133,31 @@ export default function PatientDetailScreen({ route, navigation }) {
         {history.length === 0 ? (
           <Text style={styles.emptyText}>No past visits found.</Text>
         ) : (
-          history.map((item) => (
-            <Card key={item.id} style={styles.visitCard} onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: item.id })}>
-              <Card.Content>
-                <View style={styles.visitHeader}>
-                  <Text variant="titleMedium" style={styles.visitDate}>
-                    {dayjs(item.date).format('DD MMM YYYY')}
-                  </Text>
-                  <Chip style={styles.statusChip} textStyle={{ fontSize: 10 }}>{item.status.toUpperCase()}</Chip>
-                </View>
-                <Text variant="bodyMedium" style={styles.visitType}>{item.appointmentType?.toUpperCase() || 'CONSULTATION'}</Text>
-                {item.note && <Text variant="bodySmall" numberOfLines={1} style={styles.visitNote}>{item.note}</Text>}
-              </Card.Content>
-            </Card>
-          ))
+          history.map((item) => {
+            const typeInfo = getAppointmentTypeInfo(item);
+            return (
+              <Card key={item.id} style={styles.visitCard} onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: item.id })}>
+                <Card.Content>
+                  <View style={styles.visitHeader}>
+                    <Text variant="titleMedium" style={styles.visitDate}>
+                      {dayjs(item.date).format('DD MMM YYYY')}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Chip 
+                        mode="flat" 
+                        style={[styles.typeBadge, { backgroundColor: typeInfo.bg, marginRight: 8 }]}
+                        textStyle={{ color: typeInfo.color, fontSize: 10, fontWeight: 'bold' }}
+                      >
+                        {typeInfo.label}
+                      </Chip>
+                      <Chip style={styles.statusChip} textStyle={{ fontSize: 10 }}>{item.status.toUpperCase()}</Chip>
+                    </View>
+                  </View>
+                  {item.note && <Text variant="bodySmall" numberOfLines={1} style={styles.visitNote}>{item.note}</Text>}
+                </Card.Content>
+              </Card>
+            );
+          })
         )}
       </ScrollView>
 

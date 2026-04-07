@@ -27,9 +27,9 @@ import ExtraFeeDialog from '@/components/reports/ExtraFeeDialog';
 import WhatsAppNotifyDialog from '@/components/reports/WhatsAppNotifyDialog';
 import { db } from '@/lib/firebase';
 import {
-  doc, getDoc, getDocs, query, where,
   updateDoc, serverTimestamp, collection
 } from 'firebase/firestore';
+import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 
 /* ---------- helpers ---------- */
 const toDate = (v) => (v?.toDate ? v.toDate() : new Date(v));
@@ -306,22 +306,24 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                     <Typography variant="h5" fontWeight={700}>
                       {t('Appointment Details', 'تفاصيل الموعد')}
                     </Typography>
-                    {appt?.appointmentType && (
-                      <Chip
-                        size="small"
-                        label={
-                          appt.appointmentType === 'followup'
-                            ? (isAr ? 'إعادة كشف' : 'Re-examination')
-                            : (isAr ? 'كشف' : 'Checkup')
-                        }
-                        color={appt.appointmentType === 'followup' ? 'secondary' : 'primary'}
-                        sx={{
-                          height: 28,
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                        }}
-                      />
-                    )}
+                    {appt && (() => {
+                        const typeInfo = getAppointmentTypeInfo(appt, isAr);
+                        return (
+                          <Chip 
+                            size="small"
+                            label={typeInfo.label} 
+                            sx={{ 
+                              height: 28,
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              bgcolor: typeInfo.bgcolor,
+                              color: typeInfo.textColor,
+                              border: '1.5px solid',
+                              borderColor: typeInfo.border
+                            }} 
+                          />
+                        );
+                      })()}
                   </Stack>
                   {queueNo && (
                     <Typography variant="body2" color="text.secondary">
@@ -420,22 +422,24 @@ export default function AppointmentDetailsPage({ themeMode, setThemeMode }) {
                       <Typography variant="body2" color="text.secondary" fontWeight={600}>
                         {t('Patient', 'المريض')}
                       </Typography>
-                      {appt?.appointmentType && (
-                        <Chip
-                          size="small"
-                          label={
-                            appt.appointmentType === 'followup'
-                              ? (isAr ? 'إعادة كشف' : 'Re-examination')
-                              : (isAr ? 'كشف' : 'Checkup')
-                          }
-                          color={appt.appointmentType === 'followup' ? 'secondary' : 'primary'}
-                          sx={{
-                            height: 22,
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                          }}
-                        />
-                      )}
+                      {appt && (() => {
+                          const typeInfo = getAppointmentTypeInfo(appt, isAr);
+                          return (
+                            <Chip 
+                              size="small"
+                              label={typeInfo.label} 
+                              sx={{ 
+                                height: 22,
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                bgcolor: typeInfo.bgcolor,
+                                color: typeInfo.textColor,
+                                border: '1px solid',
+                                borderColor: typeInfo.border
+                              }} 
+                            />
+                          );
+                        })()}
                     </Stack>
                     {(() => {
                       const patientId = getPatientId(appt);

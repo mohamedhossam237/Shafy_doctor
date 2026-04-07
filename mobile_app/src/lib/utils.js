@@ -70,6 +70,16 @@ export const APPOINTMENT_TYPES = {
   followup: { label: 'إعادة كشف', color: '#1976d2', bg: '#e3f2fd' },
 };
 
+export const getAppointmentTypeInfo = (item = {}) => {
+  const typeStr = String(item.bookingType || item.type || item.appointmentType || item.service || '').toLowerCase().replace(/[^a-z]/g, '');
+  
+  if (typeStr.includes('followup') || typeStr.includes('reexam') || typeStr.includes('return') || typeStr === 'follow') {
+    return APPOINTMENT_TYPES.followup;
+  }
+  
+  return APPOINTMENT_TYPES.checkup;
+};
+
 export const formatPatientNameWithRelation = (name, relation) => {
   const label = getRelationLabel(relation);
   return label ? `${name} (${label})` : name;

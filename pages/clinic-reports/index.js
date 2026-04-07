@@ -45,6 +45,7 @@ import { db } from '@/lib/firebase';
 import {
   collection, getDocs, query, where, doc, getDoc, updateDoc,
 } from 'firebase/firestore';
+import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 
 import {
   BarChart,
@@ -503,7 +504,8 @@ export default function ClinicReportsPage() {
       a.payment?.amount
     );
     if (n > 0) return n;
-    const isFollowUp = a.appointmentType === 'followup' || a.appointmentType === 'recheck';
+    const typeInfo = getAppointmentTypeInfo(a, false);
+    const isFollowUp = typeInfo.color === 'secondary';
     // Count revenue for both completed and confirmed appointments
     return (a._status === 'completed' || a._status === 'confirmed') ? Number((isFollowUp ? followUpPrice : checkupPrice) || 0) : 0;
   }, [checkupPrice, followUpPrice, tryNum]);

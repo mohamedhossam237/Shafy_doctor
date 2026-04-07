@@ -41,6 +41,7 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 
 /* ---------------- utils (unify date/time across shapes) ---------------- */
 
@@ -274,39 +275,26 @@ function RowCard({ appt, isArabic, locale, clinicLabel }) {
               );
             })()}
             {/* Appointment Type Badge */}
-            {appt?.appointmentType === 'followup' ? (
-              <Chip
-                size="small"
-                label={isArabic ? 'إعادة كشف' : 'Re-examination'}
-                sx={{
-                  borderRadius: 2.5,
-                  height: 28,
-                  bgcolor: 'rgba(156, 39, 176, 0.15)',
-                  color: 'secondary.main',
-                  fontWeight: 800,
-                  border: '2px solid',
-                  borderColor: 'secondary.main',
-                  fontSize: '0.75rem',
-                  boxShadow: '0 2px 8px rgba(156, 39, 176, 0.2)',
-                }}
-              />
-            ) : (
-              <Chip
-                size="small"
-                label={isArabic ? 'كشف' : 'Checkup'}
-                sx={{
-                  borderRadius: 2.5,
-                  height: 28,
-                  bgcolor: 'rgba(25, 118, 210, 0.15)',
-                  color: 'primary.main',
-                  fontWeight: 800,
-                  border: '2px solid',
-                  borderColor: 'primary.main',
-                  fontSize: '0.75rem',
-                  boxShadow: '0 2px 8px rgba(25, 118, 210, 0.2)',
-                }}
-              />
-            )}
+            {(() => {
+              const typeInfo = getAppointmentTypeInfo(appt, isArabic);
+              return (
+                <Chip
+                  size="small"
+                  label={typeInfo.label}
+                  sx={{
+                    borderRadius: 2.5,
+                    height: 28,
+                    bgcolor: typeInfo.bgcolor,
+                    color: typeInfo.textColor,
+                    fontWeight: 800,
+                    border: '2px solid',
+                    borderColor: typeInfo.border,
+                    fontSize: '0.75rem',
+                    boxShadow: `0 2px 8px ${typeInfo.color === 'secondary' ? 'rgba(156, 39, 176, 0.2)' : 'rgba(25, 118, 210, 0.2)'}`,
+                  }}
+                />
+              );
+            })()}
             {/* Source Badge */}
             {(() => {
               const source = String(appt?.source || '').trim();

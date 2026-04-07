@@ -6,7 +6,7 @@ import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'f
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 
-import { getRelationLabel, format12h, APPOINTMENT_TYPES, getTodayString } from '../lib/utils';
+import { getRelationLabel, format12h, APPOINTMENT_TYPES, getTodayString, getAppointmentTypeInfo } from '../lib/utils';
 
 export default function DashboardScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -51,8 +51,7 @@ export default function DashboardScreen({ navigation }) {
     const initials = item.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
     const relLabel = getRelationLabel(item.familyRelation);
     const displayTitle = relLabel ? `${item.patientName} (${relLabel})` : item.patientName;
-    const type = item.bookingType || item.type || item.appointmentType;
-    const typeInfo = APPOINTMENT_TYPES[type] || { label: type || 'كشف', color: '#757575', bg: '#f5f5f5' };
+    const typeInfo = getAppointmentTypeInfo(item);
     
     return (
       <Card key={item.id} style={styles.appointmentCard}>

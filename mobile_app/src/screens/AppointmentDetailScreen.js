@@ -7,7 +7,7 @@ import {
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import dayjs from 'dayjs';
-import { getRelationLabel, format12h, APPOINTMENT_TYPES } from '../lib/utils';
+import { getRelationLabel, format12h, APPOINTMENT_TYPES, getAppointmentTypeInfo } from '../lib/utils';
 
 export default function AppointmentDetailScreen({ route, navigation }) {
   const { appointmentId } = route.params;
@@ -102,8 +102,7 @@ export default function AppointmentDetailScreen({ route, navigation }) {
             <View>
               <Text variant="labelSmall" style={styles.label}>Service</Text>
               {(() => {
-                const type = appointment.bookingType || appointment.type || appointment.appointmentType;
-                const typeInfo = APPOINTMENT_TYPES[type] || { label: type || 'كشف', color: '#757575', bg: '#f5f5f5' };
+                const typeInfo = getAppointmentTypeInfo(appointment);
                 return (
                   <Chip 
                     mode="flat" 

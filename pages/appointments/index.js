@@ -43,11 +43,10 @@ import {
   getDocs,
   query,
   where,
-  doc,
-  updateDoc,
-  serverTimestamp,
   getDoc,
 } from 'firebase/firestore';
+import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
+import { toDayKey } from '@/lib/dates';
 
 /* ---------------- utils ---------------- */
 
@@ -75,10 +74,7 @@ function normStatus(x) {
 
 function isToday(d) {
   if (!d) return false;
-  const now = new Date();
-  return d.getFullYear() === now.getFullYear()
-    && d.getMonth() === now.getMonth()
-    && d.getDate() === now.getDate();
+  return toDayKey(d, "Africa/Cairo") === getTodayEgyptDate();
 }
 
 function formatTime(d) {
@@ -436,39 +432,26 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
             })()}
           </Box>
           {/* Appointment Type Badge */}
-          {appt?.appointmentType === 'followup' ? (
-            <Chip
-              size="small"
-              label={isArabic ? 'إعادة كشف' : 'Re-examination'}
-              sx={{
-                borderRadius: 2.5,
-                height: 28,
-                bgcolor: 'rgba(156, 39, 176, 0.15)',
-                color: 'secondary.main',
-                fontWeight: 800,
-                border: '2px solid',
-                borderColor: 'secondary.main',
-                fontSize: '0.75rem',
-                boxShadow: '0 2px 8px rgba(156, 39, 176, 0.2)',
-              }}
-            />
-          ) : (
-            <Chip
-              size="small"
-              label={isArabic ? 'كشف' : 'Checkup'}
-              sx={{
-                borderRadius: 2.5,
-                height: 28,
-                bgcolor: 'rgba(25, 118, 210, 0.15)',
-                color: 'primary.main',
-                fontWeight: 800,
-                border: '2px solid',
-                borderColor: 'primary.main',
-                fontSize: '0.75rem',
-                boxShadow: '0 2px 8px rgba(25, 118, 210, 0.2)',
-              }}
-            />
-          )}
+          {(() => {
+            const typeInfo = getAppointmentTypeInfo(appt, isArabic);
+            return (
+              <Chip
+                size="small"
+                label={typeInfo.label}
+                sx={{
+                  borderRadius: 2.5,
+                  height: 28,
+                  bgcolor: typeInfo.bgcolor,
+                  color: typeInfo.textColor,
+                  fontWeight: 800,
+                  border: '2px solid',
+                  borderColor: typeInfo.border,
+                  fontSize: '0.75rem',
+                  boxShadow: `0 2px 8px ${typeInfo.color === 'secondary' ? 'rgba(156, 39, 176, 0.2)' : 'rgba(25, 118, 210, 0.2)'}`,
+                }}
+              />
+            );
+          })()}
           {clinicLabel ? (
             <Chip
               size="small"

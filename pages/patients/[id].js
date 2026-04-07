@@ -37,6 +37,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
 import AddLabReportDialog from '@/components/reports/AddLabReportDialog';
+import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 
 /* ---------------- utils ---------------- */
 function toDate(val) {
@@ -1913,6 +1914,25 @@ export default function PatientDetailsPage() {
                                 <Typography variant="body2" color="text.secondary">
                                   {a?.doctorName_en || a?.doctorName_ar || label('Doctor', 'طبيب')}
                                 </Typography>
+                                {/* Appointment Type Badge */}
+                                {(() => {
+                                  const typeInfo = getAppointmentTypeInfo(a, isArabic);
+                                  return (
+                                    <Chip 
+                                      size="small"
+                                      label={typeInfo.label} 
+                                      sx={{ 
+                                        height: 20, 
+                                        fontSize: '0.65rem',
+                                        bgcolor: typeInfo.bgcolor,
+                                        color: typeInfo.textColor,
+                                        fontWeight: 700,
+                                        border: '1px solid',
+                                        borderColor: typeInfo.border
+                                      }} 
+                                    />
+                                  );
+                                })()}
                                 {/* Source Badge */}
                                 {(() => {
                                   const source = String(a?.source || '').trim();

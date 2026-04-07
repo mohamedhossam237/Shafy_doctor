@@ -38,6 +38,8 @@ import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, orderBy, limit } from 'firebase/firestore';
 import AddPatientDialog from '@/components/patients/AddPatientDialog';
+import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
+import { toDayKey } from '@/lib/dates';
 
 /* --------------------------- Helpers --------------------------- */
 
@@ -67,12 +69,7 @@ function toDate(val) {
 
 function isToday(d) {
   if (!d) return false;
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
+  return toDayKey(d, "Africa/Cairo") === getTodayEgyptDate();
 }
 
 function formatTime(d) {
@@ -737,12 +734,24 @@ function AppointmentItem({ appt, isArabic, withLang, index, isLast, hasAmHours }
             )}
           </Stack>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" color="text.secondary">
-              {isArabic ? 'كشف' : 'Consultation'}
-            </Typography>
-            {appt?.appointmentType === 'followup' && (
-              <Chip label={isArabic ? 'إعادة' : 'Re-exam'} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: '0.65rem' }} />
-            )}
+            {(() => {
+              const typeInfo = getAppointmentTypeInfo(appt, isArabic);
+              return (
+                <Chip 
+                  label={typeInfo.label} 
+                  size="small" 
+                  sx={{ 
+                    height: 20, 
+                    fontSize: '0.65rem',
+                    bgcolor: typeInfo.bgcolor,
+                    color: typeInfo.textColor,
+                    fontWeight: 700,
+                    border: '1px solid',
+                    borderColor: typeInfo.border
+                  }} 
+                />
+              );
+            })()}
             {/* Source Badge */}
             {(() => {
               const source = String(appt?.source || '').trim();
@@ -1281,8 +1290,8 @@ export default function DashboardIndexPage() {
             return; // Skip non-revenue appointments
           }
 
-          const appointmentType = String(r.appointmentType || '').toLowerCase();
-          const isFollowUp = appointmentType === 'followup' || appointmentType === 'recheck' || appointmentType === 'follow-up';
+          const typeInfo = getAppointmentTypeInfo(r, false);
+          const isFollowUp = typeInfo.color === 'secondary';
           
           // Calculate additional fees first
           let extra = Number(r.additionalFees || 0);
