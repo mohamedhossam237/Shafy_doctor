@@ -169,16 +169,16 @@ export default function AddPatientModal({ visible, onDismiss, onSaved }) {
               {showRelationPicker && (
                 <Surface style={styles.relationPicker} elevation={1}>
                   <Text variant="labelLarge" style={styles.pickerLabel}>
-                    Phone exists. Select relationship:
+                    الرقم مسجل بالفعل. اختر صلة القرابة:
                   </Text>
                   <SegmentedButtons
                     value={form.familyRelation}
                     onValueChange={v => setForm(f => ({...f, familyRelation: v}))}
                     buttons={[
-                      { value: 'son', label: 'Son' },
-                      { value: 'wife', label: 'Wife' },
-                      { value: 'mom', label: 'Mom' },
-                      { value: 'dad', label: 'Dad' },
+                      { value: 'son', label: 'إبن' },
+                      { value: 'wife', label: 'زوجة' },
+                      { value: 'mom', label: 'أم' },
+                      { value: 'dad', label: 'أب' },
                     ]}
                     density="compact"
                   />

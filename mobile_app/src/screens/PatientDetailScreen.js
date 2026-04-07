@@ -10,6 +10,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import dayjs from 'dayjs';
 import EditPatientModal from '../components/EditPatientModal';
+import { getRelationLabel } from '../lib/utils';
 
 export default function PatientDetailScreen({ route, navigation }) {
   const { patientId } = route.params;
@@ -77,11 +78,11 @@ export default function PatientDetailScreen({ route, navigation }) {
           <View style={styles.nameContainer}>
             <Text variant="headlineSmall" style={styles.name}>{patient?.name}</Text>
             <View style={styles.badgeRow}>
-              {patient?.familyRelation && patient.familyRelation !== 'himself' && (
+              {getRelationLabel(patient?.familyRelation) ? (
                 <Chip style={styles.relationChip} textStyle={{ fontSize: 10 }}>
-                  {patient.familyRelation.toUpperCase()}
+                  {getRelationLabel(patient?.familyRelation)}
                 </Chip>
-              )}
+              ) : null}
               <Text style={styles.idText}>ID: {patient?.id?.slice(-6)}</Text>
             </View>
           </View>

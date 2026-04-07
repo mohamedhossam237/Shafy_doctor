@@ -6,11 +6,7 @@ import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'f
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 
-function getRelationLabel(relation) {
-  if (!relation || relation === 'himself') return '';
-  const map = { son: 'Son', wife: 'Wife', mom: 'Mom', dad: 'Dad' };
-  return ` (${map[relation] || relation})`;
-}
+import { getRelationLabel } from '../lib/utils';
 
 export default function DashboardScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -54,11 +50,12 @@ export default function DashboardScreen({ navigation }) {
   const renderAppointment = ({ item }) => {
     const initials = item.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
     const relLabel = getRelationLabel(item.familyRelation);
+    const displayTitle = relLabel ? `${item.patientName} (${relLabel})` : item.patientName;
     
     return (
       <Card key={item.id} style={styles.appointmentCard}>
         <Card.Title
-          title={`${item.patientName}${relLabel}`}
+          title={displayTitle}
           subtitle={`${item.time || '--:--'} - ${item.appointmentType || 'Consultation'}`}
           left={(props) => <Avatar.Text {...props} label={initials} size={40} />}
           right={(props) => (

@@ -13,6 +13,7 @@ import {
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import dayjs from 'dayjs';
+import { getRelationLabel } from '../lib/utils';
 
 // Helpers
 const pad = (n) => String(n).padStart(2, "0");
@@ -126,6 +127,20 @@ export default function NewAppointmentScreen({ navigation, route }) {
 
     setSubmitting(true);
     try {
+      // Check if patient already has an appointment today for this doctor
+      const dupQ = query(
+        collection(db, 'appointments'),
+        where('doctorId', '==', user.uid),
+        where('patientId', '==', selectedPatient.id),
+        where('date', '==', dateStr)
+      );
+      const dupSnap = await getDocs(dupQ);
+      if (!dupSnap.empty) {
+        Alert.alert('Duplicate Booking', 'This patient already has an appointment today.');
+        setSubmitting(false);
+        return;
+      }
+
       const payload = {
         doctorId: user.uid,
         doctorName_en: doctor?.name_en || '',
@@ -155,7 +170,10 @@ export default function NewAppointmentScreen({ navigation, route }) {
     }
   };
 
-  const filteredPatients = patients.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredPatients = patients.filter(p => 
+    p.name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    p.phone?.includes(searchQuery)
+  );
 
   if (loading) return <ActivityIndicator style={{ flex: 1 }} />;
 
@@ -288,17 +306,20 @@ export default function NewAppointmentScreen({ navigation, route }) {
           <FlatList
             data={filteredPatients}
             keyExtractor={item => item.id}
-            renderItem={({ item }) => (
-              <List.Item
-                title={item.name}
-                subtitle={item.phone}
-                onPress={() => {
-                  setSelectedPatient(item);
-                  setShowPatientSearch(false);
-                }}
-                left={p => <Avatar.Text {...p} label={item.name[0]} size={40} />}
-              />
-            )}
+            renderItem={({ item }) => {
+              const rel = getRelationLabel(item.familyRelation);
+              return (
+                <List.Item
+                  title={rel ? `${item.name} (${rel})` : item.name}
+                  subtitle={item.phone}
+                  onPress={() => {
+                    setSelectedPatient(item);
+                    setShowPatientSearch(false);
+                  }}
+                  left={p => <Avatar.Text {...p} label={item.name[0]} size={40} />}
+                />
+              );
+            }}
             style={{ maxHeight: 400 }}
           />
         </Modal>

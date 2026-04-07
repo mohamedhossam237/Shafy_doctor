@@ -5,6 +5,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import AddPatientModal from '../components/AddPatientModal';
+import { getRelationLabel } from '../lib/utils';
 
 export default function PatientsScreen({ navigation }) {
   const { user } = useAuth();
@@ -53,11 +54,11 @@ export default function PatientsScreen({ navigation }) {
           left={(props) => <Avatar.Text {...props} label={initials} size={40} />}
           right={(props) => (
             <View style={styles.chipsRow}>
-              {item.familyRelation && item.familyRelation !== 'himself' && (
+              {getRelationLabel(item.familyRelation) ? (
                 <Chip size="small" style={styles.relChip} textStyle={{ fontSize: 10 }}>
-                  {item.familyRelation.toUpperCase()}
+                  {getRelationLabel(item.familyRelation)}
                 </Chip>
-              )}
+              ) : null}
             </View>
           )}
         />
