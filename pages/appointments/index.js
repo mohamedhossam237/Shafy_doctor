@@ -43,6 +43,9 @@ import {
   getDocs,
   query,
   where,
+  doc,
+  updateDoc,
+  serverTimestamp,
   getDoc,
 } from 'firebase/firestore';
 import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';

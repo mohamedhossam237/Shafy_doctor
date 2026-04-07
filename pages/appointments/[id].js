@@ -27,6 +27,7 @@ import ExtraFeeDialog from '@/components/reports/ExtraFeeDialog';
 import WhatsAppNotifyDialog from '@/components/reports/WhatsAppNotifyDialog';
 import { db } from '@/lib/firebase';
 import {
+  doc, getDoc, getDocs, query, where,
   updateDoc, serverTimestamp, collection
 } from 'firebase/firestore';
 import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
