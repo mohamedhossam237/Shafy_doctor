@@ -13,7 +13,7 @@ import {
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import dayjs from 'dayjs';
-import { getRelationLabel } from '../lib/utils';
+import { getRelationLabel, getTodayString } from '../lib/utils';
 
 // Helpers
 const pad = (n) => String(n).padStart(2, "0");
@@ -32,7 +32,7 @@ export default function NewAppointmentScreen({ navigation, route }) {
   // Form State
   const [selectedPatient, setSelectedPatient] = useState(route?.params?.patient || null);
   const [selectedClinicId, setSelectedClinicId] = useState('');
-  const [dateStr, setDateStr] = useState(dayjs().format('YYYY-MM-DD'));
+  const [dateStr, setDateStr] = useState(getTodayString());
   const [timeStr, setTimeStr] = useState('');
   const [type, setType] = useState('checkup');
   const [fees, setFees] = useState('');

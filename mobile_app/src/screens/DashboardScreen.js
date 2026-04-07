@@ -6,7 +6,7 @@ import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'f
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 
-import { getRelationLabel, format12h, APPOINTMENT_TYPES } from '../lib/utils';
+import { getRelationLabel, format12h, APPOINTMENT_TYPES, getTodayString } from '../lib/utils';
 
 export default function DashboardScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -35,7 +35,7 @@ export default function DashboardScreen({ navigation }) {
     return () => unsubscribe();
   }, [user]);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayString();
   const todayApps = appointments.filter(a => a.date === today);
   const confirmedApps = todayApps.filter(a => a.status === 'confirmed');
 
