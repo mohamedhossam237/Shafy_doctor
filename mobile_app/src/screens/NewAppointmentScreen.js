@@ -93,7 +93,8 @@ export default function NewAppointmentScreen({ navigation, route }) {
     const [startH, startM] = startS.split(':').map(Number);
     const [endH, endM] = endS.split(':').map(Number);
     
-    const step = doctor?.slotMinutes || 30;
+    // Check working_hours duration first, then root doctor duration
+    const step = hours.appointmentDuration || doctor?.appointmentDuration || doctor?.slotMinutes || 30;
     const slots = [];
     let current = startH * 60 + startM;
     const end = endH * 60 + endM;
@@ -256,7 +257,7 @@ export default function NewAppointmentScreen({ navigation, route }) {
                   onPress={() => setTimeStr(s)}
                   style={[styles.slot, timeStr === s && { backgroundColor: theme.colors.primary, borderColor: theme.colors.primary }]}
                 >
-                  <Text style={[styles.slotText, timeStr === s && { color: '#fff' }]}>{s}</Text>
+                  <Text style={[styles.slotText, timeStr === s && { color: '#fff' }]}>{format12h(s, true)}</Text>
                 </TouchableOpacity>
               ))
             ) : (

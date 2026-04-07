@@ -6,7 +6,7 @@ import { collection, query, where, onSnapshot, orderBy, doc, updateDoc } from 'f
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 
-import { getRelationLabel } from '../lib/utils';
+import { getRelationLabel, format12h, APPOINTMENT_TYPES } from '../lib/utils';
 
 export default function DashboardScreen({ navigation }) {
   const { user, signOut } = useAuth();
@@ -51,24 +51,34 @@ export default function DashboardScreen({ navigation }) {
     const initials = item.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
     const relLabel = getRelationLabel(item.familyRelation);
     const displayTitle = relLabel ? `${item.patientName} (${relLabel})` : item.patientName;
+    const typeInfo = APPOINTMENT_TYPES[item.appointmentType] || { label: item.appointmentType || 'Consultation', color: '#757575', bg: '#f5f5f5' };
     
     return (
       <Card key={item.id} style={styles.appointmentCard}>
         <Card.Title
           title={displayTitle}
-          subtitle={`${item.time || '--:--'} - ${item.appointmentType || 'Consultation'}`}
+          subtitle={format12h(item.time, true)}
           left={(props) => <Avatar.Text {...props} label={initials} size={40} />}
           right={(props) => (
-            <Chip 
-              mode="flat" 
-              style={[
-                styles.statusChip, 
-                { backgroundColor: item.status === 'confirmed' ? '#e8f5e9' : '#fff3e0' }
-              ]}
-              textStyle={{ color: item.status === 'confirmed' ? '#2e7d32' : '#ed6c02', fontSize: 10 }}
-            >
-              {item.status?.toUpperCase() || 'BOOKED'}
-            </Chip>
+            <View style={styles.rightActions}>
+              <Chip 
+                mode="flat" 
+                style={[styles.typeChip, { backgroundColor: typeInfo.bg, marginRight: 8 }]}
+                textStyle={{ color: typeInfo.color, fontSize: 10, fontWeight: 'bold' }}
+              >
+                {typeInfo.label}
+              </Chip>
+              <Chip 
+                mode="flat" 
+                style={[
+                  styles.statusChip, 
+                  { backgroundColor: item.status === 'confirmed' ? '#e8f5e9' : '#fff3e0' }
+                ]}
+                textStyle={{ color: item.status === 'confirmed' ? '#2e7d32' : '#ed6c02', fontSize: 10 }}
+              >
+                {item.status?.toUpperCase() || 'BOOKED'}
+              </Chip>
+            </View>
           )}
         />
         <Card.Actions>
@@ -209,6 +219,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   statusChip: {
+    borderRadius: 8,
+    height: 24,
+  },
+  rightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  typeChip: {
     borderRadius: 8,
     height: 24,
   },
