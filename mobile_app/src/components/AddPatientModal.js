@@ -25,11 +25,7 @@ export default function AddPatientModal({ visible, onDismiss, onSaved }) {
   const [errors, setErrors] = useState({});
   const [linkedTo, setLinkedTo] = useState(null);
 
-  const normalizePhone = (raw = '') => {
-    const d = raw.replace(/\D/g, '');
-    let digits = d.replace(/^0+/, '');
-    return digits.startsWith('20') ? `+${digits}` : `+20${digits}`;
-  };
+  const normalizePhone = (raw = '') => String(raw || '').trim().replace(/[^\d+]/g, '');
 
   const validate = () => {
     const newErrors = {};
@@ -51,7 +47,7 @@ export default function AddPatientModal({ visible, onDismiss, onSaved }) {
       // 1. Check Name Uniqueness
       const nameQ = query(
         patientsCol,
-        where('associatedDoctors', 'array-contains', user.uid),
+        where('registeredBy', '==', user.uid),
         where('name', '==', form.name.trim())
       );
       const nameSnap = await getDocs(nameQ);
@@ -65,7 +61,7 @@ export default function AddPatientModal({ visible, onDismiss, onSaved }) {
       if (!showRelationPicker) {
         const phoneQ = query(
           patientsCol,
-          where('associatedDoctors', 'array-contains', user.uid),
+          where('registeredBy', '==', user.uid),
           where('phone', '==', normalizedPhone)
         );
         const phoneSnap = await getDocs(phoneQ);
@@ -80,13 +76,20 @@ export default function AddPatientModal({ visible, onDismiss, onSaved }) {
 
       // 3. Save
       const payload = {
-        ...form,
         name: form.name.trim(),
+        name_ar: form.name.trim(),
+        name_en: '',
         phone: normalizedPhone,
+        mobile: normalizedPhone,
         age: form.age ? Number(form.age) : null,
+        gender: form.gender,
+        familyRelation: form.familyRelation,
         associatedDoctors: [user.uid],
+        associated_doctors: [user.uid],
         registeredBy: user.uid,
+        registered_by: user.uid,
         linkedTo: linkedTo || null,
+        preferredLanguage: 'ar',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };

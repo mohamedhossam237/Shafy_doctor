@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Platform, TouchableOpacity, Alert, Linking } from 'react-native';
 import { 
   Text, TextInput, Button, IconButton, Surface, 
   useTheme, Divider, ActivityIndicator, Chip,
@@ -13,11 +13,16 @@ import {
 import { db } from '../lib/firebase';
 import { useAuth } from '../providers/AuthProvider';
 import dayjs from 'dayjs';
-import { getRelationLabel, getTodayString } from '../lib/utils';
+import { getRelationLabel, getTodayString, normalizePhoneForWhatsApp, generateWhatsAppMessage } from '../lib/utils';
 
 // Helpers
 const pad = (n) => String(n).padStart(2, "0");
+const mins = (hhmm) => {
+  const [h = 0, m = 0] = String(hhmm).split(':').map(x => parseInt(x, 10) || 0);
+  return h * 60 + m;
+};
 const weekdayKey = (date) => ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][date.getDay()];
+const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 export default function NewAppointmentScreen({ navigation, route }) {
   const theme = useTheme();
@@ -55,10 +60,25 @@ export default function NewAppointmentScreen({ navigation, route }) {
       // 1. Fetch Doctor
       const docSnap = await getDoc(doc(db, 'doctors', user.uid));
       if (docSnap.exists()) {
-        const d = docSnap.data();
+        const d = ({ id: docSnap.id, ...docSnap.data() });
         setDoctor(d);
-        setClinics(d.clinics || []);
-        if (d.clinics?.length === 1) setSelectedClinicId(d.clinics[0].id);
+        const clns = d.clinics || [];
+        setClinics(clns);
+
+        // Smart Clinic Selection (Assistant App logic)
+        const now = new Date();
+        const nowMins = now.getHours() * 60 + now.getMinutes();
+        const todayKey = weekdayKey(now);
+        
+        let defaultClinic = clns.find(c => {
+          const hours = c.working_hours || {};
+          const range = hours[todayKey];
+          if (!range) return false;
+          const [startS, endS] = range.split('-');
+          return nowMins >= mins(startS) && nowMins < mins(endS);
+        }) || clns[0] || null;
+
+        if (defaultClinic) setSelectedClinicId(defaultClinic.id);
       }
       
       // 2. Fetch Patients
@@ -93,7 +113,6 @@ export default function NewAppointmentScreen({ navigation, route }) {
     const [startH, startM] = startS.split(':').map(Number);
     const [endH, endM] = endS.split(':').map(Number);
     
-    // Check working_hours duration first, then root doctor duration
     const step = hours.appointmentDuration || doctor?.appointmentDuration || doctor?.slotMinutes || 30;
     const slots = [];
     let current = startH * 60 + startM;
@@ -104,21 +123,28 @@ export default function NewAppointmentScreen({ navigation, route }) {
       current += step;
     }
 
-    // Filter booked
+    // Filter booked (Any patient)
     const q = query(
       collection(db, 'appointments'),
       where('doctorId', '==', user.uid),
-      where('date', '==', dateStr)
+      where('date', '==', dateStr),
+      where('clinicId', '==', selectedClinicId)
     );
     const snap = await getDocs(q);
-    const booked = snap.docs.map(doc => doc.data().time);
+    const booked = snap.docs
+      .filter(d => d.data().status !== 'cancelled')
+      .map(doc => doc.data().time);
     setAvailableSlots(slots.filter(s => !booked.includes(s)));
   };
 
+  const basePrice = useMemo(() => {
+    if (!doctor) return 0;
+    return type === 'checkup' ? (doctor.checkupPrice || doctor.visitPrice || 0) : (doctor.followUpPrice || 0);
+  }, [doctor, type]);
+
   const totalAmount = useMemo(() => {
-    const base = type === 'checkup' ? (doctor?.checkupPrice || 0) : (doctor?.followUpPrice || 0);
-    return Number(base) + Number(fees || 0);
-  }, [doctor, type, fees]);
+    return Number(basePrice) + Number(fees || 0);
+  }, [basePrice, fees]);
 
   const handleBook = async () => {
     if (!selectedPatient || !timeStr || !selectedClinicId) {
@@ -128,7 +154,24 @@ export default function NewAppointmentScreen({ navigation, route }) {
 
     setSubmitting(true);
     try {
-      // Check if patient already has an appointment today for this doctor
+      // 1. Check if ANYONE already booked this slot (Double check)
+      const slotQ = query(
+        collection(db, 'appointments'),
+        where('doctorId', '==', user.uid),
+        where('date', '==', dateStr),
+        where('time', '==', timeStr),
+        where('clinicId', '==', selectedClinicId)
+      );
+      const slotSnap = await getDocs(slotQ);
+      const isTaken = slotSnap.docs.some(d => d.data().status !== 'cancelled');
+      if (isTaken) {
+        Alert.alert('Conflict', 'This time slot was just taken by someone else.');
+        setSubmitting(false);
+        calculateSlots();
+        return;
+      }
+
+      // 2. Check if THIS patient has appointment today
       const dupQ = query(
         collection(db, 'appointments'),
         where('doctorId', '==', user.uid),
@@ -136,17 +179,25 @@ export default function NewAppointmentScreen({ navigation, route }) {
         where('date', '==', dateStr)
       );
       const dupSnap = await getDocs(dupQ);
-      if (!dupSnap.empty) {
-        Alert.alert('Duplicate Booking', 'This patient already has an appointment today.');
+      const hasDup = dupSnap.docs.some(d => d.data().status !== 'cancelled');
+      if (hasDup) {
+        Alert.alert('Duplicate Booking', 'This patient already has an appointment今天.');
         setSubmitting(false);
         return;
       }
 
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const [hh, mn] = timeStr.split(':').map(Number);
+      const appointmentDate = new Date(y, m - 1, d, hh, mn);
+
       const payload = {
         doctorId: user.uid,
+        doctorUID: user.uid,
         doctorName_en: doctor?.name_en || '',
+        doctorName_ar: doctor?.name_ar || '',
         date: dateStr,
         time: timeStr,
+        appointmentDate,
         appointmentType: type,
         bookingType: type,
         type: type,
@@ -155,14 +206,32 @@ export default function NewAppointmentScreen({ navigation, route }) {
         patientPhone: selectedPatient.phone,
         familyRelation: selectedPatient.familyRelation || 'himself',
         clinicId: selectedClinicId,
-        totalAmount,
+        basePrice: Number(basePrice),
         additionalFees: Number(fees || 0),
+        extraCost: Number(fees || 0),
+        extraReason: feesReason,
+        totalAmount,
+        totalCost: totalAmount,
         status: 'confirmed',
         source: 'Mobile_App',
         createdAt: serverTimestamp(),
       };
 
       await addDoc(collection(db, 'appointments'), payload);
+      
+      // WhatsApp Integration (Assistant App logic)
+      const phone = normalizePhoneForWhatsApp(selectedPatient.phone);
+      if (phone) {
+        const msg = generateWhatsAppMessage(
+          doctor?.name_ar || '', 
+          doctor?.name_en || '', 
+          dateStr, 
+          timeStr, 
+          selectedPatient.name
+        );
+        Linking.openURL(`https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`);
+      }
+
       Alert.alert('Success', 'Appointment booked successfully!');
       navigation.goBack();
     } catch (err) {
