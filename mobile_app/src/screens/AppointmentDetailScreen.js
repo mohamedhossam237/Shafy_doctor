@@ -42,7 +42,7 @@ export default function AppointmentDetailScreen({ route, navigation }) {
   if (loading) return <ActivityIndicator style={{ flex: 1 }} />;
   if (!appointment) return <Text>Appointment not found</Text>;
 
-  const initials = appointment.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  const initials = (appointment.patientName || '').split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   return (
     <ScrollView style={styles.container}>
@@ -162,6 +162,7 @@ const styles = StyleSheet.create({
   content: { padding: 16 },
   statusRow: { alignItems: 'center', marginBottom: 20 },
   statusChip: { paddingHorizontal: 10 },
+  serviceChip: { borderRadius: 8, height: 26 },
   patientCard: { backgroundColor: '#fff', borderRadius: 20, padding: 16, marginBottom: 20 },
   patientInfo: { flexDirection: 'row', alignItems: 'center' },
   patientNameContainer: { marginLeft: 15, flex: 1 },

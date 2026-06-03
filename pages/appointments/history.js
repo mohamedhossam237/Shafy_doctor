@@ -40,7 +40,7 @@ import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 
 /* ---------------- utils (unify date/time across shapes) ---------------- */
@@ -580,12 +580,24 @@ export default function AppointmentsHistoryPage() {
         setClinics([]);
       }
 
-      // Load all appointments for this doctor (both shapes)
+      // Load all appointments for this doctor (both shapes), limiting to last 6 months by default with fallback
       const col = collection(db, 'appointments');
-      const [snapA, snapB] = await Promise.all([
-        getDocs(query(col, where('doctorId', '==', user.uid))),
-        getDocs(query(col, where('doctorUID', '==', user.uid))),
-      ]);
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+      let snapA, snapB;
+      try {
+        [snapA, snapB] = await Promise.all([
+          getDocs(query(col, where('doctorId', '==', user.uid), where('appointmentDate', '>=', sixMonthsAgo))),
+          getDocs(query(col, where('doctorUID', '==', user.uid), where('appointmentDate', '>=', sixMonthsAgo))),
+        ]);
+      } catch (err) {
+        console.warn("Index not found for history range query, falling back to capped fetch:", err);
+        [snapA, snapB] = await Promise.all([
+          getDocs(query(col, where('doctorId', '==', user.uid), limit(300))),
+          getDocs(query(col, where('doctorUID', '==', user.uid), limit(300))),
+        ]);
+      }
 
       // Merge + dedupe
       const map = new Map();

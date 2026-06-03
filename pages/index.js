@@ -36,10 +36,13 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc, orderBy, limit } from 'firebase/firestore';
-import AddPatientDialog from '@/components/patients/AddPatientDialog';
+import { collection, query, where, getDocs, doc, getDoc, orderBy, limit, getCountFromServer } from 'firebase/firestore';
 import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
 import { toDayKey } from '@/lib/dates';
+
+const AddPatientDialog = dynamic(() => import('@/components/patients/AddPatientDialog'), {
+  ssr: false,
+});
 
 /* --------------------------- Helpers --------------------------- */
 
@@ -1138,14 +1141,48 @@ export default function DashboardIndexPage() {
         });
         setHasAmHours(foundAm);
 
+        // Weekly Data (last 7 days)
+        const last7Days = Array.from({ length: 7 }, (_, i) => {
+          const d = new Date();
+          d.setDate(d.getDate() - (6 - i));
+          return d;
+        });
+
+        const pad = (n) => String(n).padStart(2, "0");
+        const dateStrings = last7Days.map(day => `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`);
+
         // appointments
         const colAppt = collection(db, 'appointments');
-        const [snapOld, snapNew] = await Promise.all([
-          getDocs(query(colAppt, where('doctorUID', '==', doctorUID))),
-          getDocs(query(colAppt, where('doctorId', '==', doctorUID))),
+        
+        // 1. Fetch using index-free equality field
+        const [snapOldDate, snapNewDate] = await Promise.all([
+          getDocs(query(colAppt, where('doctorUID', '==', doctorUID), where('date', 'in', dateStrings))),
+          getDocs(query(colAppt, where('doctorId', '==', doctorUID), where('date', 'in', dateStrings))),
         ]);
+
+        // 2. Fetch using weekly range query on appointmentDate (with try-catch fallback)
+        const weekYMD = dateStrings[0];
+        const startOfWeekly = new Date(`${weekYMD}T00:00:00+03:00`);
+        let snapOldRange = [];
+        let snapNewRange = [];
+        try {
+          const [sOld, sNew] = await Promise.all([
+            getDocs(query(colAppt, where('doctorUID', '==', doctorUID), where('appointmentDate', '>=', startOfWeekly))),
+            getDocs(query(colAppt, where('doctorId', '==', doctorUID), where('appointmentDate', '>=', startOfWeekly))),
+          ]);
+          snapOldRange = sOld.docs;
+          snapNewRange = sNew.docs;
+        } catch (err) {
+          console.warn("Index not found for weekly appointmentDate query, relying on dateStrings query:", err);
+        }
+
         const apptMap = new Map();
-        [...snapOld.docs, ...snapNew.docs].forEach((d) => apptMap.set(d.id, { id: d.id, ...d.data() }));
+        [
+          ...snapOldDate.docs,
+          ...snapNewDate.docs,
+          ...snapOldRange,
+          ...snapNewRange
+        ].forEach((d) => apptMap.set(d.id, { id: d.id, ...d.data() }));
         let rows = Array.from(apptMap.values()).map((r) => ({ ...r, _dt: apptDate(r) }));
 
         // Deduplicate logically: same patient + same time
@@ -1197,13 +1234,6 @@ export default function DashboardIndexPage() {
           .slice(0, 4);
         setAppointments(upcoming);
 
-        // Weekly Data (last 7 days)
-        const last7Days = Array.from({ length: 7 }, (_, i) => {
-          const d = new Date();
-          d.setDate(d.getDate() - (6 - i));
-          return d;
-        });
-
         const weeklyStats = last7Days.map(day => {
           const dayStr = day.toLocaleDateString('en-CA'); // YYYY-MM-DD
           const count = rows.filter(r => {
@@ -1224,30 +1254,60 @@ export default function DashboardIndexPage() {
         const pSnap = await getDocs(pQuery);
         setRecentPatients(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-        // Total Patients Count (approximate for now, using previous logic)
-        const [snapAssoc, snapReg] = await Promise.all([
-          getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', doctorUID))),
-          getDocs(query(patientsCol, where('registeredBy', '==', doctorUID))),
-        ]);
-        const patientMap = new Map();
-        [...snapAssoc.docs, ...snapReg.docs].forEach((d) =>
-          patientMap.set(d.id, { id: d.id, ...d.data() })
-        );
-        const visiblePatientsCount = patientMap.size;
+        // Total Patients Count (server-side counting)
+        let visiblePatientsCount = 0;
+        try {
+          const countSnap = await getCountFromServer(query(patientsCol, where('associatedDoctors', 'array-contains', doctorUID)));
+          visiblePatientsCount = countSnap.data().count;
+        } catch (e) {
+          console.error("Failed to get patients count server-side, falling back to full fetch:", e);
+          const [snapAssoc, snapReg] = await Promise.all([
+            getDocs(query(patientsCol, where('associatedDoctors', 'array-contains', doctorUID))),
+            getDocs(query(patientsCol, where('registeredBy', '==', doctorUID))),
+          ]);
+          const patientMap = new Map();
+          [...snapAssoc.docs, ...snapReg.docs].forEach((d) =>
+            patientMap.set(d.id, { id: d.id, ...d.data() })
+          );
+          visiblePatientsCount = patientMap.size;
+        }
 
         // Recent Reports
         const colRep = collection(db, 'reports');
-        const rQuery = query(colRep, where('doctorUID', '==', doctorUID), orderBy('createdAt', 'desc'), limit(5));
-        // Note: if 'createdAt' is missing on some reports, this might fail or return empty. 
-        // Fallback to client-side sort if needed, but let's try query first.
-        // Actually, let's stick to the previous logic of fetching all and sorting client side for reports to be safe, 
-        // but limit to 5 for the UI.
-        const [repSnapUID, repSnapId] = await Promise.all([
-          getDocs(query(colRep, where('doctorUID', '==', doctorUID))),
-          getDocs(query(colRep, where('doctorId', '==', doctorUID))),
-        ]);
+        let totalReportsCount = 0;
+        try {
+          const countSnap = await getCountFromServer(query(colRep, where('doctorUID', '==', doctorUID)));
+          totalReportsCount = countSnap.data().count;
+        } catch (e) {
+          console.error("Failed to get reports count server-side:", e);
+        }
+
+        let repDocs = [];
+        try {
+          const [repSnapUID, repSnapId] = await Promise.all([
+            getDocs(query(colRep, where('doctorUID', '==', doctorUID), orderBy('date', 'desc'), limit(5))),
+            getDocs(query(colRep, where('doctorId', '==', doctorUID), orderBy('date', 'desc'), limit(5))),
+          ]);
+          repDocs = [...repSnapUID.docs, ...repSnapId.docs];
+        } catch (err) {
+          console.warn("Index not found for reports orderBy date, falling back to unordered limit:", err);
+          try {
+            const [repSnapUID, repSnapId] = await Promise.all([
+              getDocs(query(colRep, where('doctorUID', '==', doctorUID), limit(20))),
+              getDocs(query(colRep, where('doctorId', '==', doctorUID), limit(20))),
+            ]);
+            repDocs = [...repSnapUID.docs, ...repSnapId.docs];
+          } catch (e2) {
+            const [repSnapUID, repSnapId] = await Promise.all([
+              getDocs(query(colRep, where('doctorUID', '==', doctorUID))),
+              getDocs(query(colRep, where('doctorId', '==', doctorUID))),
+            ]);
+            repDocs = [...repSnapUID.docs, ...repSnapId.docs];
+          }
+        }
+
         const repMap = new Map();
-        [...repSnapUID.docs, ...repSnapId.docs].forEach((d) => repMap.set(d.id, { id: d.id, ...d.data() }));
+        repDocs.forEach((d) => repMap.set(d.id, { id: d.id, ...d.data() }));
         const repRows = Array.from(repMap.values());
         // Sort by date desc
         repRows.sort((a, b) => (toDate(b?.date)?.getTime() || 0) - (toDate(a?.date)?.getTime() || 0));
@@ -1274,7 +1334,7 @@ export default function DashboardIndexPage() {
         setCounts({
           appointments: todayAll.length,
           patients: visiblePatientsCount,
-          reports: repRows.length,
+          reports: totalReportsCount,
         });
 
         // Calculate detailed revenue for today

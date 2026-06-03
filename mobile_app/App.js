@@ -1,4 +1,7 @@
+import React from 'react';
+import { MD3LightTheme, PaperProvider } from 'react-native-paper';
 import { AuthProvider } from './src/providers/AuthProvider';
+import RootNavigator from './src/navigation/RootNavigator';
 
 const theme = {
   ...MD3LightTheme,

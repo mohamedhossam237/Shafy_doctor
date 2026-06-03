@@ -1,11 +1,11 @@
 {
-  "name": "mobile_app",
+  "name": "shafy_doctor",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "dependencies": {
@@ -27,5 +27,8 @@
     "react-native-screens": "~4.16.0",
     "react-native-vector-icons": "^10.3.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "babel-preset-expo": "^55.0.17"
+  }
 }

@@ -62,7 +62,7 @@ export default function PatientDetailScreen({ route, navigation }) {
 
   if (loading) return <ActivityIndicator style={{ flex: 1 }} />;
 
-  const initials = patient?.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  const initials = (patient?.name || '').split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   return (
     <View style={styles.container}>

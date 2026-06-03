@@ -52,12 +52,18 @@ import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 
+import dynamic from 'next/dynamic';
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db, storage } from '@/lib/firebase';
-import AddArticleDialog from '@/components/blogs/AddArticleDialog';
-import AddInfographicDialog from '@/components/blogs/AddInfographicDialog';
+
+const AddArticleDialog = dynamic(() => import('@/components/blogs/AddArticleDialog'), {
+  ssr: false,
+});
+const AddInfographicDialog = dynamic(() => import('@/components/blogs/AddInfographicDialog'), {
+  ssr: false,
+});
 import {
   collection,
   getDocs,

@@ -4,21 +4,27 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, getDocs, query, collection, where, limit as qLimit } from 'firebase/firestore';
+import { Box, CircularProgress } from '@mui/material';
 
 export default function DoctorRouteGuard({ children }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [authorized, setAuthorized] = React.useState(false);
+  const [guardLoading, setGuardLoading] = React.useState(true);
 
   React.useEffect(() => {
+    if (authLoading) return;
+
+    if (!user) {
+      // If there is no session, redirect to login page immediately
+      const q = { ...router.query, lang: (router.query.lang || 'en') };
+      router.replace({ pathname: '/login', query: q });
+      return;
+    }
+
     let cancelled = false;
     const run = async () => {
-      // If there is no session yet, nothing to gate.
-      if (!user) return; // Wait for auth to settle. If user is null, AuthProvider might still be loading or unauthed.
-                         // Usually AuthProvider handles the "loading" state. 
-                         // Assuming user object availability implies we can check role.
-      if (!user.uid) return;
-
+      setGuardLoading(true);
       const uid = user.uid;
       const email = (user.email || '').toLowerCase();
 
@@ -52,13 +58,25 @@ export default function DoctorRouteGuard({ children }) {
              await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
              router.replace('/login');
         }
+      } finally {
+        if (!cancelled) {
+          setGuardLoading(false);
+        }
       }
     };
     run();
     return () => { cancelled = true; };
-  }, [user, router]); // Dependency on user object
+  }, [user, authLoading, router]);
 
-  if (!authorized) return null; // Or a loading spinner
+  if (authLoading || (user && guardLoading && !authorized)) {
+    return (
+      <Box sx={{ display: 'grid', placeItems: 'center', height: '70vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!authorized) return null;
 
   return <>{children}</>;
 }

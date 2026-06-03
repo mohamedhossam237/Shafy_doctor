@@ -21,10 +21,14 @@ import {
   collection, onSnapshot, query, where, addDoc, serverTimestamp
 } from 'firebase/firestore';
 
+import dynamic from 'next/dynamic';
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
 import PatientCard from '@/components/patients/PatientCard';
 import PatientListEmpty from '@/components/patients/PatientListEmpty';
-import AddPatientDialog from '@/components/patients/AddPatientDialog';
+
+const AddPatientDialog = dynamic(() => import('@/components/patients/AddPatientDialog'), {
+  ssr: false,
+});
 
 export default function PatientsIndexPage() {
   const router = useRouter();
@@ -50,50 +54,69 @@ export default function PatientsIndexPage() {
     if (!user?.uid) return;
     setLoading(true);
 
+    let isMounted = true;
+    let unsub1 = null;
+    let unsub2 = null;
+
     try {
       const patientsCol = collection(db, 'patients');
       const q1 = query(patientsCol, where('associatedDoctors', 'array-contains', user.uid));
       const q2 = query(patientsCol, where('registeredBy', '==', user.uid));
 
-      const unsub1 = onSnapshot(q1, (snap1) => {
-        const data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
+      let data1 = [];
+      let data2 = [];
 
-        const unsub2 = onSnapshot(q2, (snap2) => {
-          const data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const updatePatients = () => {
+        if (!isMounted) return;
+        // 🧩 Merge + deduplicate by ID
+        const combined = [...data1, ...data2];
+        const unique = Object.values(
+          combined.reduce((acc, cur) => {
+            acc[cur.id] = cur;
+            return acc;
+          }, {})
+        );
 
-          // 🧩 Merge + deduplicate by ID
-          const combined = [...data1, ...data2];
-          const unique = Object.values(
-            combined.reduce((acc, cur) => {
-              acc[cur.id] = cur;
-              return acc;
-            }, {})
-          );
+        // ✅ Filter only patients with a valid phone number
+        const withPhone = unique.filter(
+          (p) => typeof p.phone === 'string' && p.phone.trim() !== ''
+        );
 
-          // ✅ Filter only patients with a valid phone number
-          const withPhone = unique.filter(
-            (p) => typeof p.phone === 'string' && p.phone.trim() !== ''
-          );
+        // Sort alphabetically
+        withPhone.sort((a, b) =>
+          String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
+        );
 
-          // Sort alphabetically
-          withPhone.sort((a, b) =>
-            String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
-          );
+        setPatients(withPhone);
+        setLoading(false);
+      };
 
-          setPatients(withPhone);
-          setLoading(false);
-        });
+      unsub1 = onSnapshot(q1, (snap1) => {
+        data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updatePatients();
+      }, (err) => {
+        console.error("Error loading associated patients:", err);
+        if (isMounted) setLoading(false);
+      });
 
-        return () => {
-          unsub1();
-          unsub2();
-        };
+      unsub2 = onSnapshot(q2, (snap2) => {
+        data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+        updatePatients();
+      }, (err) => {
+        console.error("Error loading registered patients:", err);
+        if (isMounted) setLoading(false);
       });
     } catch (err) {
       console.error(err);
       setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
       setLoading(false);
     }
+
+    return () => {
+      isMounted = false;
+      if (unsub1) unsub1();
+      if (unsub2) unsub2();
+    };
   }, [user?.uid, isArabic]);
 
   /* ------------------------------------------------------------ */

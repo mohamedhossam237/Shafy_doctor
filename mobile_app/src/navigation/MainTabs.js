@@ -7,6 +7,8 @@ import DashboardScreen from '../screens/DashboardScreen';
 import PatientsScreen from '../screens/PatientsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
+const Tab = createBottomTabNavigator();
+
 export default function MainTabs() {
   const theme = useTheme();
 

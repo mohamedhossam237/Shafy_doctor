@@ -760,16 +760,44 @@ export default function AppointmentsPage() {
 
       try {
         const col = collection(db, 'appointments');
+        const todayStr = getTodayEgyptDate();
+        
+        // Timezone-safe start and end dates for Egypt (between +03:00 and +02:00)
+        const startOfToday = new Date(`${todayStr}T00:00:00+03:00`);
+        const endOfToday = new Date(`${todayStr}T23:59:59+02:00`);
 
-        // Support both field names: doctorUID (old) and doctorId (patient booking)
-        const [snapOld, snapNew] = await Promise.all([
-          getDocs(query(col, where('doctorUID', '==', user.uid))),
-          getDocs(query(col, where('doctorId', '==', user.uid))),
+        // 1. Fetch using index-free equality fields (date and queueDayKey)
+        const [snapOldDate, snapNewDate, snapOldQueue, snapNewQueue] = await Promise.all([
+          getDocs(query(col, where('doctorUID', '==', user.uid), where('date', '==', todayStr))),
+          getDocs(query(col, where('doctorId', '==', user.uid), where('date', '==', todayStr))),
+          getDocs(query(col, where('doctorUID', '==', user.uid), where('queueDayKey', '==', todayStr))),
+          getDocs(query(col, where('doctorId', '==', user.uid), where('queueDayKey', '==', todayStr))),
         ]);
 
-        // Merge and dedupe by id
+        // 2. Fetch using range queries on appointmentDate (requires composite index, so wrap in try-catch fallback)
+        let snapOldRange = [];
+        let snapNewRange = [];
+        try {
+          const [sOld, sNew] = await Promise.all([
+            getDocs(query(col, where('doctorUID', '==', user.uid), where('appointmentDate', '>=', startOfToday), where('appointmentDate', '<=', endOfToday))),
+            getDocs(query(col, where('doctorId', '==', user.uid), where('appointmentDate', '>=', startOfToday), where('appointmentDate', '<=', endOfToday)))
+          ]);
+          snapOldRange = sOld.docs;
+          snapNewRange = sNew.docs;
+        } catch (err) {
+          console.warn("Index not found for appointmentDate range query, relying on equality queries:", err);
+        }
+
+        // Merge and dedupe all documents by ID
         const map = new Map();
-        [...snapOld.docs, ...snapNew.docs].forEach((d) => {
+        [
+          ...snapOldDate.docs,
+          ...snapNewDate.docs,
+          ...snapOldQueue.docs,
+          ...snapNewQueue.docs,
+          ...snapOldRange,
+          ...snapNewRange
+        ].forEach((d) => {
           map.set(d.id, { id: d.id, ...d.data() });
         });
         const initialRows = Array.from(map.values());
@@ -832,7 +860,7 @@ export default function AppointmentsPage() {
           // Update local state
           todayOnly.forEach((r) => {
             if (toUpdate.some((u) => u.id === r.id)) {
-              r.status = 'completed';
+               r.status = 'completed';
             }
           });
         }

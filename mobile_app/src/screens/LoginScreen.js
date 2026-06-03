@@ -1,27 +1,36 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard } from 'react-native';
-import { TextInput, Button, Text, Surface, HelperText } from 'react-native-paper';
-import { LinearGradient } from 'expo-linear-gradient';
+import { View, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Image } from 'react-native';
+import { TextInput, Button, Text, HelperText, useTheme } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function LoginScreen() {
+  const theme = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { emailLogin } = useAuth();
 
   const handleLogin = async () => {
     if (!email || !password) {
-      setError('Please fill in all fields');
+      setError('Please fill all fields');
       return;
     }
     setError('');
     setLoading(true);
     try {
-      await emailLogin(email, password);
+      await emailLogin(email.trim().toLowerCase(), password.trim());
     } catch (err) {
-      setError(err.message || 'Login failed');
+      const code = err?.code;
+      let msg = 'Login failed';
+      if (code === 'auth/invalid-email') msg = 'Invalid email address';
+      else if (code === 'auth/user-not-found') msg = 'User not found';
+      else if (code === 'auth/wrong-password') msg = 'Incorrect password';
+      else if (err?.message) msg = `Login failed: ${err.message}`;
+      
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -30,23 +39,16 @@ export default function LoginScreen() {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={styles.container}>
-        <LinearGradient
-          colors={['#1976d2', '#42a5f5']}
-          style={styles.background}
-        />
-        
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.content}
         >
-          <View style={styles.header}>
-            <Text variant="displaySmall" style={styles.title}>Shafy Doctor</Text>
-            <Text variant="titleMedium" style={styles.subtitle}>Modern Patient Management</Text>
-          </View>
+          <View style={styles.formContainer}>
+            <View style={styles.header}>
+              <MaterialCommunityIcons name="lock-outline" size={32} color={theme.colors.primary} />
+              <Text variant="headlineSmall" style={styles.title}>Sign In</Text>
+            </View>
 
-          <Surface style={styles.card} elevation={4}>
-            <Text variant="headlineSmall" style={styles.cardTitle}>Login</Text>
-            
             <TextInput
               label="Email"
               value={email}
@@ -55,6 +57,7 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               style={styles.input}
+              theme={{ roundness: 8 }}
             />
             
             <TextInput
@@ -62,11 +65,29 @@ export default function LoginScreen() {
               value={password}
               onChangeText={setPassword}
               mode="outlined"
-              secureTextEntry
+              secureTextEntry={!showPassword}
               style={styles.input}
+              theme={{ roundness: 8 }}
+              right={
+                <TextInput.Icon 
+                  icon={showPassword ? "eye-off" : "eye"} 
+                  onPress={() => setShowPassword(!showPassword)}
+                />
+              }
             />
 
-            {error ? <HelperText type="error">{error}</HelperText> : null}
+            {error ? <HelperText type="error" visible={!!error}>{error}</HelperText> : null}
+
+            <View style={styles.forgotPasswordContainer}>
+              <Button
+                mode="text"
+                onPress={() => {}}
+                labelStyle={styles.forgotBtnText}
+                compact
+              >
+                Forgot Password?
+              </Button>
+            </View>
 
             <Button
               mode="contained"
@@ -75,20 +96,11 @@ export default function LoginScreen() {
               disabled={loading}
               style={styles.button}
               contentStyle={styles.buttonContent}
+              labelStyle={styles.buttonLabel}
             >
               Sign In
             </Button>
-            
-            <Button
-              mode="text"
-              onPress={() => {}}
-              style={styles.forgotBtn}
-            >
-              Forgot Password?
-            </Button>
-          </Surface>
-          
-          <Text style={styles.footer}>© 2026 Shafy Inc.</Text>
+          </View>
         </KeyboardAvoidingView>
       </View>
     </TouchableWithoutFeedback>
@@ -98,61 +110,54 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  background: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    height: '100%',
+    backgroundColor: '#ffffff',
   },
   content: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 24,
+  },
+  formContainer: {
+    width: '100%',
+    maxWidth: 400,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 48,
+    marginBottom: 32,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    resizeMode: 'contain',
+    marginBottom: 8,
   },
   title: {
-    color: '#fff',
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  subtitle: {
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 8,
-  },
-  card: {
-    padding: 24,
-    borderRadius: 24,
-    backgroundColor: '#fff',
-  },
-  cardTitle: {
     fontWeight: '700',
-    marginBottom: 24,
-    textAlign: 'center',
-    color: '#1a237e',
+    marginTop: 8,
+    color: '#000000',
   },
   input: {
-    marginBottom: 8,
-    backgroundColor: '#fff',
+    marginBottom: 16,
+    backgroundColor: '#ffffff',
+  },
+  forgotPasswordContainer: {
+    alignItems: 'flex-end',
+    marginBottom: 16,
+  },
+  forgotBtnText: {
+    fontWeight: '700',
+    fontSize: 14,
   },
   button: {
-    marginTop: 16,
-    borderRadius: 12,
+    borderRadius: 8,
+    marginVertical: 4,
   },
   buttonContent: {
     height: 48,
   },
-  forgotBtn: {
-    marginTop: 8,
-  },
-  footer: {
-    textAlign: 'center',
-    color: 'rgba(255,255,255,0.6)',
-    marginTop: 48,
-    fontSize: 12,
+  buttonLabel: {
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

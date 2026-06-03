@@ -48,7 +48,7 @@ export default function DashboardScreen({ navigation }) {
   };
 
   const renderAppointment = ({ item }) => {
-    const initials = item.patientName?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
+    const initials = (item.patientName || '').split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
     const relLabel = getRelationLabel(item.familyRelation);
     const displayTitle = relLabel ? `${item.patientName} (${relLabel})` : item.patientName;
     const typeInfo = getAppointmentTypeInfo(item);
