@@ -39,6 +39,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, orderBy, limit, getCountFromServer } from 'firebase/firestore';
 import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
 import { toDayKey } from '@/lib/dates';
+import globalCache from '@/lib/cache';
 
 const AddPatientDialog = dynamic(() => import('@/components/patients/AddPatientDialog'), {
   ssr: false,
@@ -1112,8 +1113,26 @@ export default function DashboardIndexPage() {
 
   React.useEffect(() => {
     if (!user) return;
+
+    if (globalCache.dashboard) {
+      const c = globalCache.dashboard;
+      setDoctorName(c.doctorName);
+      setAppointments(c.appointments);
+      setHasAmHours(c.hasAmHours);
+      setWeeklyData(c.weeklyData);
+      setDailyRevenue(c.dailyRevenue);
+      setRecentPatients(c.recentPatients);
+      setRecentReports(c.recentReports);
+      setRecentArticles(c.recentArticles);
+      setCounts(c.counts);
+      setRevenueDetails(c.revenueDetails);
+      setLoading(false);
+    }
+
     (async () => {
-      setLoading(true);
+      if (!globalCache.dashboard) {
+        setLoading(true);
+      }
       setErr('');
       try {
         const doctorUID = user.uid;
@@ -1393,13 +1412,32 @@ export default function DashboardIndexPage() {
         });
 
         const totalIncome = checkupRevenue + followupRevenue + additionalRevenue;
-        setRevenueDetails({
+        const currentRevenueDetails = {
           total: totalIncome,
           checkup: checkupRevenue,
           followup: followupRevenue,
           additional: additionalRevenue,
-        });
+        };
+        setRevenueDetails(currentRevenueDetails);
         setDailyRevenue(totalIncome);
+
+        // Cache the dashboard data
+        globalCache.dashboard = {
+          doctorName: isArabic ? dData?.name_ar || 'الطبيب' : dData?.name_en || 'Doctor',
+          appointments: upcoming,
+          hasAmHours: foundAm,
+          weeklyData: weeklyStats,
+          dailyRevenue: totalIncome,
+          recentPatients: pSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+          recentReports: repRows.slice(0, 4),
+          recentArticles: (typeof articlesRows !== 'undefined' ? articlesRows : []).slice(0, 4),
+          counts: {
+            appointments: todayAll.length,
+            patients: visiblePatientsCount,
+            reports: totalReportsCount,
+          },
+          revenueDetails: currentRevenueDetails,
+        };
       } catch (e) {
         console.error(e);
         setErr(e?.message || 'Failed to load dashboard');

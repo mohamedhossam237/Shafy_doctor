@@ -50,6 +50,7 @@ import {
 } from 'firebase/firestore';
 import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
 import { toDayKey } from '@/lib/dates';
+import globalCache from '@/lib/cache';
 
 /* ---------------- utils ---------------- */
 
@@ -754,8 +755,17 @@ export default function AppointmentsPage() {
   // Load today's appointments for this doctor
   React.useEffect(() => {
     if (!user) return; // Protected will redirect if not signed in
+
+    if (globalCache.appointments) {
+      setTodayRows(globalCache.appointments);
+      todayRowsRef.current = globalCache.appointments;
+      setLoading(false);
+    }
+
     (async () => {
-      setLoading(true);
+      if (!globalCache.appointments) {
+        setLoading(true);
+      }
       setError('');
 
       try {
@@ -867,6 +877,7 @@ export default function AppointmentsPage() {
 
         setTodayRows(todayOnly);
         todayRowsRef.current = todayOnly;
+        globalCache.appointments = todayOnly;
       } catch (e) {
         console.error(e);
         setError(isArabic ? 'تعذر تحميل المواعيد' : 'Failed to load appointments');

@@ -42,6 +42,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
+import globalCache from '@/lib/cache';
 
 /* ---------------- utils (unify date/time across shapes) ---------------- */
 
@@ -565,14 +566,26 @@ export default function AppointmentsHistoryPage() {
 
   const fetchData = React.useCallback(async () => {
     if (!user?.uid) return;
-    setLoading(true);
+
+    if (globalCache.history) {
+      setRows(globalCache.history.rows);
+      rowsRef.current = globalCache.history.rows;
+      setClinics(globalCache.history.clinics);
+      setLoading(false);
+    }
+
+    if (!globalCache.history) {
+      setLoading(true);
+    }
     setError('');
     try {
       // Load clinics for this doctor (to render chips)
+      let loadedClinics = [];
       try {
         const docSnap = await getDoc(doc(db, 'doctors', user.uid));
         if (docSnap.exists()) {
-          setClinics(sanitizeClinics(docSnap.data()?.clinics));
+          loadedClinics = sanitizeClinics(docSnap.data()?.clinics) || [];
+          setClinics(loadedClinics);
         } else {
           setClinics([]);
         }
@@ -653,6 +666,10 @@ export default function AppointmentsHistoryPage() {
 
       setRows(withDates);
       rowsRef.current = withDates;
+      globalCache.history = {
+        rows: withDates,
+        clinics: loadedClinics
+      };
     } catch (e) {
       console.error(e);
       setError(isArabic ? 'تعذر تحميل السجل' : 'Failed to load history');

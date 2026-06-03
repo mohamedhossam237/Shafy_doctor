@@ -2,6 +2,7 @@
 'use client';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { auth, googleProvider } from '@/lib/firebase';
+import globalCache from '@/lib/cache';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -27,6 +28,9 @@ export default function AuthProvider({ children }) {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u || null);
       setLoading(false);
+      if (!u) {
+        globalCache.clear();
+      }
     });
     return () => unsub();
   }, []);

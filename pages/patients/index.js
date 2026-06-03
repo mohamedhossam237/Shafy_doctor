@@ -25,6 +25,7 @@ import dynamic from 'next/dynamic';
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
 import PatientCard from '@/components/patients/PatientCard';
 import PatientListEmpty from '@/components/patients/PatientListEmpty';
+import globalCache from '@/lib/cache';
 
 const AddPatientDialog = dynamic(() => import('@/components/patients/AddPatientDialog'), {
   ssr: false,
@@ -52,7 +53,15 @@ export default function PatientsIndexPage() {
   /* ------------------------------------------------------------ */
   React.useEffect(() => {
     if (!user?.uid) return;
-    setLoading(true);
+
+    if (globalCache.patients) {
+      setPatients(globalCache.patients);
+      setLoading(false);
+    }
+
+    if (!globalCache.patients) {
+      setLoading(true);
+    }
 
     let isMounted = true;
     let unsub1 = null;
@@ -89,6 +98,7 @@ export default function PatientsIndexPage() {
 
         setPatients(withPhone);
         setLoading(false);
+        globalCache.patients = withPhone;
       };
 
       unsub1 = onSnapshot(q1, (snap1) => {
