@@ -73,7 +73,18 @@ function toDate(val) {
 
 function isToday(d) {
   if (!d) return false;
-  return toDayKey(d, "Africa/Cairo") === getTodayEgyptDate();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const formatted = `${year}-${month}-${day}`;
+  
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = String(now.getMonth() + 1).padStart(2, '0');
+  const nowDay = String(now.getDate()).padStart(2, '0');
+  const today = `${nowYear}-${nowMonth}-${nowDay}`;
+  
+  return formatted === today;
 }
 
 function formatTime(d) {
@@ -1173,34 +1184,15 @@ export default function DashboardIndexPage() {
         // appointments
         const colAppt = collection(db, 'appointments');
         
-        // 1. Fetch using index-free equality field
         const [snapOldDate, snapNewDate] = await Promise.all([
           getDocs(query(colAppt, where('doctorUID', '==', doctorUID), where('date', 'in', dateStrings))),
           getDocs(query(colAppt, where('doctorId', '==', doctorUID), where('date', 'in', dateStrings))),
         ]);
 
-        // 2. Fetch using weekly range query on appointmentDate (with try-catch fallback)
-        const weekYMD = dateStrings[0];
-        const startOfWeekly = new Date(`${weekYMD}T00:00:00+03:00`);
-        let snapOldRange = [];
-        let snapNewRange = [];
-        try {
-          const [sOld, sNew] = await Promise.all([
-            getDocs(query(colAppt, where('doctorUID', '==', doctorUID), where('appointmentDate', '>=', startOfWeekly))),
-            getDocs(query(colAppt, where('doctorId', '==', doctorUID), where('appointmentDate', '>=', startOfWeekly))),
-          ]);
-          snapOldRange = sOld.docs;
-          snapNewRange = sNew.docs;
-        } catch (err) {
-          console.warn("Index not found for weekly appointmentDate query, relying on dateStrings query:", err);
-        }
-
         const apptMap = new Map();
         [
           ...snapOldDate.docs,
-          ...snapNewDate.docs,
-          ...snapOldRange,
-          ...snapNewRange
+          ...snapNewDate.docs
         ].forEach((d) => apptMap.set(d.id, { id: d.id, ...d.data() }));
         let rows = Array.from(apptMap.values()).map((r) => ({ ...r, _dt: apptDate(r) }));
 
@@ -1365,7 +1357,7 @@ export default function DashboardIndexPage() {
         todayAppointments.forEach((r) => {
           // Only count revenue for completed or confirmed appointments
           const status = String(r.status || '').toLowerCase();
-          if (status !== 'completed' && status !== 'confirmed') {
+          if (status !== 'completed' && status !== 'confirmed' && status !== 'arrived') {
             return; // Skip non-revenue appointments
           }
 

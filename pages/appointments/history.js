@@ -40,7 +40,7 @@ import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc, serverTimestamp, limit, or } from 'firebase/firestore';
 import { getAppointmentTypeInfo } from '@/lib/appointmentUtils';
 import globalCache from '@/lib/cache';
 
@@ -593,28 +593,25 @@ export default function AppointmentsHistoryPage() {
         setClinics([]);
       }
 
-      // Load all appointments for this doctor (both shapes), limiting to last 6 months by default with fallback
+      // Load appointments for this doctor using single or() query matching mobile
       const col = collection(db, 'appointments');
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-      let snapA, snapB;
+      let snap;
       try {
-        [snapA, snapB] = await Promise.all([
-          getDocs(query(col, where('doctorId', '==', user.uid), where('appointmentDate', '>=', sixMonthsAgo))),
-          getDocs(query(col, where('doctorUID', '==', user.uid), where('appointmentDate', '>=', sixMonthsAgo))),
-        ]);
+        snap = await getDocs(
+          query(
+            col,
+            or(where('doctorId', '==', user.uid), where('doctorUID', '==', user.uid)),
+            limit(300)
+          )
+        );
       } catch (err) {
-        console.warn("Index not found for history range query, falling back to capped fetch:", err);
-        [snapA, snapB] = await Promise.all([
-          getDocs(query(col, where('doctorId', '==', user.uid), limit(300))),
-          getDocs(query(col, where('doctorUID', '==', user.uid), limit(300))),
-        ]);
+        console.error("Failed to query history using or operator:", err);
+        snap = { docs: [] };
       }
 
       // Merge + dedupe
       const map = new Map();
-      [...snapA.docs, ...snapB.docs].forEach((d) => {
+      snap.docs.forEach((d) => {
         const data = d.data();
         map.set(d.id, { id: d.id, ...data });
       });

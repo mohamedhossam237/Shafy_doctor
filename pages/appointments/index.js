@@ -78,7 +78,18 @@ function normStatus(x) {
 
 function isToday(d) {
   if (!d) return false;
-  return toDayKey(d, "Africa/Cairo") === getTodayEgyptDate();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const formatted = `${year}-${month}-${day}`;
+  
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = String(now.getMonth() + 1).padStart(2, '0');
+  const nowDay = String(now.getDate()).padStart(2, '0');
+  const today = `${nowYear}-${nowMonth}-${nowDay}`;
+  
+  return formatted === today;
 }
 
 function formatTime(d) {
@@ -770,43 +781,21 @@ export default function AppointmentsPage() {
 
       try {
         const col = collection(db, 'appointments');
-        const todayStr = getTodayEgyptDate();
-        
-        // Timezone-safe start and end dates for Egypt (between +03:00 and +02:00)
-        const startOfToday = new Date(`${todayStr}T00:00:00+03:00`);
-        const endOfToday = new Date(`${todayStr}T23:59:59+02:00`);
+        const d = new Date();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
 
-        // 1. Fetch using index-free equality fields (date and queueDayKey)
-        const [snapOldDate, snapNewDate, snapOldQueue, snapNewQueue] = await Promise.all([
+        const [snapOldDate, snapNewDate] = await Promise.all([
           getDocs(query(col, where('doctorUID', '==', user.uid), where('date', '==', todayStr))),
           getDocs(query(col, where('doctorId', '==', user.uid), where('date', '==', todayStr))),
-          getDocs(query(col, where('doctorUID', '==', user.uid), where('queueDayKey', '==', todayStr))),
-          getDocs(query(col, where('doctorId', '==', user.uid), where('queueDayKey', '==', todayStr))),
         ]);
 
-        // 2. Fetch using range queries on appointmentDate (requires composite index, so wrap in try-catch fallback)
-        let snapOldRange = [];
-        let snapNewRange = [];
-        try {
-          const [sOld, sNew] = await Promise.all([
-            getDocs(query(col, where('doctorUID', '==', user.uid), where('appointmentDate', '>=', startOfToday), where('appointmentDate', '<=', endOfToday))),
-            getDocs(query(col, where('doctorId', '==', user.uid), where('appointmentDate', '>=', startOfToday), where('appointmentDate', '<=', endOfToday)))
-          ]);
-          snapOldRange = sOld.docs;
-          snapNewRange = sNew.docs;
-        } catch (err) {
-          console.warn("Index not found for appointmentDate range query, relying on equality queries:", err);
-        }
-
-        // Merge and dedupe all documents by ID
         const map = new Map();
         [
           ...snapOldDate.docs,
-          ...snapNewDate.docs,
-          ...snapOldQueue.docs,
-          ...snapNewQueue.docs,
-          ...snapOldRange,
-          ...snapNewRange
+          ...snapNewDate.docs
         ].forEach((d) => {
           map.set(d.id, { id: d.id, ...d.data() });
         });

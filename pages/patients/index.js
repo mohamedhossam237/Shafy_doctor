@@ -64,20 +64,23 @@ export default function PatientsIndexPage() {
     }
 
     let isMounted = true;
-    let unsub1 = null;
-    let unsub2 = null;
 
-    try {
-      const patientsCol = collection(db, 'patients');
-      const q1 = query(patientsCol, where('associatedDoctors', 'array-contains', user.uid));
-      const q2 = query(patientsCol, where('registeredBy', '==', user.uid));
+    (async () => {
+      try {
+        const patientsCol = collection(db, 'patients');
+        const q1 = query(patientsCol, where('associatedDoctors', 'array-contains', user.uid));
+        const q2 = query(patientsCol, where('registeredBy', '==', user.uid));
 
-      let data1 = [];
-      let data2 = [];
+        const [snap1, snap2] = await Promise.all([
+          getDocs(q1),
+          getDocs(q2)
+        ]);
 
-      const updatePatients = () => {
         if (!isMounted) return;
-        // 🧩 Merge + deduplicate by ID
+
+        const data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
+
         const combined = [...data1, ...data2];
         const unique = Object.values(
           combined.reduce((acc, cur) => {
@@ -86,9 +89,9 @@ export default function PatientsIndexPage() {
           }, {})
         );
 
-        // ✅ Filter only patients with a valid phone number
+        // Filter only patients with a valid phone number or mobile
         const withPhone = unique.filter(
-          (p) => typeof p.phone === 'string' && p.phone.trim() !== ''
+          (p) => (typeof p.phone === 'string' && p.phone.trim() !== '') || (typeof p.mobile === 'string' && p.mobile.trim() !== '')
         );
 
         // Sort alphabetically
@@ -99,33 +102,17 @@ export default function PatientsIndexPage() {
         setPatients(withPhone);
         setLoading(false);
         globalCache.patients = withPhone;
-      };
-
-      unsub1 = onSnapshot(q1, (snap1) => {
-        data1 = snap1.docs.map((d) => ({ id: d.id, ...d.data() }));
-        updatePatients();
-      }, (err) => {
-        console.error("Error loading associated patients:", err);
-        if (isMounted) setLoading(false);
-      });
-
-      unsub2 = onSnapshot(q2, (snap2) => {
-        data2 = snap2.docs.map((d) => ({ id: d.id, ...d.data() }));
-        updatePatients();
-      }, (err) => {
-        console.error("Error loading registered patients:", err);
-        if (isMounted) setLoading(false);
-      });
-    } catch (err) {
-      console.error(err);
-      setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
-      setLoading(false);
-    }
+      } catch (err) {
+        console.error("Error loading patients:", err);
+        if (isMounted) {
+          setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
+          setLoading(false);
+        }
+      }
+    })();
 
     return () => {
       isMounted = false;
-      if (unsub1) unsub1();
-      if (unsub2) unsub2();
     };
   }, [user?.uid, isArabic]);
 
