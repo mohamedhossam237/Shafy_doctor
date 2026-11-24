@@ -1,50 +1,38 @@
 'use client';
 
 import * as React from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Stack,
-  Divider,
-  useTheme,
-  Button,
-  alpha,
-  CircularProgress
-} from '@mui/material';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
-import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import { Box, Typography, Stack, CircularProgress } from '@mui/material';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
+import CancelRoundedIcon from '@mui/icons-material/CancelRounded';
+import MonitorHeartRoundedIcon from '@mui/icons-material/MonitorHeartRounded';
+import MedicalServicesRoundedIcon from '@mui/icons-material/MedicalServicesRounded';
+import SmokingRoomsRoundedIcon from '@mui/icons-material/SmokingRoomsRounded';
+import LocalBarRoundedIcon from '@mui/icons-material/LocalBarRounded';
+import FamilyRestroomRoundedIcon from '@mui/icons-material/FamilyRestroomRounded';
+import PregnantWomanRoundedIcon from '@mui/icons-material/PregnantWomanRounded';
+import HealthAndSafetyRoundedIcon from '@mui/icons-material/HealthAndSafetyRounded';
 
 /**
- * HealthInfoSection – Enhanced version
- * Supports both controlled mode (form/setForm) and direct update mode (patient/onUpdate).
- * Replaces Radio buttons with modern toggle cards.
+ * HealthInfoSection – Compact 2-column clinical flag cards
+ * Supports controlled mode (form/setForm) and instant save mode (patient/onUpdate).
  */
 export default function HealthInfoSection({ form, setForm, patient, onUpdate, t, isArabic }) {
-  const theme = useTheme();
   const [updating, setUpdating] = React.useState({});
 
-  // 🌍 Translation helper
   const translate = React.useCallback(
     (en, ar) => (typeof t === 'function' ? t(en, ar) : isArabic ? ar : en),
     [t, isArabic]
   );
 
-  // Determine current values
   const values = form || patient || {};
   const isReadOnly = !setForm && !onUpdate;
 
-  // 🧩 State handler
   const handleToggle = (field, val) => async () => {
-    // If same value, do nothing (or toggle off if needed, but for Yes/No usually we keep it)
-    if (values[field] === val) return;
+    if (isReadOnly || values[field] === val) return;
 
     if (setForm) {
-      // Controlled mode (Add Patient)
       setForm((f) => ({ ...(f || {}), [field]: val }));
     } else if (onUpdate) {
-      // Direct update mode (Patient Profile)
       try {
         setUpdating((prev) => ({ ...prev, [field]: true }));
         await onUpdate(field, val);
@@ -56,172 +44,201 @@ export default function HealthInfoSection({ form, setForm, patient, onUpdate, t,
     }
   };
 
-  // 🩺 Questions list
   const questions = React.useMemo(() => {
     const base = [
-      { key: 'isDiabetic', label: translate('Is the patient diabetic?', 'هل المريض مصاب بالسكري؟') },
-      { key: 'hadSurgeries', label: translate('Has the patient had surgeries?', 'هل خضع المريض لعمليات؟') },
-      { key: 'isSmoker', label: translate('Does the patient smoke?', 'هل المريض مدخن؟') },
-      { key: 'drinksAlcohol', label: translate('Does the patient drink alcohol?', 'هل يشرب المريض الكحول؟') },
-      { key: 'familyHistory', label: translate('Family history of similar diseases?', 'هل يوجد تاريخ عائلي لأمراض مشابهة؟') },
+      {
+        key: 'isDiabetic',
+        label: translate('Diabetic', 'مصاب بالسكري'),
+        icon: MonitorHeartRoundedIcon,
+        accent: '#d97706',
+        softBg: '#fef3c7',
+      },
+      {
+        key: 'hadSurgeries',
+        label: translate('Past Surgeries', 'عمليات جراحية سابقة'),
+        icon: MedicalServicesRoundedIcon,
+        accent: '#2563eb',
+        softBg: '#eff6ff',
+      },
+      {
+        key: 'isSmoker',
+        label: translate('Smoker', 'مدخن'),
+        icon: SmokingRoomsRoundedIcon,
+        accent: '#dc2626',
+        softBg: '#fee2e2',
+      },
+      {
+        key: 'drinksAlcohol',
+        label: translate('Alcohol Intake', 'يتناول الكحول'),
+        icon: LocalBarRoundedIcon,
+        accent: '#7c3aed',
+        softBg: '#f3e8ff',
+      },
+      {
+        key: 'familyHistory',
+        label: translate('Family History', 'تاريخ عائلي مشابه'),
+        icon: FamilyRestroomRoundedIcon,
+        accent: '#0284c7',
+        softBg: '#e0f2fe',
+      },
     ];
-    if (values?.gender?.toLowerCase() === 'female') {
-      base.push({ key: 'isPregnant', label: translate('Is the patient pregnant?', 'هل المريضة حامل؟') });
+    if (String(values?.gender || '').toLowerCase() === 'female') {
+      base.push({
+        key: 'isPregnant',
+        label: translate('Pregnant', 'حامل'),
+        icon: PregnantWomanRoundedIcon,
+        accent: '#db2777',
+        softBg: '#fce7f3',
+      });
     }
     return base;
   }, [translate, values?.gender]);
 
   return (
-    <Box sx={{ mt: 3 }}>
-      {/* 🩺 Title */}
-      <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
-        <Box
-          sx={{
-            p: 1,
-            borderRadius: 2,
-            background: (t) => `linear-gradient(135deg, ${t.palette.success.main}, ${t.palette.success.dark})`,
+    <Box sx={{ mt: 2.5 }} dir={isArabic ? 'rtl' : 'ltr'}>
+      <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 1.75 }}>
+        <div
+          style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '11px',
+            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+            color: '#ffffff',
             display: 'flex',
-            boxShadow: (t) => `0 4px 12px rgba(46, 125, 50, 0.3)`,
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 6px 14px -4px rgba(37, 99, 235, 0.4)',
+            flexShrink: 0,
           }}
         >
-          <Typography sx={{ color: 'white', fontSize: 24, fontWeight: 900 }}>🩺</Typography>
+          <HealthAndSafetyRoundedIcon sx={{ fontSize: 20 }} />
+        </div>
+        <Box>
+          <Typography variant="subtitle1" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+            {translate('Health Flags & Risk Assessment', 'تقييم الحالة الصحية وعوامل الخطورة')}
+          </Typography>
+          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+            {translate('Tap Yes / No to toggle clinical flags instantly', 'اضغط نعم / لا لتحديث المؤشرات الصحية فوراً')}
+          </Typography>
         </Box>
-        <Typography
-          variant="h6"
-          fontWeight={900}
-          sx={{
-            textAlign: isArabic ? 'right' : 'left',
-            color: theme.palette.text.primary,
-          }}
-        >
-          {translate('Health Assessment', 'تقييم الحالة الصحية')}
-        </Typography>
       </Stack>
 
-      {/* 📋 Card container */}
-      <Paper
-        variant="outlined"
-        sx={{
-          p: { xs: 2, sm: 2.5 },
-          borderRadius: 4,
-          background: (t) => `linear-gradient(135deg, ${t.palette.background.paper} 0%, ${t.palette.grey[50]} 100%)`,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-          border: (t) => `1px solid ${t.palette.divider}`,
-          transition: 'all 0.3s ease',
-          '&:hover': {
-            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          }
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+          gap: '10px',
         }}
       >
-        <Stack spacing={2.2}>
-          {questions.map((q, i) => {
-            const isYes = values[q.key] === true;
-            const isNo = values[q.key] === false;
-            const isLoading = updating[q.key];
+        {questions.map((q) => {
+          const isYes = values[q.key] === true;
+          const isNo = values[q.key] === false;
+          const isLoading = updating[q.key];
+          const Icon = q.icon;
 
-            return (
-              <Paper
-                key={q.key}
-                variant="outlined"
-                sx={{
-                  p: { xs: 1.5, sm: 2 },
-                  borderRadius: 3,
-                  boxShadow: 'none',
-                  background: (th) => `linear-gradient(135deg, ${th.palette.background.default} 0%, ${th.palette.grey[50]} 100%)`,
-                  border: (th) => `2px solid ${th.palette.divider}`,
-                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  '&:hover': {
-                    borderColor: theme.palette.success.main,
-                    boxShadow: `0 4px 12px rgba(46, 125, 50, 0.2)`,
-                    transform: 'translateY(-2px)',
-                    background: (th) => th.palette.background.paper,
-                  },
-                  direction: isArabic ? 'rtl' : 'ltr',
-                }}
-              >
-                <Stack
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  flexWrap="wrap"
-                  spacing={1.5}
+          return (
+            <div
+              key={q.key}
+              style={{
+                padding: '12px 14px',
+                borderRadius: '15px',
+                background: isYes ? q.softBg : '#ffffff',
+                border: `1.5px solid ${isYes ? q.accent + '66' : '#e2e8f0'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: isYes ? '#ffffff' : '#f1f5f9',
+                    color: isYes ? q.accent : '#64748b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
                 >
-                  <Typography
-                    variant="subtitle1"
-                    fontWeight={700}
-                    color="text.primary"
-                    sx={{
-                      flex: 1,
-                      textAlign: isArabic ? 'right' : 'left',
-                      lineHeight: 1.3,
-                    }}
-                  >
-                    {`${i + 1}. ${q.label}`}
-                  </Typography>
+                  <Icon sx={{ fontSize: 18 }} />
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.84rem',
+                    fontWeight: 800,
+                    color: '#0f172a',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {q.label}
+                </span>
+              </div>
 
-                  {/* Custom Toggle UI */}
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    {isLoading ? (
-                      <CircularProgress size={24} />
-                    ) : (
-                      <>
-                        <Button
-                          onClick={handleToggle(q.key, true)}
-                          disabled={isReadOnly}
-                          variant={isYes ? 'contained' : 'outlined'}
-                          color="success"
-                          startIcon={isYes ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
-                          sx={{
-                            borderRadius: 2,
-                            textTransform: 'none',
-                            fontWeight: 700,
-                            px: 2,
-                            opacity: isNo ? 0.5 : 1,
-                            borderColor: isYes ? 'transparent' : 'divider',
-                            bgcolor: isYes ? 'success.main' : 'transparent',
-                            color: isYes ? 'white' : 'text.secondary',
-                            '&:hover': {
-                              bgcolor: isYes ? 'success.dark' : alpha(theme.palette.success.main, 0.1),
-                              borderColor: 'success.main',
-                            }
-                          }}
-                        >
-                          {translate('Yes', 'نعم')}
-                        </Button>
-                        <Button
-                          onClick={handleToggle(q.key, false)}
-                          disabled={isReadOnly}
-                          variant={isNo ? 'contained' : 'outlined'}
-                          color="error"
-                          startIcon={isNo ? <CancelIcon /> : <RadioButtonUncheckedIcon />}
-                          sx={{
-                            borderRadius: 2,
-                            textTransform: 'none',
-                            fontWeight: 700,
-                            px: 2,
-                            opacity: isYes ? 0.5 : 1,
-                            borderColor: isNo ? 'transparent' : 'divider',
-                            bgcolor: isNo ? 'error.main' : 'transparent',
-                            color: isNo ? 'white' : 'text.secondary',
-                            '&:hover': {
-                              bgcolor: isNo ? 'error.dark' : alpha(theme.palette.error.main, 0.1),
-                              borderColor: 'error.main',
-                            }
-                          }}
-                        >
-                          {translate('No', 'لا')}
-                        </Button>
-                      </>
-                    )}
-                  </Stack>
-                </Stack>
-              </Paper>
-            );
-          })}
-        </Stack>
-
-        <Divider sx={{ mt: 3, opacity: 0.4 }} />
-      </Paper>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
+                {isLoading ? (
+                  <CircularProgress size={20} sx={{ color: '#2563eb' }} />
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={handleToggle(q.key, true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 10px',
+                        borderRadius: '9px',
+                        border: `1px solid ${isYes ? q.accent : '#cbd5e1'}`,
+                        background: isYes ? q.accent : '#ffffff',
+                        color: isYes ? '#ffffff' : '#475569',
+                        fontWeight: 800,
+                        fontSize: '0.74rem',
+                        cursor: isReadOnly ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        transition: 'all 0.16s ease',
+                      }}
+                    >
+                      {isYes && <CheckCircleRoundedIcon sx={{ fontSize: 13 }} />}
+                      <span>{translate('Yes', 'نعم')}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isReadOnly}
+                      onClick={handleToggle(q.key, false)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '5px 10px',
+                        borderRadius: '9px',
+                        border: `1px solid ${isNo ? '#10b981' : '#cbd5e1'}`,
+                        background: isNo ? '#ecfdf5' : '#ffffff',
+                        color: isNo ? '#047857' : '#64748b',
+                        fontWeight: 800,
+                        fontSize: '0.74rem',
+                        cursor: isReadOnly ? 'default' : 'pointer',
+                        fontFamily: 'inherit',
+                        transition: 'all 0.16s ease',
+                      }}
+                    >
+                      {isNo && <CancelRoundedIcon sx={{ fontSize: 13 }} />}
+                      <span>{translate('No', 'لا')}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </Box>
   );
 }

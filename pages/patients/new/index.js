@@ -1,19 +1,23 @@
 'use client';
 import * as React from 'react';
 import { useRouter } from 'next/router';
-import { Container, Paper, Stack, Typography, Snackbar, Alert, Box } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { Container, Stack, Typography, Snackbar, Alert, Box } from '@mui/material';
 import Protected from '@/components/Protected';
 import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import PatientForm from '@/components/patients/PatientForm';
-import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import PersonAddAlt1RoundedIcon from '@mui/icons-material/PersonAddAlt1Rounded';
 
 export default function NewPatientPage() {
   const router = useRouter();
-  const isArabic = router?.query?.lang === 'ar' || router?.query?.ar === '1';
+  const isArabic = React.useMemo(() => {
+    const q = router?.query || {};
+    if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
+    if (q.ar) return q.ar === '1' || String(q.ar).toLowerCase() === 'true';
+    return true;
+  }, [router.query]);
   const { user } = useAuth();
 
   const [snack, setSnack] = React.useState({ open: false, message: '', severity: 'info' });
@@ -22,7 +26,7 @@ export default function NewPatientPage() {
   const onSubmit = async (values, { setSubmitting }) => {
     if (!user) return;
     try {
-      await addDoc(collection(db, 'patients'), {
+      const docRef = await addDoc(collection(db, 'patients'), {
         name: values.name.trim(),
         age: values.age ? Number(values.age) : null,
         gender: values.gender || null,
@@ -35,12 +39,19 @@ export default function NewPatientPage() {
         medications: values.medications || null,
         maritalStatus: values.maritalStatus || null,
         lastVisit: values.lastVisit || null,
+        isDiabetic: !!values.isDiabetic,
+        hadSurgeries: !!values.hadSurgeries,
+        isSmoker: !!values.isSmoker,
+        drinksAlcohol: !!values.drinksAlcohol,
+        familyHistory: !!values.familyHistory,
+        isPregnant: !!values.isPregnant,
         registeredBy: user.uid,
+        associatedDoctors: [user.uid],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
       openSnack(isArabic ? 'تم إضافة المريض بنجاح' : 'Patient added successfully', 'success');
-      setTimeout(() => router.replace(`/patients${isArabic ? '?lang=ar' : ''}`), 600);
+      setTimeout(() => router.replace(`/patients/${docRef.id}${isArabic ? '?lang=ar' : '?lang=en'}`), 500);
     } catch (e) {
       console.error(e);
       openSnack(isArabic ? 'فشل حفظ البيانات' : 'Failed to save patient', 'error');
@@ -51,62 +62,43 @@ export default function NewPatientPage() {
 
   return (
     <Protected>
-      <AppLayout>
-        <Container maxWidth="md" sx={{ py: 3 }}>
-          {/* Header */}
-          <Paper
-            elevation={0}
-            sx={{
-              p: 3,
-              mb: 3,
-              borderRadius: 4,
-              background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.1)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
-              border: (t) => `1px solid ${t.palette.divider}`,
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <Box sx={{
-              position: 'absolute',
-              top: -30,
-              right: isArabic ? 'auto' : -30,
-              left: isArabic ? -30 : 'auto',
-              width: 150,
-              height: 150,
-              borderRadius: '50%',
-              bgcolor: (t) => alpha(t.palette.primary.main, 0.05),
-              zIndex: 0
-            }} />
-            <Stack direction="row" spacing={2} alignItems="center" position="relative" zIndex={1}>
+      <AppLayout
+        title={isArabic ? 'إضافة مريض جديد' : 'Add New Patient'}
+        subtitle={isArabic ? 'إنشاء ملف طبي متكامل للمريض في ثوانٍ' : 'Create a complete clinical patient profile in seconds'}
+      >
+        <Container maxWidth="lg" disableGutters sx={{ pb: 4 }}>
+          {/* Royal Sapphire Hero Banner */}
+          <div className="shafy-hero-shell" style={{ padding: '24px 28px', marginBottom: '22px' }}>
+            <Stack direction="row" spacing={2} alignItems="center" sx={{ position: 'relative', zIndex: 2 }}>
               <Box
                 sx={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 3,
-                  bgcolor: 'primary.main',
+                  width: 58,
+                  height: 58,
+                  borderRadius: '16px',
+                  background: 'rgba(255,255,255,0.16)',
+                  border: '1.5px solid rgba(255,255,255,0.35)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                  flexShrink: 0,
                 }}
               >
-                <PersonAddIcon sx={{ fontSize: 32, color: 'white' }} />
+                <PersonAddAlt1RoundedIcon sx={{ fontSize: 30, color: '#ffffff' }} />
               </Box>
               <Box>
-                <Typography variant="h4" fontWeight={900} color="text.primary">
-                  {isArabic ? 'إضافة مريض جديد' : 'Add New Patient'}
+                <Typography variant="h4" fontWeight={900} sx={{ color: '#ffffff', fontSize: { xs: '1.35rem', md: '1.65rem' } }}>
+                  {isArabic ? 'إضافة ملف مريض جديد' : 'New Patient Profile'}
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {isArabic ? 'أدخل معلومات المريض الكاملة' : 'Enter complete patient information'}
+                <Typography variant="body2" sx={{ color: '#dbeafe', mt: 0.4, fontWeight: 600 }}>
+                  {isArabic
+                    ? 'أدخل البيانات الأساسية، فصيلة الدم، الحساسيات، وعوامل الخطورة الصحية'
+                    : 'Enter demographics, blood type, allergies, and clinical risk flags'}
                 </Typography>
               </Box>
             </Stack>
-          </Paper>
+          </div>
 
-          {/* Form */}
-          <Paper sx={{ p: 3, borderRadius: 3, border: (t) => `1px solid ${t.palette.divider}` }}>
-            <PatientForm isArabic={isArabic} onSubmit={onSubmit} />
-          </Paper>
+          <PatientForm isArabic={isArabic} onSubmit={onSubmit} />
 
           <Snackbar
             open={snack.open}

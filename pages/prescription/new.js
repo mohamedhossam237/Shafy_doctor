@@ -82,7 +82,18 @@ export default function NewPrescriptionPage() {
   const [patients, setPatients] = React.useState([]);
   const [patientsLoading, setPatientsLoading] = React.useState(false);
   const [selectedPatient, setSelectedPatient] = React.useState(null);
-  const [patientInfo, setPatientInfo] = React.useState({ mrn: '', sex: '', dobStr: '', phone: '' });
+  const [patientInfo, setPatientInfo] = React.useState({
+    mrn: '',
+    sex: '',
+    dobStr: '',
+    phone: '',
+    age: '',
+    bloodType: '',
+    allergies: '',
+    conditions: '',
+    isDiabetic: false,
+    isPregnant: false,
+  });
 
   // Form state (all fields from dialog)
   const [form, setForm] = React.useState({
@@ -282,6 +293,12 @@ export default function NewPrescriptionPage() {
         sex: data?.sex || data?.gender || '',
         dobStr,
         phone: normalizePhoneForDisplay(phone),
+        age: data?.age ?? '',
+        bloodType: data?.bloodType || '',
+        allergies: data?.allergies || '',
+        conditions: data?.conditions || '',
+        isDiabetic: !!data?.isDiabetic,
+        isPregnant: !!data?.isPregnant,
       });
     } catch (err) {
       console.error(err);
@@ -1779,207 +1796,205 @@ export default function NewPrescriptionPage() {
     }, 250);
   };
 
+  const scrollToSection = (sectionId) => {
+    if (typeof document === 'undefined') return;
+    const el = document.getElementById(sectionId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const applyNormalVitals = () => {
+    setForm((prev) => ({
+      ...prev,
+      vitalsBP: '120/80',
+      vitalsHR: '75',
+      vitalsTemp: '37.0',
+      vitalsSpO2: '98',
+    }));
+  };
+
+  const quickAddLabTest = (testName) => {
+    setTestsList((prev) => {
+      if (prev.some((x) => String(x.name || '').toLowerCase() === testName.toLowerCase())) {
+        return prev;
+      }
+      if (prev.length === 1 && !prev[0].name?.trim() && !prev[0].notes?.trim()) {
+        return [{ name: testName, notes: '' }];
+      }
+      return [...prev, { name: testName, notes: '' }];
+    });
+  };
+
+  const filledMedsCount = medicationsList.filter((m) => String(m?.name || '').trim()).length;
+  const filledTestsCount = testsList.filter((x) => String(x?.name || '').trim()).length;
+  const hasClinicalFilled = Boolean(form.chiefComplaint.trim() || form.diagnosis.trim() || form.findings.trim());
+  const hasVitalsFilled = Boolean(form.vitalsBP || form.vitalsHR || form.vitalsTemp || form.vitalsSpO2);
+  const patientAllergiesList = String(patientInfo.allergies || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s && !['none', 'لا يوجد'].includes(s.toLowerCase()));
+  const patientConditionsList = String(patientInfo.conditions || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   return (
     <Protected>
-      <AppLayout>
-        <Box 
-          dir={dir} 
-          sx={{ 
-            minHeight: '100vh', 
-            pb: 4,
-            background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.02) 0%, rgba(66, 165, 245, 0.01) 50%, rgba(156, 39, 176, 0.02) 100%)',
-            position: 'relative',
-            '&::before': {
-              content: '""',
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'radial-gradient(circle at 20% 50%, rgba(25, 118, 210, 0.05) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(66, 165, 245, 0.04) 0%, transparent 50%), radial-gradient(circle at 40% 20%, rgba(156, 39, 176, 0.03) 0%, transparent 50%)',
-              pointerEvents: 'none',
-              zIndex: 0,
-            },
-          }}
-        >
-          <Container maxWidth="md" sx={{ py: 2, position: 'relative', zIndex: 1 }}>
-            {/* Header */}
-            <Paper
-              elevation={0}
-              sx={{
-                p: 3,
-                mb: 3,
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.98) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: '4px',
-                  background: 'linear-gradient(90deg, #1976d2 0%, #42a5f5 50%, #9c27b0 100%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'shimmer 3s ease-in-out infinite',
-                },
-                '@keyframes shimmer': {
-                  '0%': { backgroundPosition: '200% 0' },
-                  '100%': { backgroundPosition: '-200% 0' },
-                },
-              }}
-            >
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-                <Button
-                  component={Link}
-                  href={`/patient-reports${isArabic ? '?lang=ar' : ''}`}
-                  startIcon={isArabic ? null : <ArrowBackIcon />}
-                  endIcon={isArabic ? <ArrowBackIcon /> : null}
-                  sx={{
-                    borderRadius: 2.5,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    px: 2.5,
-                    borderWidth: 2,
-                    '&:hover': {
-                      borderWidth: 2,
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    },
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  {t('Back', 'رجوع')}
-                </Button>
-                <Stack direction="row" spacing={1.5}>
+      <AppLayout
+        title={t('New Prescription & Clinical Report', 'وصفة طبية وتقرير سريري جديد')}
+        subtitle={t('Fast structured clinical entry with AI suggestions & 1-tap presets', 'إدخال سريري سريع مع اقتراحات ذكية وقوالب جاهزة للجرعات والفحوصات')}
+      >
+        <Box dir={dir} sx={{ pb: 11 }}>
+          <Container maxWidth="lg" disableGutters>
+            {/* Royal Sapphire Hero Header */}
+            <div className="shafy-hero-shell" style={{ padding: '22px 26px', marginBottom: '18px' }}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+                justifyContent="space-between"
+                spacing={2}
+                sx={{ position: 'relative', zIndex: 2 }}
+              >
+                <Box>
+                  <Typography variant="h4" fontWeight={900} sx={{ color: '#ffffff', fontSize: { xs: '1.35rem', md: '1.68rem' } }}>
+                    {t('New Prescription & Clinical Report', 'كتابة وصفة وتقرير سريري')}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#dbeafe', mt: 0.4, fontWeight: 600 }}>
+                    {selectedPatient
+                      ? `${t('Patient:', 'المريض:')} ${selectedPatient.name}`
+                      : t('Select a patient and document clinical findings, vitals, medications & tests', 'اختر المريض وسجّل التشخيص، العلامات الحيوية، الأدوية والفحوصات')}
+                  </Typography>
+                </Box>
+
+                <Stack direction="row" spacing={1.25} flexWrap="wrap">
+                  <Button
+                    component={Link}
+                    href={`/patient-reports${isArabic ? '?lang=ar' : ''}`}
+                    startIcon={isArabic ? null : <ArrowBackIcon />}
+                    endIcon={isArabic ? <ArrowBackIcon /> : null}
+                    sx={{
+                      borderRadius: '12px',
+                      color: '#ffffff',
+                      bgcolor: 'rgba(255,255,255,0.14)',
+                      border: '1px solid rgba(255,255,255,0.28)',
+                      px: 2,
+                      '&:hover': { bgcolor: 'rgba(255,255,255,0.22)' },
+                    }}
+                  >
+                    {t('Back', 'رجوع')}
+                  </Button>
                   <Button
                     variant="contained"
                     startIcon={<WhatsAppIcon />}
                     onClick={handleWhatsAppShare}
                     sx={{
-                      minWidth: 140,
-                      borderRadius: 2.5,
-                      textTransform: 'none',
-                      fontWeight: 700,
+                      borderRadius: '12px',
                       background: 'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
-                      boxShadow: '0 4px 12px rgba(37, 211, 102, 0.3)',
-                      '&:hover': {
-                        background: 'linear-gradient(135deg, #20BA5A 0%, #0E7A6E 100%)',
-                        boxShadow: '0 6px 16px rgba(37, 211, 102, 0.4)',
-                        transform: 'translateY(-2px)',
-                      },
-                      transition: 'all 0.2s ease',
+                      boxShadow: '0 6px 16px rgba(37, 211, 102, 0.35)',
                     }}
                   >
-                    {t('Share via WhatsApp', 'مشاركة عبر واتساب')}
+                    {t('WhatsApp', 'واتساب')}
                   </Button>
                   <Button
                     variant="contained"
                     startIcon={<PrintIcon />}
                     onClick={handlePrint}
                     sx={{
-                      minWidth: 120,
-                      borderRadius: 2.5,
-                      textTransform: 'none',
-                      fontWeight: 700,
-                      background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                      boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
-                      '&:hover': {
-                        background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                        boxShadow: '0 6px 16px rgba(25, 118, 210, 0.4)',
-                        transform: 'translateY(-2px)',
-                      },
-                      transition: 'all 0.2s ease',
+                      borderRadius: '12px',
+                      bgcolor: '#ffffff !important',
+                      background: '#ffffff !important',
+                      color: '#1d4ed8 !important',
                     }}
                   >
                     {t('Print', 'طباعة')}
                   </Button>
                 </Stack>
               </Stack>
+            </div>
 
-              <Typography 
-                variant="h4" 
-                fontWeight={900} 
-                sx={{ 
-                  mb: 1,
-                  background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 50%, #9c27b0 100%)',
-                  backgroundClip: 'text',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
-              >
-                {t('New Prescription', 'وصفة طبية جديدة')}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 0 }}>
-                {t('Create a medical prescription with medications and tests.', 'إنشاء وصفة طبية تحتوي على الأدوية والفحوصات.')}
-              </Typography>
-            </Paper>
-
-            {/* Patient Selection */}
-            <Paper 
-              elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #1976d2 0%, #42a5f5 50%, #64b5f6 100%)',
-                  transition: 'all 0.3s ease',
-                },
+            {/* Sticky Section Quick-Jump Progress Bar */}
+            <div
+              style={{
+                position: 'sticky',
+                top: '82px',
+                zIndex: 40,
+                marginBottom: '20px',
+                padding: '8px 10px',
+                borderRadius: '16px',
+                background: 'rgba(255, 255, 255, 0.94)',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 8px 22px -10px rgba(15, 23, 42, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                overflowX: 'auto',
               }}
             >
-              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
-                <Box
-                  sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(25, 118, 210, 0.3)',
+              {[
+                { id: 'rx-sec-patient', label: t('1. Patient', '١. المريض'), done: Boolean(selectedPatient) },
+                { id: 'rx-sec-clinical', label: t('2. Clinical', '٢. التشخيص'), done: hasClinicalFilled },
+                { id: 'rx-sec-vitals', label: t('3. Vitals', '٣. العلامات الحيوية'), done: hasVitalsFilled },
+                { id: 'rx-sec-meds', label: `${t('4. Medications', '٤. الأدوية')} (${filledMedsCount})`, done: filledMedsCount > 0 },
+                { id: 'rx-sec-tests', label: `${t('5. Tests', '٥. الفحوصات')} (${filledTestsCount})`, done: filledTestsCount > 0 },
+                { id: 'rx-sec-meta', label: t('6. Meta & Scan', '٦. العنوان والمرفق'), done: Boolean(form.titleAr || form.titleEn || previewURL) },
+              ].map((sec) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => scrollToSection(sec.id)}
+                  className="shafy-tab-pill"
+                  style={{
+                    padding: '6px 13px',
+                    fontSize: '0.78rem',
+                    background: sec.done ? '#eff6ff' : '#f8fafc',
+                    color: sec.done ? '#1d4ed8' : '#475569',
+                    borderColor: sec.done ? '#bfdbfe' : '#e2e8f0',
                   }}
                 >
-                  <PersonIcon sx={{ color: 'white', fontSize: 24 }} />
-                </Box>
-                <Typography 
-                  variant="h6" 
-                  fontWeight={800}
-                  sx={{
-                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  {t('Patient Information', 'معلومات المريض')}
-                </Typography>
+                  {sec.done && <span style={{ color: '#059669' }}>✓</span>}
+                  <span>{sec.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* 1. Patient Selection + Clinical Safety Banner */}
+            <Paper
+              id="rx-sec-patient"
+              elevation={0}
+              className="glass-panel"
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #2563eb',
+                scrollMarginTop: '148px',
+              }}
+            >
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1.5}>
+                  <Box
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '13px',
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 6px 16px -4px rgba(37, 99, 235, 0.36)',
+                    }}
+                  >
+                    <PersonIcon sx={{ color: 'white', fontSize: 22 }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                      {t('1. Patient Information', '١. اختيار المريض')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                      {t('Search by name or phone number', 'ابحث بالاسم أو رقم الهاتف لعرض ملف المريض وتنبيهات الحساسية')}
+                    </Typography>
+                  </Box>
+                </Stack>
               </Stack>
 
               <Autocomplete
@@ -2005,7 +2020,7 @@ export default function NewPrescriptionPage() {
                 renderInput={(params) => (
                   <TextField
                     {...params}
-                    label={t('Select Patient', 'اختر المريض')}
+                    label={t('Select Patient *', 'اختر المريض *')}
                     placeholder={t('Search by name or phone', 'ابحث بالاسم أو الهاتف')}
                     InputProps={{
                       ...params.InputProps,
@@ -2021,383 +2036,111 @@ export default function NewPrescriptionPage() {
               />
 
               {selectedPatient && (
-                <Grid container spacing={2} sx={{ mt: 2 }}>
-                  {[
-                    { label: t('MRN', 'رقم الملف'), value: patientInfo.mrn },
-                    { label: t('Sex', 'النوع'), value: patientInfo.sex },
-                    { label: t('DOB', 'تاريخ الميلاد'), value: patientInfo.dobStr },
-                    { label: t('Phone', 'الهاتف'), value: patientInfo.phone },
-                  ].map((item, idx) => (
-                    <Grid item xs={6} sm={3} key={idx}>
-                      <Paper
-                        elevation={0}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 2,
-                          background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.05) 0%, rgba(66, 165, 245, 0.03) 100%)',
-                          border: '1px solid',
-                          borderColor: 'rgba(25, 118, 210, 0.1)',
-                          transition: 'all 0.2s ease',
-                          '&:hover': {
-                            background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.08) 0%, rgba(66, 165, 245, 0.05) 100%)',
-                            borderColor: 'rgba(25, 118, 210, 0.2)',
-                            transform: 'translateY(-2px)',
-                          },
-                        }}
-                      >
-                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                          {item.label}
-                        </Typography>
-                        <Typography variant="body2" fontWeight={700} color="primary.main">
-                          {item.value || '-'}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  ))}
-                </Grid>
+                <>
+                  <Grid container spacing={1.5} sx={{ mt: 1.5 }}>
+                    {[
+                      { label: t('Phone', 'الهاتف'), value: patientInfo.phone },
+                      { label: t('Age', 'العمر'), value: patientInfo.age || '—' },
+                      { label: t('Gender', 'النوع'), value: patientInfo.sex || '—' },
+                      { label: t('Blood Type', 'فصيلة الدم'), value: patientInfo.bloodType || '—' },
+                    ].map((item, idx) => (
+                      <Grid item xs={6} sm={3} key={idx}>
+                        <div
+                          style={{
+                            padding: '10px 14px',
+                            borderRadius: '13px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700 }}>{item.label}</div>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 900, color: '#0f172a', marginTop: '2px' }}>
+                            {item.value || '—'}
+                          </div>
+                        </div>
+                      </Grid>
+                    ))}
+                  </Grid>
+
+                  {/* Live Clinical Safety Banner inside Prescription Form */}
+                  {(patientAllergiesList.length > 0 || patientConditionsList.length > 0 || patientInfo.isDiabetic || patientInfo.isPregnant) && (
+                    <div
+                      style={{
+                        marginTop: '14px',
+                        padding: '11px 14px',
+                        borderRadius: '13px',
+                        background: '#fef2f2',
+                        border: '1.5px solid #fecaca',
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', fontWeight: 900, color: '#b91c1c' }}>
+                        {t('⚠ Patient Safety Alerts:', '⚠ تنبيهات هامة قبل وصف الأدوية:')}
+                      </span>
+                      {patientAllergiesList.map((al, i) => (
+                        <span key={`rx-al-${i}`} style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#ef4444', color: '#ffffff' }}>
+                          {t('Allergy:', 'حساسية:')} {al}
+                        </span>
+                      ))}
+                      {patientConditionsList.map((cd, i) => (
+                        <span key={`rx-cd-${i}`} style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#f59e0b', color: '#ffffff' }}>
+                          {cd}
+                        </span>
+                      ))}
+                      {patientInfo.isDiabetic && (
+                        <span style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#d97706', color: '#ffffff' }}>
+                          {t('Diabetic', 'مريض سكري')}
+                        </span>
+                      )}
+                      {patientInfo.isPregnant && (
+                        <span style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#db2777', color: '#ffffff' }}>
+                          {t('Pregnant', 'حامل')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </Paper>
 
-            {/* Attachment Section */}
-            <Paper 
+            {/* 2. Clinical Section */}
+            <Paper
+              id="rx-sec-clinical"
               elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #9c27b0 0%, #ba68c8 50%, #ce93d8 100%)',
-                  transition: 'all 0.3s ease',
-                },
+              className="glass-panel"
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #10b981',
+                scrollMarginTop: '148px',
               }}
             >
               <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
                 <Box
                   sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #9c27b0 0%, #ba68c8 100%)',
+                    width: 44,
+                    height: 44,
+                    borderRadius: '13px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(156, 39, 176, 0.3)',
+                    boxShadow: '0 6px 16px -4px rgba(16, 185, 129, 0.36)',
                   }}
                 >
-                  <NoteAltIcon sx={{ color: 'white', fontSize: 24 }} />
+                  <HealingIcon sx={{ color: 'white', fontSize: 22 }} />
                 </Box>
-                <Typography 
-                  variant="h6" 
-                  fontWeight={800}
-                  sx={{
-                    background: 'linear-gradient(135deg, #9c27b0 0%, #ba68c8 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  {t('Attachment', 'المرفق')}
-                </Typography>
-              </Stack>
-              <Stack spacing={2}>
-                <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap">
-                  <Tooltip title={t('Attach report image', 'إرفاق صورة التقرير')}>
-                    <Button 
-                      variant="outlined" 
-                      startIcon={<AddPhotoAlternateIcon />} 
-                      component="label"
-                      sx={{
-                        borderRadius: 2.5,
-                        textTransform: 'none',
-                        fontWeight: 700,
-                        px: 2.5,
-                        borderWidth: 2,
-                        borderColor: 'secondary.main',
-                        color: 'secondary.main',
-                        '&:hover': {
-                          borderWidth: 2,
-                          borderColor: 'secondary.dark',
-                          background: 'rgba(156, 39, 176, 0.08)',
-                          transform: 'translateY(-2px)',
-                          boxShadow: '0 4px 12px rgba(156, 39, 176, 0.2)',
-                        },
-                        transition: 'all 0.2s ease',
-                      }}
-                    >
-                      {t('Attach Image', 'إرفاق صورة')}
-                      <input type="file" hidden accept="image/*" onChange={handleFilePick} />
-                    </Button>
-                  </Tooltip>
-                  {fileName && (
-                    <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: 240 }}>
-                      {fileName}
-                    </Typography>
-                  )}
-                  {previewURL && (
-                    <Button color="error" size="small" onClick={clearFile}>
-                      {t('Remove', 'إزالة')}
-                    </Button>
-                  )}
-                </Stack>
-                {attaching && (
-                  <Stack sx={{ minWidth: 220 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {t('Uploading image…', 'جاري رفع الصورة…')}
-                    </Typography>
-                    <LinearProgress />
-                  </Stack>
-                )}
-                {!!previewURL && (
-                  <Box
-                    sx={{
-                      mt: 1.5,
-                      width: '100%',
-                      borderRadius: 2,
-                      border: (t2) => `1px solid ${t2.palette.divider}`,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <Box
-                      sx={{
-                        aspectRatio: '16 / 9',
-                        backgroundImage: `url(${previewURL})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                      }}
-                    />
-                  </Box>
-                )}
-              </Stack>
-            </Paper>
-
-            {/* Meta Section */}
-            <Paper 
-              elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #ff9800 0%, #ffb74d 50%, #ffcc80 100%)',
-                  transition: 'all 0.3s ease',
-                },
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
-                <Box
-                  sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #ff9800 0%, #ffb74d 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(255, 152, 0, 0.3)',
-                  }}
-                >
-                  <EventIcon sx={{ color: 'white', fontSize: 24 }} />
+                <Box>
+                  <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                    {t('2. Clinical Assessment & Diagnosis', '٢. التقييم السريري والتشخيص')}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                    {t('Focus any field for AI clinical suggestions', 'اضغط داخل أي خانة للحصول على اقتراحات طبية ذكية')}
+                  </Typography>
                 </Box>
-                <Typography 
-                  variant="h6" 
-                  fontWeight={800}
-                  sx={{
-                    background: 'linear-gradient(135deg, #ff9800 0%, #ffb74d 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  {t('Report Meta', 'بيانات التقرير')}
-                </Typography>
-              </Stack>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  {titleGenerating && !titleAutoGenerated.ar && (
-                    <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={16} sx={{ color: '#8a4baf' }} />
-                      <Typography variant="caption" color="text.secondary">
-                        {t('Generating title...', 'جارٍ توليد العنوان...')}
-                      </Typography>
-                    </Box>
-                  )}
-                  <TextField
-                    label={t('Title (Arabic)', 'العنوان (عربي)')}
-                    fullWidth
-                    value={form.titleAr}
-                    onChange={handleFormChange('titleAr')}
-                    disabled={!titleAutoGenerated.ar}
-                    helperText={
-                      !titleAutoGenerated.ar
-                        ? t('Title will be generated automatically after filling all fields', 'سيتم توليد العنوان تلقائياً بعد ملء كافة الخانات')
-                        : titleAutoGenerated.ar && form.titleAr?.trim()
-                        ? t('Auto-generated - you can edit', 'مولّد تلقائياً - يمكنك التعديل')
-                        : ' '
-                    }
-                    InputProps={{
-                      endAdornment: titleAutoGenerated.ar && form.titleAr?.trim() && (
-                        <InputAdornment position="end">
-                          <Tooltip title={t('Auto-generated', 'مولّد تلقائياً')}>
-                            <AutoAwesomeIcon fontSize="small" sx={{ color: '#8a4baf' }} />
-                          </Tooltip>
-                        </InputAdornment>
-                      ),
-                    }}
-                    inputProps={{ maxLength: 80 }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  {titleGenerating && !titleAutoGenerated.en && (
-                    <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CircularProgress size={16} sx={{ color: '#8a4baf' }} />
-                      <Typography variant="caption" color="text.secondary">
-                        {t('Generating title...', 'جارٍ توليد العنوان...')}
-                      </Typography>
-                    </Box>
-                  )}
-                  <TextField
-                    label={t('Title (English)', 'العنوان (إنجليزي)')}
-                    fullWidth
-                    value={form.titleEn}
-                    onChange={handleFormChange('titleEn')}
-                    disabled={!titleAutoGenerated.en}
-                    helperText={
-                      !titleAutoGenerated.en
-                        ? t('Title will be generated automatically after filling all fields', 'سيتم توليد العنوان تلقائياً بعد ملء كافة الخانات')
-                        : titleAutoGenerated.en && form.titleEn?.trim()
-                        ? t('Auto-generated - you can edit', 'مولّد تلقائياً - يمكنك التعديل')
-                        : ' '
-                    }
-                    InputProps={{
-                      endAdornment: titleAutoGenerated.en && form.titleEn?.trim() && (
-                        <InputAdornment position="end">
-                          <Tooltip title={t('Auto-generated', 'مولّد تلقائياً')}>
-                            <AutoAwesomeIcon fontSize="small" sx={{ color: '#8a4baf' }} />
-                          </Tooltip>
-                        </InputAdornment>
-                      ),
-                    }}
-                    inputProps={{ maxLength: 80 }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6} md={4}>
-                  <TextField
-                    type="datetime-local"
-                    label={t('Date', 'التاريخ')}
-                    value={form.dateStr}
-                    onChange={handleFormChange('dateStr')}
-                    fullWidth
-                    InputLabelProps={{ shrink: true }}
-                    helperText=" "
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <EventIcon fontSize="small" />
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
-                </Grid>
-              </Grid>
-            </Paper>
-
-            {/* Clinical Section */}
-            <Paper 
-              elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #4caf50 0%, #66bb6a 50%, #81c784 100%)',
-                  transition: 'all 0.3s ease',
-                },
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
-                <Box
-                  sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #4caf50 0%, #66bb6a 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(76, 175, 80, 0.3)',
-                  }}
-                >
-                  <HealingIcon sx={{ color: 'white', fontSize: 24 }} />
-                </Box>
-                <Typography 
-                  variant="h6" 
-                  fontWeight={800}
-                  sx={{
-                    background: 'linear-gradient(135deg, #4caf50 0%, #66bb6a 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  {t('Clinical Details', 'التفاصيل السريرية')}
-                </Typography>
               </Stack>
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
@@ -2467,65 +2210,60 @@ export default function NewPrescriptionPage() {
               </Grid>
             </Paper>
 
-            {/* Vitals Section */}
-            <Paper 
+            {/* 3. Vitals Section with 1-Click Normal Preset */}
+            <Paper
+              id="rx-sec-vitals"
               elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #f44336 0%, #ef5350 50%, #e57373 100%)',
-                  transition: 'all 0.3s ease',
-                },
+              className="glass-panel"
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #ef4444',
+                scrollMarginTop: '148px',
               }}
             >
-              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
-                <Box
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1.5} sx={{ mb: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1.5}>
+                  <Box
+                    sx={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: '13px',
+                      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 6px 16px -4px rgba(239, 68, 68, 0.36)',
+                    }}
+                  >
+                    <FavoriteIcon sx={{ color: 'white', fontSize: 22 }} />
+                  </Box>
+                  <Box>
+                    <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                      {t('3. Vital Signs', '٣. العلامات الحيوية')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                      {t('Use 1-click preset for normal vitals or pick values', 'املأ القيم الطبيعية بضغطة واحدة أو عدّلها يدوياً')}
+                    </Typography>
+                  </Box>
+                </Stack>
+
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={applyNormalVitals}
+                  startIcon={<AutoAwesomeIcon sx={{ fontSize: 16 }} />}
                   sx={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 3,
-                    background: 'linear-gradient(135deg, #f44336 0%, #ef5350 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 16px rgba(244, 67, 54, 0.3)',
+                    borderRadius: '11px',
+                    borderColor: '#fecaca',
+                    bgcolor: '#fef2f2',
+                    color: '#b91c1c',
+                    fontWeight: 800,
+                    '&:hover': { bgcolor: '#fee2e2', borderColor: '#ef4444' },
                   }}
                 >
-                  <FavoriteIcon sx={{ color: 'white', fontSize: 24 }} />
-                </Box>
-                <Typography 
-                  variant="h6" 
-                  fontWeight={800}
-                  sx={{
-                    background: 'linear-gradient(135deg, #f44336 0%, #ef5350 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                  }}
-                >
-                  {t('Vital Signs', 'العلامات الحيوية')}
-                </Typography>
+                  {t('Normal Vitals (120/80 • 75 • 37°C • 98%)', 'قيم طبيعية سريعة (120/80 • 75 • 37°)')}
+                </Button>
               </Stack>
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6} md={3}>
@@ -2695,86 +2433,51 @@ export default function NewPrescriptionPage() {
               </Dialog>
             </Paper>
 
-            {/* Medications */}
-            <Paper 
+            {/* 4. Medications with Quick Dose / Frequency / Duration Chips */}
+            <Paper
+              id="rx-sec-meds"
               elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #2196f3 0%, #42a5f5 50%, #64b5f6 100%)',
-                  transition: 'all 0.3s ease',
-                },
+              className="glass-panel"
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #2563eb',
+                scrollMarginTop: '148px',
               }}
             >
               <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.5 }}>
                 <Stack direction="row" alignItems="center" spacing={1.5}>
                   <Box
                     sx={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 3,
-                      background: 'linear-gradient(135deg, #2196f3 0%, #42a5f5 100%)',
+                      width: 44,
+                      height: 44,
+                      borderRadius: '13px',
+                      background: 'linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      boxShadow: '0 4px 16px rgba(33, 150, 243, 0.3)',
+                      boxShadow: '0 6px 16px -4px rgba(37, 99, 235, 0.36)',
                     }}
                   >
-                    <MedicationIcon sx={{ color: 'white', fontSize: 24 }} />
+                    <MedicationIcon sx={{ color: 'white', fontSize: 22 }} />
                   </Box>
-                  <Typography 
-                    variant="h6" 
-                    fontWeight={800}
-                    sx={{
-                      background: 'linear-gradient(135deg, #2196f3 0%, #42a5f5 100%)',
-                      backgroundClip: 'text',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                    }}
-                  >
-                    {t('Medications', 'الأدوية')}
-                  </Typography>
+                  <Box>
+                    <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                      {t('4. Prescribed Medications', '٤. الأدوية الموصوفة')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                      {t('Type drug name + tap quick frequency & duration chips', 'ابحث عن الدواء ثم اختر التكرار والمدة بضغطة واحدة')}
+                    </Typography>
+                  </Box>
                 </Stack>
                 <Button
                   size="small"
                   startIcon={<AddCircleOutlineIcon />}
                   onClick={addMedication}
-                  variant="outlined"
-                  sx={{
-                    borderRadius: 2.5,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    borderWidth: 2,
-                    '&:hover': {
-                      borderWidth: 2,
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(33, 150, 243, 0.2)',
-                    },
-                    transition: 'all 0.2s ease',
-                  }}
+                  variant="contained"
+                  sx={{ borderRadius: '11px', px: 2 }}
                 >
-                  {t('Add', 'إضافة')}
+                  {t('Add Drug', 'إضافة دواء')}
                 </Button>
               </Stack>
 
@@ -2998,98 +2701,141 @@ export default function NewPrescriptionPage() {
                           <DeleteOutlineIcon />
                         </IconButton>
                       </Grid>
+
+                      {/* 1-Click Quick Dose / Frequency / Duration Chips */}
+                      <Grid item xs={12}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingTop: '4px' }}>
+                          {(isArabic
+                            ? [
+                                { k: 'frequency', v: 'مرة يومياً (1×1)' },
+                                { k: 'frequency', v: 'مرتين يومياً (1×2)' },
+                                { k: 'frequency', v: '3 مرات يومياً (1×3)' },
+                                { k: 'frequency', v: 'عند اللزوم' },
+                                { k: 'dose', v: 'قرص بعد الأكل' },
+                                { k: 'dose', v: 'قرص قبل الأكل' },
+                                { k: 'duration', v: '5 أيام' },
+                                { k: 'duration', v: '7 أيام' },
+                                { k: 'duration', v: '14 يوم' },
+                                { k: 'duration', v: 'شهر' },
+                              ]
+                            : [
+                                { k: 'frequency', v: 'Once daily (OD)' },
+                                { k: 'frequency', v: 'Twice daily (BID)' },
+                                { k: 'frequency', v: '3x daily (TID)' },
+                                { k: 'frequency', v: 'PRN' },
+                                { k: 'dose', v: '1 tab after meals' },
+                                { k: 'dose', v: '1 tab before meals' },
+                                { k: 'duration', v: '5 days' },
+                                { k: 'duration', v: '7 days' },
+                                { k: 'duration', v: '14 days' },
+                                { k: 'duration', v: '1 month' },
+                              ]
+                          ).map((chip) => {
+                            const active = m[chip.k] === chip.v;
+                            return (
+                              <button
+                                key={`${chip.k}-${chip.v}`}
+                                type="button"
+                                onClick={() => updateMedication(idx, chip.k, chip.v)}
+                                style={{
+                                  padding: '3px 10px',
+                                  borderRadius: '999px',
+                                  border: `1px solid ${active ? '#2563eb' : '#e2e8f0'}`,
+                                  background: active ? '#eff6ff' : '#f8fafc',
+                                  color: active ? '#1d4ed8' : '#475569',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                }}
+                              >
+                                {chip.v}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Grid>
                     </Grid>
                   </Paper>
                 ))}
               </Stack>
             </Paper>
 
-            {/* Tests */}
-            <Paper 
+            {/* 5. Medical Tests with 1-Click Common Lab Chips */}
+            <Paper
+              id="rx-sec-tests"
               elevation={0}
-              sx={{ 
-                p: 3.5, 
-                mb: 3, 
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                  boxShadow: '0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.06)',
-                  transform: 'translateY(-2px)',
-                },
-                position: 'relative',
-                overflow: 'hidden',
-                '&::before': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '5px',
-                  height: '100%',
-                  background: 'linear-gradient(180deg, #00bcd4 0%, #26c6da 50%, #4dd0e1 100%)',
-                  transition: 'all 0.3s ease',
-                },
+              className="glass-panel"
+              sx={{
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #0ea5e9',
+                scrollMarginTop: '148px',
               }}
             >
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.5 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
                 <Stack direction="row" alignItems="center" spacing={1.5}>
                   <Box
                     sx={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: 3,
-                      background: 'linear-gradient(135deg, #00bcd4 0%, #26c6da 100%)',
+                      width: 44,
+                      height: 44,
+                      borderRadius: '13px',
+                      background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      boxShadow: '0 4px 16px rgba(0, 188, 212, 0.3)',
+                      boxShadow: '0 6px 16px -4px rgba(14, 165, 233, 0.36)',
                     }}
                   >
-                    <ScienceIcon sx={{ color: 'white', fontSize: 24 }} />
+                    <ScienceIcon sx={{ color: 'white', fontSize: 22 }} />
                   </Box>
-                  <Typography 
-                    variant="h6" 
-                    fontWeight={800}
-                    sx={{
-                      background: 'linear-gradient(135deg, #00bcd4 0%, #26c6da 100%)',
-                      backgroundClip: 'text',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                    }}
-                  >
-                    {t('Medical Tests', 'الفحوصات الطبية')}
-                  </Typography>
+                  <Box>
+                    <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                      {t('5. Requested Tests & Labs', '٥. الفحوصات والتحاليل المطلوبة')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                      {t('Tap common labs below or type any custom investigation', 'أضف التحاليل الشائعة بضغطة واحدة أو ابحث عن أي فحص')}
+                    </Typography>
+                  </Box>
                 </Stack>
                 <Button
                   size="small"
                   startIcon={<AddCircleOutlineIcon />}
                   onClick={addTest}
                   variant="outlined"
-                  sx={{
-                    borderRadius: 2.5,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    borderWidth: 2,
-                    borderColor: 'info.main',
-                    color: 'info.main',
-                    '&:hover': {
-                      borderWidth: 2,
-                      borderColor: 'info.dark',
-                      background: 'rgba(0, 188, 212, 0.08)',
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0, 188, 212, 0.2)',
-                    },
-                    transition: 'all 0.2s ease',
-                  }}
+                  sx={{ borderRadius: '11px' }}
                 >
-                  {t('Add', 'إضافة')}
+                  {t('Add Test', 'إضافة فحص')}
                 </Button>
               </Stack>
+
+              {/* 1-Click Common Lab Chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px', marginBottom: '16px' }}>
+                {['CBC', 'HbA1c', 'Fasting Blood Sugar', 'Lipid Profile', 'Liver Function (ALT/AST)', 'Kidney Function (Creatinine/Urea)', 'TSH', 'Vitamin D', 'Urine Analysis'].map((lab) => {
+                  const selected = testsList.some((x) => String(x.name || '').toLowerCase() === lab.toLowerCase());
+                  return (
+                    <button
+                      key={lab}
+                      type="button"
+                      onClick={() => quickAddLabTest(lab)}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: '999px',
+                        border: `1px solid ${selected ? '#0284c7' : '#bae6fd'}`,
+                        background: selected ? '#0284c7' : '#f0f9ff',
+                        color: selected ? '#ffffff' : '#0369a1',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {selected ? '✓ ' : '+ '}
+                      {lab}
+                    </button>
+                  );
+                })}
+              </div>
 
               <Stack spacing={2}>
                 {testsList.map((testItem, idx) => (
@@ -3262,67 +3008,193 @@ export default function NewPrescriptionPage() {
               </Stack>
             </Paper>
 
-            {/* Actions */}
+            {/* 6. Report Meta & Attachment Section */}
             <Paper
+              id="rx-sec-meta"
               elevation={0}
+              className="glass-panel"
               sx={{
-                p: 3,
-                borderRadius: 4,
-                background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                backdropFilter: 'blur(20px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-                border: '1.5px solid',
-                borderColor: 'rgba(255,255,255,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
+                p: { xs: 2.5, sm: 3 },
+                mb: 2.5,
+                borderTop: '4px solid #6366f1',
+                scrollMarginTop: '148px',
               }}
             >
-              <Stack direction="row" spacing={2} justifyContent="flex-end">
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2.5 }}>
+                <Box
+                  sx={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '13px',
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 6px 16px -4px rgba(99, 102, 241, 0.36)',
+                  }}
+                >
+                  <NoteAltIcon sx={{ color: 'white', fontSize: 22 }} />
+                </Box>
+                <Box>
+                  <Typography variant="h6" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                    {t('6. Report Title, Date & Scan Attachment', '٦. عنوان التقرير والتاريخ والمرفق')}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                    {t('Titles auto-generate or can be typed manually anytime', 'يتم توليد العنوان تلقائياً أو يمكنك كتابته يدوياً في أي وقت')}
+                  </Typography>
+                </Box>
+              </Stack>
+
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    label={t('Title (Arabic)', 'العنوان (عربي)')}
+                    fullWidth
+                    size="small"
+                    value={form.titleAr}
+                    onChange={handleFormChange('titleAr')}
+                    helperText={
+                      titleGenerating
+                        ? t('Auto-generating...', 'جارٍ التوليد تلقائياً...')
+                        : titleAutoGenerated.ar && form.titleAr?.trim()
+                        ? t('Auto-generated (editable)', 'مولّد تلقائياً - قابل للتعديل')
+                        : ''
+                    }
+                    InputProps={{
+                      endAdornment: titleAutoGenerated.ar && form.titleAr?.trim() && (
+                        <InputAdornment position="end">
+                          <AutoAwesomeIcon fontSize="small" sx={{ color: '#6366f1' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    inputProps={{ maxLength: 80 }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    label={t('Title (English)', 'العنوان (إنجليزي)')}
+                    fullWidth
+                    size="small"
+                    value={form.titleEn}
+                    onChange={handleFormChange('titleEn')}
+                    InputProps={{
+                      endAdornment: titleAutoGenerated.en && form.titleEn?.trim() && (
+                        <InputAdornment position="end">
+                          <AutoAwesomeIcon fontSize="small" sx={{ color: '#6366f1' }} />
+                        </InputAdornment>
+                      ),
+                    }}
+                    inputProps={{ maxLength: 80 }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    type="datetime-local"
+                    label={t('Visit Date & Time', 'تاريخ ووقت الزيارة')}
+                    value={form.dateStr}
+                    onChange={handleFormChange('dateStr')}
+                    fullWidth
+                    size="small"
+                    InputLabelProps={{ shrink: true }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <EventIcon fontSize="small" />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                </Grid>
+
+                {/* Attachment Upload Row */}
+                <Grid item xs={12}>
+                  <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" sx={{ pt: 1 }}>
+                    <Button variant="outlined" startIcon={<AddPhotoAlternateIcon />} component="label" sx={{ borderRadius: '12px' }}>
+                      {t('Attach Scan / Image', 'إرفاق صورة أشعة أو تقرير')}
+                      <input type="file" hidden accept="image/*" onChange={handleFilePick} />
+                    </Button>
+                    {fileName && (
+                      <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: 260 }}>
+                        {fileName}
+                      </Typography>
+                    )}
+                    {previewURL && (
+                      <Button color="error" size="small" onClick={clearFile}>
+                        {t('Remove', 'إزالة')}
+                      </Button>
+                    )}
+                    {attaching && <CircularProgress size={20} />}
+                  </Stack>
+                  {!!previewURL && (
+                    <Box sx={{ mt: 1.5, maxWidth: 420, borderRadius: '14px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                      <Box sx={{ aspectRatio: '16 / 9', backgroundImage: `url(${previewURL})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+                    </Box>
+                  )}
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {/* Sticky Bottom Clinical Action Bar */}
+            <div
+              style={{
+                position: 'sticky',
+                bottom: '14px',
+                zIndex: 50,
+                padding: '14px 20px',
+                borderRadius: '18px',
+                background: 'rgba(15, 23, 42, 0.94)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                color: '#ffffff',
+                boxShadow: '0 18px 40px -10px rgba(15, 23, 42, 0.42)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', fontSize: '0.84rem', fontWeight: 800 }}>
+                <span style={{ color: '#93c5fd' }}>
+                  {selectedPatient?.name || t('No patient selected', 'لم يتم اختيار مريض')}
+                </span>
+                <span style={{ opacity: 0.4 }}>•</span>
+                <span>{filledMedsCount} {t('Meds', 'أدوية')}</span>
+                <span style={{ opacity: 0.4 }}>•</span>
+                <span>{filledTestsCount} {t('Tests', 'فحوصات')}</span>
+              </div>
+
+              <Stack direction="row" spacing={1.25} flexWrap="wrap">
                 <Button
                   variant="outlined"
                   onClick={() => router.push(`/patient-reports${isArabic ? '?lang=ar' : ''}`)}
-                  sx={{
-                    borderRadius: 2.5,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    px: 3,
-                    borderWidth: 2,
-                    '&:hover': {
-                      borderWidth: 2,
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    },
-                    transition: 'all 0.2s ease',
-                  }}
+                  sx={{ borderRadius: '12px', color: '#e2e8f0', borderColor: 'rgba(255,255,255,0.28)' }}
                 >
                   {t('Cancel', 'إلغاء')}
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<PrintIcon />}
+                  onClick={handlePrint}
+                  sx={{ borderRadius: '12px', color: '#ffffff', borderColor: 'rgba(255,255,255,0.38)' }}
+                >
+                  {t('Print', 'طباعة')}
                 </Button>
                 <Button
                   variant="contained"
                   onClick={handleSave}
                   disabled={submitting}
                   sx={{
-                    minWidth: 140,
-                    borderRadius: 2.5,
-                    textTransform: 'none',
-                    fontWeight: 700,
-                    px: 3,
-                    background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
-                    '&:hover': {
-                      background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                      boxShadow: '0 6px 16px rgba(25, 118, 210, 0.4)',
-                      transform: 'translateY(-2px)',
-                    },
-                    '&:disabled': {
-                      background: 'rgba(0,0,0,0.12)',
-                    },
-                    transition: 'all 0.2s ease',
+                    minWidth: 150,
+                    borderRadius: '12px',
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                    boxShadow: '0 8px 20px rgba(37, 99, 235, 0.5)',
                   }}
                 >
-                  {submitting ? <CircularProgress size={20} color="inherit" /> : t('Save', 'حفظ')}
+                  {submitting ? <CircularProgress size={20} color="inherit" /> : t('Save Report', 'حفظ التقرير')}
                 </Button>
               </Stack>
-            </Paper>
+            </div>
           </Container>
         </Box>
 

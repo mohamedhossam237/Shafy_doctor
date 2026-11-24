@@ -603,23 +603,47 @@ OCR text:
         fullScreen={fullScreen}
         maxWidth="md"
         PaperProps={{
-          sx: { direction: dir, textAlign: isArabic ? 'right' : 'left', borderRadius: fullScreen ? 0 : 3 },
+          sx: { direction: dir, textAlign: isArabic ? 'right' : 'left', borderRadius: fullScreen ? 0 : '24px', overflow: 'hidden' },
         }}
       >
-        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 1 }}>
-          <Stack direction="row" alignItems="center" spacing={1.25}>
-            <Chip
-              icon={<ScienceIcon />}
-              label={t('Lab Report', 'تقرير معملي')}
-              color="secondary"
-              sx={{ fontWeight: 800, letterSpacing: 0.3 }}
-            />
-            <Typography variant="body2" color="text.secondary">{t('New entry', 'إدخال جديد')}</Typography>
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #0b1936 0%, #15347a 52%, #4f46e5 100%)',
+            color: '#ffffff',
+            padding: '18px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <div
+              style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '13px',
+                background: 'rgba(255,255,255,0.16)',
+                border: '1px solid rgba(255,255,255,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <ScienceIcon sx={{ color: '#ffffff' }} />
+            </div>
+            <Box>
+              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                {t('Lab Report Entry', 'إدخال تقرير معملي')}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#dbeafe', fontWeight: 600 }}>
+                {t('Use 1-click lab panels or OCR + AI Auto-Fill', 'استخدم القوالب الجاهزة أو مسح الورقة بالذكاء الاصطناعي')}
+              </Typography>
+            </Box>
           </Stack>
-          <IconButton onClick={() => !submitting && onClose?.()} disabled={submitting}>
+          <IconButton onClick={() => !submitting && onClose?.()} disabled={submitting} sx={{ color: '#ffffff', bgcolor: 'rgba(255,255,255,0.14)' }}>
             <CloseIcon />
           </IconButton>
-        </DialogTitle>
+        </div>
 
         <DialogContent
           dividers
@@ -778,7 +802,87 @@ OCR text:
             </Section>
 
             {/* Tests */}
-            <Section icon={<ScienceIcon fontSize="small" />} title={t('Tests', 'التحاليل')}>
+            <Section icon={<ScienceIcon fontSize="small" />} title={t('Tests & Quick Lab Panels', 'التحاليل والقوالب الجاهزة')}>
+              {/* 1-Click Standard Lab Panel Presets */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+                {[
+                  {
+                    label: 'CBC',
+                    rows: [
+                      { test: 'Hemoglobin (Hb)', result: '', unit: 'g/dL', refRange: '12.0 - 16.5', flag: '', notes: '' },
+                      { test: 'WBC', result: '', unit: '10^3/µL', refRange: '4.0 - 11.0', flag: '', notes: '' },
+                      { test: 'Platelets', result: '', unit: '10^3/µL', refRange: '150 - 450', flag: '', notes: '' },
+                    ],
+                  },
+                  {
+                    label: 'Blood Sugar / HbA1c',
+                    rows: [
+                      { test: 'Fasting Blood Glucose', result: '', unit: 'mg/dL', refRange: '70 - 99', flag: '', notes: '' },
+                      { test: 'HbA1c', result: '', unit: '%', refRange: '4.0 - 5.6', flag: '', notes: '' },
+                    ],
+                  },
+                  {
+                    label: 'Lipid Profile',
+                    rows: [
+                      { test: 'Total Cholesterol', result: '', unit: 'mg/dL', refRange: '< 200', flag: '', notes: '' },
+                      { test: 'LDL', result: '', unit: 'mg/dL', refRange: '< 100', flag: '', notes: '' },
+                      { test: 'HDL', result: '', unit: 'mg/dL', refRange: '> 40', flag: '', notes: '' },
+                      { test: 'Triglycerides', result: '', unit: 'mg/dL', refRange: '< 150', flag: '', notes: '' },
+                    ],
+                  },
+                  {
+                    label: 'Liver Panel',
+                    rows: [
+                      { test: 'ALT (SGPT)', result: '', unit: 'U/L', refRange: '7 - 56', flag: '', notes: '' },
+                      { test: 'AST (SGOT)', result: '', unit: 'U/L', refRange: '10 - 40', flag: '', notes: '' },
+                      { test: 'Total Bilirubin', result: '', unit: 'mg/dL', refRange: '0.1 - 1.2', flag: '', notes: '' },
+                    ],
+                  },
+                  {
+                    label: 'Kidney Panel',
+                    rows: [
+                      { test: 'Serum Creatinine', result: '', unit: 'mg/dL', refRange: '0.6 - 1.2', flag: '', notes: '' },
+                      { test: 'Blood Urea', result: '', unit: 'mg/dL', refRange: '15 - 45', flag: '', notes: '' },
+                      { test: 'Uric Acid', result: '', unit: 'mg/dL', refRange: '3.5 - 7.2', flag: '', notes: '' },
+                    ],
+                  },
+                  {
+                    label: 'Thyroid (TSH/FT4)',
+                    rows: [
+                      { test: 'TSH', result: '', unit: 'µIU/mL', refRange: '0.4 - 4.0', flag: '', notes: '' },
+                      { test: 'Free T4', result: '', unit: 'ng/dL', refRange: '0.8 - 1.8', flag: '', notes: '' },
+                    ],
+                  },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      setTests((prev) => {
+                        const isEmptySingle = prev.length === 1 && !prev[0].test?.trim() && !prev[0].result?.trim();
+                        return isEmptySingle ? preset.rows : [...prev, ...preset.rows];
+                      });
+                      if (!form.title?.trim()) {
+                        setForm((f) => ({ ...f, title: preset.label }));
+                      }
+                    }}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: '999px',
+                      border: '1px solid #bfdbfe',
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    + {preset.label}
+                  </button>
+                ))}
+              </div>
+
               <Stack spacing={1.5}>
                 {Boolean(errors.tests) && (
                   <Alert severity="warning">{t('Add at least one test', 'أضف فحصًا واحدًا على الأقل')}</Alert>

@@ -310,11 +310,41 @@ export default function PatientDetailsPage() {
   const [savingSection, setSavingSection] = React.useState('');
 
   const [tabValue, setTabValue] = React.useState(0);
+  const [drawerTab, setDrawerTab] = React.useState('basics');
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
 
   const label = (e, a) => (isArabic ? a : e);
+
+  const profileCompleteness = React.useMemo(() => {
+    if (!patient) return 0;
+    const checks = [
+      Boolean(patient.name),
+      Boolean(patient.phone),
+      Number.isFinite(patient.age) || Boolean(patient.age),
+      Boolean(patient.gender),
+      Boolean(patient.bloodType),
+      Boolean(patient.address || patient.email),
+      Boolean(patient.weight || patient.height || patient.bloodPressure),
+      Boolean(patient.allergies || patient.conditions || patient.medications),
+    ];
+    return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  }, [patient]);
+
+  const bmiInfo = React.useMemo(() => {
+    const w = parseFloat(patient?.weight);
+    const h = parseFloat(patient?.height);
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+    const hMeters = h > 3 ? h / 100 : h;
+    const bmi = w / (hMeters * hMeters);
+    if (!Number.isFinite(bmi) || bmi < 5 || bmi > 90) return null;
+    const val = Number(bmi.toFixed(1));
+    if (val < 18.5) return { val, tag: isArabic ? 'نحافة' : 'Underweight', color: '#0284c7', bg: '#e0f2fe' };
+    if (val < 25) return { val, tag: isArabic ? 'وزن مثالي' : 'Normal', color: '#059669', bg: '#ecfdf5' };
+    if (val < 30) return { val, tag: isArabic ? 'زيادة وزن' : 'Overweight', color: '#d97706', bg: '#fef3c7' };
+    return { val, tag: isArabic ? 'سمنة' : 'Obese', color: '#dc2626', bg: '#fee2e2' };
+  }, [patient?.weight, patient?.height, isArabic]);
 
   const canEditNotes =
     (user?.role && String(user.role).toLowerCase() === 'doctor') ||
@@ -338,7 +368,7 @@ export default function PatientDetailsPage() {
 
   const buildEditAllValues = React.useCallback(() => ({
     name: patient?.name || '',
-    age: Number.isFinite(patient?.age) ? patient.age : '',
+    age: Number.isFinite(patient?.age) ? patient.age : (patient?.age || ''),
     gender: patient?.gender || '',
     bloodType: patient?.bloodType || '',
     phone: patient?.phone || '',
@@ -349,6 +379,10 @@ export default function PatientDetailsPage() {
     medications: patient?.medications || '',
     maritalStatus: patient?.maritalStatus || '',
     lastVisit: toLocalDateTimeInput(patient?.lastVisit),
+    weight: patient?.weight || '',
+    height: patient?.height || '',
+    bloodPressure: patient?.bloodPressure || '',
+    temperature: patient?.temperature || '',
     notes: patient?.notes || '',
     financialNotes: patient?.financialNotes || '',
     isDiabetic: !!patient?.isDiabetic,
@@ -359,9 +393,10 @@ export default function PatientDetailsPage() {
     isPregnant: !!patient?.isPregnant,
   }), [patient]);
 
-  const openEditAll = React.useCallback(() => {
+  const openEditAll = React.useCallback((initialTab = 'basics') => {
     if (!patient) return;
     setEditAllValues(buildEditAllValues());
+    setDrawerTab(typeof initialTab === 'string' ? initialTab : 'basics');
     setEditAllOpen(true);
   }, [patient, buildEditAllValues]);
 
@@ -370,10 +405,10 @@ export default function PatientDetailsPage() {
     setSavingAll(true);
     try {
       const ref = doc(db, 'patients', patient.id);
-      const ageVal = Number(editAllValues.age);
+      const ageVal = editAllValues.age !== '' ? Number(editAllValues.age) : null;
       const updateData = {
         name: editAllValues.name.trim(),
-        age: Number.isFinite(ageVal) ? ageVal : null,
+        age: ageVal !== null && Number.isFinite(ageVal) ? ageVal : null,
         gender: editAllValues.gender || null,
         bloodType: editAllValues.bloodType || null,
         phone: editAllValues.phone || null,
@@ -384,6 +419,10 @@ export default function PatientDetailsPage() {
         medications: editAllValues.medications || null,
         maritalStatus: editAllValues.maritalStatus || null,
         lastVisit: editAllValues.lastVisit || null,
+        weight: editAllValues.weight || '',
+        height: editAllValues.height || '',
+        bloodPressure: editAllValues.bloodPressure || '',
+        temperature: editAllValues.temperature || '',
         notes: editAllValues.notes || '',
         financialNotes: editAllValues.financialNotes || '',
         isDiabetic: !!editAllValues.isDiabetic,
@@ -917,1331 +956,1249 @@ export default function PatientDetailsPage() {
   };
 
   /* ---------- UI ---------- */
+  const allergyList = splitCsv(patient?.allergies).filter((x) => !['none', 'لا يوجد'].includes(x.toLowerCase()));
+  const conditionList = splitCsv(patient?.conditions);
+  const hasClinicalAlerts =
+    allergyList.length > 0 || conditionList.length > 0 || patient?.isDiabetic || patient?.isPregnant;
+
   return (
     <Protected>
-      <AppLayout>
-        <Container maxWidth="md">
+      <AppLayout
+        title={patient?.name ? `${label('Patient Profile', 'ملف المريض')} • ${patient.name}` : label('Patient Profile', 'ملف المريض')}
+        subtitle={label('Clinical record, vitals, reports & appointment history', 'السجل السريري، المؤشرات الحيوية، التقارير وسجل الزيارات')}
+      >
+        <Container maxWidth={false} disableGutters>
           {loading ? (
-            <Stack spacing={2} sx={{ mt: 2 }}>
-              <Skeleton height={32} />
-              <Skeleton variant="rounded" height={200} />
-              <Skeleton variant="rounded" height={180} />
-              <Skeleton height={24} />
-              <Skeleton variant="rounded" height={140} />
+            <Stack spacing={2.5}>
+              <Skeleton variant="rounded" height={220} sx={{ borderRadius: '24px' }} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                {[1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} variant="rounded" height={120} sx={{ borderRadius: '20px' }} />
+                ))}
+              </div>
+              <Skeleton variant="rounded" height={260} sx={{ borderRadius: '22px' }} />
             </Stack>
           ) : !patient ? (
-            <Paper sx={{ p: 3, mt: 3 }}>
-              <Typography color="error">{label('Patient not found', 'المريض غير موجود')}</Typography>
-              <Button sx={{ mt: 2 }} component={Link} href={`/patients${isArabic ? '?lang=ar' : ''}`}>
+            <div className="glass-panel" style={{ padding: '40px', textAlign: 'center' }}>
+              <Typography variant="h6" fontWeight={900} color="error" gutterBottom>
+                {label('Patient not found', 'المريض غير موجود')}
+              </Typography>
+              <Button sx={{ mt: 2 }} variant="contained" component={Link} href={`/patients${isArabic ? '?lang=ar' : ''}`}>
                 {label('Back to list', 'العودة إلى القائمة')}
               </Button>
-            </Paper>
+            </div>
           ) : (
-            <Stack spacing={2} sx={{ mt: 1 }}>
+            <Stack spacing={3}>
+              {/* Royal Sapphire Executive Patient Hero */}
+              <div className="shafy-hero-shell" style={{ padding: '26px 28px' }}>
+                <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '18px', minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: '76px',
+                          height: '76px',
+                          borderRadius: '22px',
+                          background: '#ffffff',
+                          color: '#1d4ed8',
+                          border: '3px solid rgba(255,255,255,0.42)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.9rem',
+                          fontWeight: 900,
+                          boxShadow: '0 14px 32px rgba(0,0,0,0.22)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {initials}
+                      </div>
 
-              {/* Modern Hero Section */}
-              <Paper
-                elevation={0}
-                sx={{
-                  p: { xs: 3, md: 4 },
-                  borderRadius: 5,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  background: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.primary.dark} 100%)`,
-                  color: 'primary.contrastText',
-                  boxShadow: (t) => `0 20px 40px -10px ${alpha(t.palette.primary.main, 0.4)}`,
-                }}
-              >
-                {/* Decorative Elements */}
-                <Box sx={{
-                  position: 'absolute', top: -100, right: -100,
-                  width: 400, height: 400, borderRadius: '50%',
-                  background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%)',
-                  zIndex: 0
-                }} />
-                <Box sx={{
-                  position: 'absolute', bottom: -50, left: -50,
-                  width: 200, height: 200, borderRadius: '50%',
-                  background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%)',
-                  zIndex: 0
-                }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <Typography variant="h4" fontWeight={900} sx={{ color: '#ffffff', lineHeight: 1.15, fontSize: { xs: '1.45rem', md: '1.85rem' } }}>
+                            {patient.name || label('Unnamed', 'بدون اسم')}
+                          </Typography>
+                          <Chip
+                            label={`ID: ${String(patient.id).slice(0, 8)}`}
+                            size="small"
+                            onClick={() => copy(patient.id)}
+                            icon={<ContentCopyIcon style={{ color: '#ffffff', fontSize: 13 }} />}
+                            sx={{
+                              bgcolor: 'rgba(255,255,255,0.16)',
+                              color: '#ffffff',
+                              fontWeight: 800,
+                              border: '1px solid rgba(255,255,255,0.26)',
+                              cursor: 'pointer',
+                            }}
+                          />
+                        </div>
 
-                <Grid container spacing={3} alignItems="center" position="relative" zIndex={1}>
-                  <Grid item>
-                    <Avatar
-                      sx={{
-                        width: { xs: 100, md: 120 },
-                        height: { xs: 100, md: 120 },
-                        bgcolor: 'background.paper',
-                        color: 'primary.main',
-                        fontSize: '3rem',
-                        fontWeight: 800,
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-                        border: '4px solid rgba(255,255,255,0.2)'
+                        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
+                          {(Number.isFinite(patient?.age) || patient?.age) && (
+                            <Chip
+                              size="small"
+                              icon={<EventIcon style={{ color: '#ffffff', fontSize: 15 }} />}
+                              label={`${label('Age', 'العمر')}: ${patient.age}`}
+                              sx={{ bgcolor: 'rgba(255,255,255,0.14)', color: '#ffffff', fontWeight: 700 }}
+                            />
+                          )}
+                          {patient?.gender && (
+                            <Chip
+                              size="small"
+                              icon={<PersonIcon style={{ color: '#ffffff', fontSize: 15 }} />}
+                              label={
+                                String(patient.gender).toLowerCase() === 'male'
+                                  ? label('Male', 'ذكر')
+                                  : String(patient.gender).toLowerCase() === 'female'
+                                  ? label('Female', 'أنثى')
+                                  : patient.gender
+                              }
+                              sx={{ bgcolor: 'rgba(255,255,255,0.14)', color: '#ffffff', fontWeight: 700 }}
+                            />
+                          )}
+                          {patient?.bloodType && (
+                            <Chip
+                              size="small"
+                              icon={<BloodtypeIcon style={{ color: '#fecaca', fontSize: 15 }} />}
+                              label={patient.bloodType}
+                              sx={{ bgcolor: 'rgba(239, 68, 68, 0.28)', color: '#fee2e2', border: '1px solid rgba(254,202,202,0.45)', fontWeight: 900 }}
+                            />
+                          )}
+                          {patient?.phone && (
+                            <Chip
+                              size="small"
+                              icon={<PhoneIcon style={{ color: '#bae6fd', fontSize: 14 }} />}
+                              label={patient.phone}
+                              onClick={() => copy(patient.phone)}
+                              sx={{ bgcolor: 'rgba(255,255,255,0.14)', color: '#ffffff', fontWeight: 700, cursor: 'pointer' }}
+                            />
+                          )}
+                        </Stack>
+                      </div>
+                    </div>
+
+                    {/* Profile Completeness Meter */}
+                    <div
+                      onClick={() => openEditAll('basics')}
+                      role="button"
+                      tabIndex={0}
+                      style={{
+                        background: 'rgba(255,255,255,0.14)',
+                        border: '1px solid rgba(255,255,255,0.26)',
+                        borderRadius: '15px',
+                        padding: '10px 16px',
+                        minWidth: '185px',
+                        cursor: 'pointer',
                       }}
                     >
-                      {initials}
-                    </Avatar>
-                  </Grid>
-                  <Grid item xs>
-                    <Stack spacing={1}>
-                      <Box>
-                        <Typography variant="h3" fontWeight={900} sx={{ lineHeight: 1.1, mb: 0.5 }}>
-                          {patient.name || label('Unnamed', 'بدون اسم')}
-                        </Typography>
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ opacity: 0.9 }}>
-                          <Chip
-                            label={`ID: ${patient.id}`}
-                            size="small"
-                            sx={{
-                              bgcolor: 'rgba(255,255,255,0.15)',
-                              color: 'inherit',
-                              fontWeight: 600,
-                              backdropFilter: 'blur(4px)'
-                            }}
-                            onClick={() => copy(patient.id)}
-                            icon={<ContentCopyIcon style={{ color: 'white', fontSize: 14 }} />}
-                          />
-                        </Stack>
-                      </Box>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '0.73rem', fontWeight: 800, color: '#dbeafe' }}>
+                          {label('Profile Completeness', 'اكتمال ملف المريض')}
+                        </span>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 900, color: '#ffffff' }}>
+                          {profileCompleteness}%
+                        </span>
+                      </div>
+                      <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.2)', borderRadius: '999px', overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${profileCompleteness}%`,
+                            height: '100%',
+                            background: profileCompleteness >= 80 ? '#34d399' : '#fbbf24',
+                            borderRadius: '999px',
+                            transition: 'width 0.35s ease',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
-                        {Number.isFinite(patient?.age) && (
-                          <Chip
-                            icon={<EventIcon style={{ color: 'white' }} fontSize="small" />}
-                            label={`${label('Age', 'العمر')}: ${patient.age}`}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
-                          />
-                        )}
-                        {patient?.gender && (
-                          <Chip
-                            icon={<PersonIcon style={{ color: 'white' }} fontSize="small" />}
-                            label={patient.gender}
-                            sx={{ bgcolor: 'rgba(255,255,255,0.1)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
-                          />
-                        )}
-                        {patient?.bloodType && (
-                          <Chip
-                            icon={<BloodtypeIcon style={{ color: '#ffcdd2' }} fontSize="small" />}
-                            label={patient.bloodType}
-                            sx={{ bgcolor: 'rgba(211, 47, 47, 0.2)', color: '#ffcdd2', border: '1px solid rgba(211, 47, 47, 0.3)', fontWeight: 700 }}
-                          />
-                        )}
-                      </Stack>
-                    </Stack>
-                  </Grid>
-                  <Grid item xs={12} md="auto">
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                  {/* Clinical Safety Alert Strip (Allergies / Chronic Conditions / Flags) */}
+                  {hasClinicalAlerts && (
+                    <div
+                      style={{
+                        background: 'rgba(254, 226, 226, 0.16)',
+                        border: '1px solid rgba(254, 202, 202, 0.4)',
+                        borderRadius: '14px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', fontWeight: 900, color: '#fecaca' }}>
+                        {label('⚠ Clinical Alerts:', '⚠ تنبيهات إكلينيكية هامة:')}
+                      </span>
+                      {allergyList.map((al, i) => (
+                        <span key={`al-${i}`} style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#ef4444', color: '#ffffff' }}>
+                          {label('Allergy:', 'حساسية:')} {al}
+                        </span>
+                      ))}
+                      {conditionList.map((cd, i) => (
+                        <span key={`cd-${i}`} style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#f59e0b', color: '#ffffff' }}>
+                          {cd}
+                        </span>
+                      ))}
+                      {patient?.isDiabetic && (
+                        <span style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#f59e0b', color: '#ffffff' }}>
+                          {label('Diabetic', 'مريض سكري')}
+                        </span>
+                      )}
+                      {patient?.isPregnant && (
+                        <span style={{ fontSize: '0.74rem', fontWeight: 800, padding: '3px 10px', borderRadius: '999px', background: '#ec4899', color: '#ffffff' }}>
+                          {label('Pregnant', 'حامل')}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Quick Executive Action Toolbar */}
+                  <div className="shafy-telemetry-bar" style={{ padding: '12px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
+                      <Button
+                        variant="contained"
+                        startIcon={<DescriptionIcon />}
+                        onClick={() => router.push(`/prescription/new?patientId=${patient.id}${isArabic ? '&lang=ar' : '&lang=en'}`)}
+                        sx={{
+                          bgcolor: '#ffffff !important',
+                          background: '#ffffff !important',
+                          color: '#1d4ed8 !important',
+                          borderRadius: '13px',
+                          fontWeight: 900,
+                          px: 2.5,
+                          py: 1,
+                          boxShadow: '0 8px 20px rgba(0,0,0,0.18)',
+                        }}
+                      >
+                        {label('New Prescription / Report', 'إضافة وصفة / تقرير')}
+                      </Button>
+
                       <Button
                         variant="outlined"
-                        size="large"
-                        startIcon={<EditOutlinedIcon />}
-                        onClick={openEditAll}
+                        startIcon={<ScienceIcon />}
+                        onClick={() => setLabOpen(true)}
                         sx={{
-                          borderRadius: 3,
-                          textTransform: 'none',
-                          fontWeight: 700,
-                          fontSize: '1rem',
-                          px: 3,
-                          py: 1.5,
-                          borderColor: 'rgba(255,255,255,0.4)',
-                          color: 'white',
-                          backdropFilter: 'blur(10px)',
-                          bgcolor: 'rgba(255,255,255,0.1)',
-                          border: '2px solid rgba(255,255,255,0.3)',
-                          '&:hover': {
-                            bgcolor: 'rgba(255,255,255,0.2)',
-                            borderColor: 'rgba(255,255,255,0.6)',
-                            transform: 'translateY(-2px)',
-                            boxShadow: '0 8px 20px rgba(0,0,0,0.15)'
-                          },
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                          borderRadius: '13px',
+                          fontWeight: 800,
+                          px: 2.2,
+                          py: 1,
+                          color: '#ffffff',
+                          borderColor: 'rgba(255,255,255,0.36)',
+                          bgcolor: 'rgba(255,255,255,0.12)',
+                          '&:hover': { bgcolor: 'rgba(255,255,255,0.22)', borderColor: '#ffffff' },
+                        }}
+                      >
+                        {label('Add Lab Report', 'إضافة تحليل معملي')}
+                      </Button>
+
+                      <Button
+                        variant="outlined"
+                        startIcon={<AddCircleOutlineIcon />}
+                        onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : '&lang=en'}`)}
+                        sx={{
+                          borderRadius: '13px',
+                          fontWeight: 800,
+                          px: 2.2,
+                          py: 1,
+                          color: '#ffffff',
+                          borderColor: 'rgba(255,255,255,0.36)',
+                          bgcolor: 'rgba(255,255,255,0.12)',
+                          '&:hover': { bgcolor: 'rgba(255,255,255,0.22)', borderColor: '#ffffff' },
+                        }}
+                      >
+                        {label('Book Visit', 'حجز موعد')}
+                      </Button>
+
+                      <Button
+                        variant="outlined"
+                        startIcon={<EditOutlinedIcon />}
+                        onClick={() => openEditAll('basics')}
+                        sx={{
+                          borderRadius: '13px',
+                          fontWeight: 800,
+                          px: 2.2,
+                          py: 1,
+                          color: '#fef08a',
+                          borderColor: 'rgba(254,240,138,0.45)',
+                          bgcolor: 'rgba(254,240,138,0.14)',
+                          '&:hover': { bgcolor: 'rgba(254,240,138,0.24)', borderColor: '#fef08a' },
                         }}
                       >
                         {label('Edit Profile', 'تعديل الملف')}
                       </Button>
+
                       <Button
                         variant="outlined"
-                        size="large"
                         startIcon={<PrintIcon />}
                         onClick={printReport}
                         disabled={aiBusy}
                         sx={{
-                          borderRadius: 3,
-                          textTransform: 'none',
-                          fontWeight: 700,
-                          fontSize: '1rem',
-                          px: 3,
-                          py: 1.5,
-                          borderColor: 'rgba(255,255,255,0.4)',
-                          color: 'white',
-                          backdropFilter: 'blur(10px)',
-                          bgcolor: 'rgba(255,255,255,0.1)',
-                          border: '2px solid rgba(255,255,255,0.3)',
-                          '&:hover': {
-                            bgcolor: 'rgba(255,255,255,0.2)',
-                            borderColor: 'rgba(255,255,255,0.6)',
-                            transform: 'translateY(-2px)',
-                            boxShadow: '0 8px 20px rgba(0,0,0,0.15)'
-                          },
-                          '&.Mui-disabled': {
-                            borderColor: 'rgba(255,255,255,0.2)',
-                            color: 'rgba(255,255,255,0.4)'
-                          },
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
-                        }}
-                      >
-                        {label('Print Report', 'طباعة التقرير')}
-                      </Button>
-                      <Button
-                        variant="contained"
-                        size="large"
-                        startIcon={<AddCircleOutlineIcon />}
-                        onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
-                        sx={{
-                          borderRadius: 3,
-                          textTransform: 'none',
+                          borderRadius: '13px',
                           fontWeight: 800,
-                          fontSize: '1.05rem',
-                          px: 4,
-                          py: 1.5,
-                          bgcolor: 'white',
-                          color: 'primary.main',
-                          boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
-                          border: '2px solid white',
-                          '&:hover': {
-                            bgcolor: 'grey.50',
-                            transform: 'translateY(-3px)',
-                            boxShadow: '0 12px 32px rgba(0,0,0,0.3)'
-                          },
-                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                          px: 2,
+                          py: 1,
+                          color: '#ffffff',
+                          borderColor: 'rgba(255,255,255,0.3)',
+                          bgcolor: 'rgba(255,255,255,0.08)',
+                          '&:hover': { bgcolor: 'rgba(255,255,255,0.2)', borderColor: '#ffffff' },
                         }}
                       >
-                        {label('New Appointment', 'حجز موعد')}
+                        {label('Print Summary', 'طباعة الملخص')}
                       </Button>
-                    </Stack>
-                  </Grid>
-                </Grid>
-              </Paper>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-
-              {/* Glassmorphic Stats Cards */}
-              <Grid container spacing={3}>
+              {/* 4 Top-Accented Glass KPI Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                 {[
                   {
-                    icon: <LocalHospitalIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    icon: <LocalHospitalIcon sx={{ fontSize: 22 }} />,
                     count: totalAppointments,
                     label: label('Total Visits', 'إجمالي الزيارات'),
                     sub: label('Recorded appointments', 'مواعيد مسجلة'),
-                    color: '#2196f3',
-                    gradient: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)'
+                    color: '#2563eb',
+                    softBg: '#eff6ff',
                   },
                   {
-                    icon: <DescriptionIcon sx={{ fontSize: 32, color: 'white' }} />,
+                    icon: <DescriptionIcon sx={{ fontSize: 22 }} />,
                     count: totalReports,
                     label: label('Medical Reports', 'التقارير الطبية'),
                     sub: label('Clinical & Lab', 'سريرية ومعملية'),
-                    color: '#7b1fa2',
-                    gradient: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)'
+                    color: '#4f46e5',
+                    softBg: '#eef2ff',
                   },
                   {
-                    icon: <EventIcon sx={{ fontSize: 32, color: 'white' }} />,
-                    count: nextAppointment ? fmtNiceDateTime(nextAppointment._d || nextAppointment.date) : label('None', 'لا يوجد'),
+                    icon: <EventIcon sx={{ fontSize: 22 }} />,
+                    count: nextAppointment ? fmtNiceDate(nextAppointment._d || nextAppointment.date) : label('None', 'لا يوجد'),
                     label: label('Next Visit', 'الزيارة القادمة'),
-                    sub: nextAppointment?.time || label('No upcoming', 'لا يوجد قادم'),
-                    color: '#2e7d32',
-                    gradient: 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)'
+                    sub: nextAppointment?.time || label('No upcoming visit', 'لا يوجد موعد قادم'),
+                    color: '#059669',
+                    softBg: '#ecfdf5',
                   },
                   {
-                    icon: <ScienceIcon sx={{ fontSize: 32, color: 'white' }} />,
-                    count: latestReport ? (latestReport?.diagnosis || latestReport?.titleEn || latestReport?.titleAr || label('Report', 'تقرير')) : '—',
-                    label: label('Latest Report', 'أحدث تقرير'),
-                    sub: latestReport?.date ? fmtNiceDateTime(latestReport.date) : label('No reports', 'لا توجد تقارير'),
-                    color: '#ed6c02',
-                    gradient: 'linear-gradient(135deg, #ff9800 0%, #ed6c02 100%)'
-                  }
+                    icon: <ScienceIcon sx={{ fontSize: 22 }} />,
+                    count: latestReport ? (latestReport?.diagnosis || latestReport?.titleAr || latestReport?.titleEn || label('Report', 'تقرير')) : '—',
+                    label: label('Latest Diagnosis / Report', 'أحدث تشخيص / تقرير'),
+                    sub: latestReport?.date ? fmtNiceDate(latestReport.date) : label('No reports yet', 'لا توجد تقارير بعد'),
+                    color: '#d97706',
+                    softBg: '#fef3c7',
+                  },
                 ].map((stat, i) => (
-                  <Grid item xs={12} sm={6} md={3} key={i}>
-                    <Paper
-                      elevation={0}
-                      sx={{
-                        p: 3,
-                        borderRadius: 4,
-                        height: '100%',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 0.8)} 0%, ${alpha(t.palette.background.paper, 0.4)} 100%)`,
-                        backdropFilter: 'blur(20px)',
-                        border: '1px solid rgba(255,255,255,0.3)',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.05)',
-                        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                        '&:hover': {
-                          transform: 'translateY(-5px)',
-                          boxShadow: `0 12px 40px -8px ${alpha(stat.color, 0.3)}`,
-                          borderColor: alpha(stat.color, 0.4)
-                        }
-                      }}
-                    >
-                      <Box sx={{
-                        position: 'absolute', top: -20, right: -20,
-                        width: 100, height: 100, borderRadius: '50%',
-                        background: stat.gradient, opacity: 0.1, zIndex: 0
-                      }} />
-
-                      <Stack spacing={2} position="relative" zIndex={1}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-                          <Box sx={{
-                            width: 56, height: 56, borderRadius: 3,
-                            background: stat.gradient,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            boxShadow: `0 8px 16px -4px ${alpha(stat.color, 0.4)}`
-                          }}>
-                            {stat.icon}
-                          </Box>
-                          <Typography variant="h4" fontWeight={900} sx={{ color: stat.color }}>
-                            {String(stat.count).length > 10 ? String(stat.count).substring(0, 10) + '...' : stat.count}
-                          </Typography>
-                        </Stack>
-                        <Box>
-                          <Typography variant="subtitle1" fontWeight={800} color="text.primary">
-                            {stat.label}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" fontWeight={500} noWrap>
-                            {stat.sub}
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Paper>
-                  </Grid>
-                ))}
-              </Grid>
-
-
-              {/* Tabs Navigation */}
-              <Box sx={{ width: '100%' }}>
-                <Tabs
-                  value={tabValue}
-                  onChange={handleTabChange}
-                  variant="scrollable"
-                  scrollButtons="auto"
-                  sx={{
-                    '& .MuiTabs-indicator': {
-                      height: 4,
-                      borderRadius: 2,
-                      background: (t) => `linear-gradient(90deg, ${t.palette.primary.main}, ${t.palette.secondary.main})`
-                    },
-                    '& .MuiTab-root': {
-                      textTransform: 'none',
-                      fontWeight: 700,
-                      fontSize: '1rem',
-                      minHeight: 60,
-                      px: 3,
-                      color: 'text.secondary',
-                      '&.Mui-selected': { color: 'primary.main' }
-                    }
-                  }}
-                >
-                  <Tab label={label('Overview', 'نظرة عامة')} />
-                  <Tab label={label('Appointments', 'المواعيد')} icon={<LocalHospitalIcon fontSize="small" />} iconPosition="start" />
-                  <Tab label={label('Reports', 'التقارير')} icon={<DescriptionIcon fontSize="small" />} iconPosition="start" />
-                  <Tab label={label('Notes', 'الملاحظات')} icon={<EditOutlinedIcon fontSize="small" />} iconPosition="start" />
-                  <Tab label={label('External Labs', 'معامل خارجية')} icon={<ScienceIcon fontSize="small" />} iconPosition="start" />
-                </Tabs>
-                <Divider sx={{ mt: -0.2 }} />
-
-                {/* TAB 1: OVERVIEW */}
-                <CustomTabPanel value={tabValue} index={0}>
-                  <Stack spacing={3}>
-                    {/* AI Summary Card */}
-                    <Paper
-                      elevation={0}
-                      sx={{
-                        p: 4,
-                        borderRadius: 5,
-                        position: 'relative',
-                        overflow: 'hidden',
-                        background: (t) => `linear-gradient(135deg, ${alpha(t.palette.secondary.main, 0.05)} 0%, ${alpha(t.palette.background.paper, 1)} 100%)`,
-                        border: (t) => `1px solid ${alpha(t.palette.secondary.main, 0.2)}`,
-                        boxShadow: (t) => `0 12px 40px -10px ${alpha(t.palette.secondary.main, 0.15)}`,
-                      }}
-                    >
-                      <Box sx={{
-                        position: 'absolute', top: -50, right: -50, width: 200, height: 200,
-                        borderRadius: '50%', bgcolor: (t) => alpha(t.palette.secondary.main, 0.05), zIndex: 0
-                      }} />
-
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" sx={{ mb: 3, position: 'relative', zIndex: 1 }}>
-                        <Stack direction="row" spacing={2} alignItems="center">
-                          <Avatar sx={{
-                            width: 56, height: 56,
-                            background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
-                            boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`
-                          }}>
-                            <AutoAwesomeIcon sx={{ fontSize: 32 }} />
-                          </Avatar>
-                          <Box>
-                            <Typography variant="h5" fontWeight={900} color="text.primary">
-                              {label('AI Clinical Summary', 'الملخص السريري الذكي')}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary" fontWeight={600}>
-                              {label('Powered by Shafy AI', 'مدعوم بواسطة شافي AI')}
-                            </Typography>
-                          </Box>
-                        </Stack>
-                        <Button
-                          variant="contained"
-                          size="large"
-                          startIcon={aiBusy ? <Box sx={{ width: 20, height: 20 }} /> : <AutoAwesomeIcon />}
-                          onClick={summarizeWithAI}
-                          disabled={aiBusy}
-                          sx={{
-                            borderRadius: 3,
-                            textTransform: 'none',
-                            fontWeight: 800,
-                            px: 4,
-                            py: 1.2,
-                            background: (t) => `linear-gradient(135deg, ${t.palette.secondary.main}, ${t.palette.secondary.dark})`,
-                            boxShadow: (t) => `0 8px 20px -4px ${alpha(t.palette.secondary.main, 0.4)}`,
-                            '&:hover': {
-                              background: (t) => `linear-gradient(135deg, ${t.palette.secondary.dark}, ${t.palette.secondary.main})`,
-                            }
-                          }}
-                        >
-                          {aiBusy ? <LinearProgress sx={{ width: 120, height: 6, borderRadius: 2 }} color="inherit" /> : label('Generate Summary', 'توليد الملخص')}
-                        </Button>
-                      </Stack>
-
-                      {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 3, mb: 3 }}>{aiErr}</Alert>}
-
-                      <Paper
-                        elevation={0}
-                        sx={{
-                          p: 3,
-                          borderRadius: 4,
-                          bgcolor: 'rgba(255,255,255,0.6)',
-                          backdropFilter: 'blur(10px)',
-                          border: '1px solid rgba(255,255,255,0.5)',
-                          minHeight: 120,
+                  <div
+                    key={i}
+                    className="glass-panel glass-panel-lift"
+                    style={{ padding: '20px', borderTop: `4px solid ${stat.color}` }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>{stat.label}</span>
+                      <div
+                        style={{
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '12px',
+                          background: stat.softBg,
+                          color: stat.color,
                           display: 'flex',
                           alignItems: 'center',
-                          justifyContent: !aiText ? 'center' : 'flex-start'
+                          justifyContent: 'center',
                         }}
                       >
-                        {aiBusy ? (
-                          <Stack spacing={2} width="100%">
-                            <Skeleton variant="text" width="90%" height={32} />
-                            <Skeleton variant="text" width="80%" height={32} />
-                            <Skeleton variant="text" width="95%" height={32} />
-                          </Stack>
-                        ) : aiText ? (
-                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, fontSize: '1.05rem' }} color="text.primary">
-                            {aiText}
-                          </Typography>
-                        ) : (
-                          <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center', fontWeight: 500 }}>
-                            {label('Click "Generate Summary" to get a concise AI-powered overview of this patient\'s history and status.', 'اضغط على "توليد الملخص" للحصول على نظرة عامة موجزة مدعومة بالذكاء الاصطناعي.')}
-                          </Typography>
-                        )}
-                      </Paper>
-                    </Paper>
-
-                    {/* Quick Stats Cards */}
-                    <Grid container spacing={2}>
-                      {[
-                        {
-                          icon: <LocalHospitalIcon sx={{ fontSize: 28, color: 'white' }} />,
-                          count: appts.filter(a => a.status === 'completed').length,
-                          label: label('Total Visits', 'إجمالي الزيارات'),
-                          color: '#2196f3',
-                          gradient: 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)'
-                        },
-                        {
-                          icon: <EventIcon sx={{ fontSize: 28, color: 'white' }} />,
-                          count: patient.lastVisit ? Math.floor((new Date() - new Date(patient.lastVisit)) / (1000 * 60 * 60 * 24)) : '—',
-                          label: label('Days Since Last', 'أيام منذ آخر زيارة'),
-                          color: '#4caf50',
-                          gradient: 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)'
-                        },
-                        {
-                          icon: <DescriptionIcon sx={{ fontSize: 28, color: 'white' }} />,
-                          count: reports.length,
-                          label: label('Reports', 'التقارير'),
-                          color: '#ff9800',
-                          gradient: 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)'
-                        },
-                        {
-                          icon: <ScienceIcon sx={{ fontSize: 28, color: 'white' }} />,
-                          count: appts.filter(a => a.status === 'scheduled' || a.status === 'pending').length,
-                          label: label('Upcoming', 'القادمة'),
-                          color: '#9c27b0',
-                          gradient: 'linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%)'
-                        }
-                      ].map((stat, i) => (
-                        <Grid item xs={6} sm={3} key={i}>
-                          <Paper
-                            elevation={0}
-                            sx={{
-                              p: 2.5,
-                              borderRadius: 3,
-                              position: 'relative',
-                              overflow: 'hidden',
-                              border: '1px solid rgba(0,0,0,0.08)',
-                              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                              '&:hover': {
-                                transform: 'translateY(-4px)',
-                                boxShadow: `0 12px 24px -4px ${alpha(stat.color, 0.25)}`,
-                                borderColor: alpha(stat.color, 0.3)
-                              }
-                            }}
-                          >
-                            <Stack spacing={2} alignItems="center">
-                              <Avatar
-                                variant="rounded"
-                                sx={{
-                                  width: 56, height: 56,
-                                  background: stat.gradient,
-                                  boxShadow: `0 8px 16px -4px ${alpha(stat.color, 0.4)}`,
-                                  borderRadius: 2.5
-                                }}
-                              >
-                                {stat.icon}
-                              </Avatar>
-                              <Box textAlign="center">
-                                <Typography variant="h4" fontWeight={900} sx={{ color: stat.color, lineHeight: 1 }}>
-                                  {stat.count}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ mt: 0.5, display: 'block', opacity: 0.8 }}>
-                                  {stat.label}
-                                </Typography>
-                              </Box>
-                            </Stack>
-                          </Paper>
-                        </Grid>
-                      ))}
-                    </Grid>
-
-                    {/* Vitals & Activity Row */}
-                    <Grid container spacing={4}>
-                      {/* Vitals Section */}
-                      <Grid item xs={12} md={6}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 4,
-                            borderRadius: 5,
-                            height: '100%',
-                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.error.main, 0.02)} 100%)`,
-                            border: (t) => `1px solid ${alpha(t.palette.error.main, 0.1)}`,
-                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)',
-                            position: 'relative',
-                            overflow: 'hidden'
-                          }}
-                        >
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 4 }}>
-                            <Stack direction="row" alignItems="center" spacing={2}>
-                              <Avatar sx={{
-                                width: 48, height: 48,
-                                bgcolor: (t) => alpha(t.palette.error.main, 0.1),
-                                color: 'error.main',
-                                borderRadius: 2.5
-                              }}>
-                                <BloodtypeIcon />
-                              </Avatar>
-                              <Typography variant="h6" fontWeight={900}>
-                                {label('Vitals & Metrics', 'المؤشرات الحيوية')}
-                              </Typography>
-                            </Stack>
-                            {!editMode.vitals ? (
-                              <IconButton onClick={() => handleEditModeToggle('vitals')} sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon />
-                              </IconButton>
-                            ) : (
-                              <Stack direction="row" spacing={1}>
-                                <Button size="small" onClick={() => handleCancelEdit('vitals')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
-                                <Button size="small" variant="contained" onClick={() => handleSaveSection('vitals')} disabled={savingSection === 'vitals'}>
-                                  {label('Save', 'حفظ')}
-                                </Button>
-                              </Stack>
-                            )}
-                          </Stack>
-
-                          <Grid container spacing={2}>
-                            {[
-                              { key: 'weight', label: label('Weight', 'الوزن'), unit: 'kg', icon: '⚖️', color: '#1976d2' },
-                              { key: 'height', label: label('Height', 'الطول'), unit: 'cm', icon: '📏', color: '#2e7d32' },
-                              { key: 'bloodPressure', label: label('Blood Pressure', 'ضغط الدم'), unit: '', icon: '❤️', color: '#d32f2f' },
-                              { key: 'temperature', label: label('Temperature', 'درجة الحرارة'), unit: '°C', icon: '🌡️', color: '#ed6c02' }
-                            ].map((item) => (
-                              <Grid item xs={6} key={item.key}>
-                                <Paper
-                                  elevation={0}
-                                  sx={{
-                                    p: 2.5,
-                                    borderRadius: 3,
-                                    bgcolor: (t) => alpha(item.color, 0.04),
-                                    border: (t) => `1px solid ${alpha(item.color, 0.1)}`,
-                                    transition: 'all 0.2s',
-                                    '&:hover': {
-                                      bgcolor: (t) => alpha(item.color, 0.08),
-                                      transform: 'translateY(-2px)'
-                                    }
-                                  }}
-                                >
-                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                    <span style={{ fontSize: '1.2rem' }}>{item.icon}</span> {item.label}
-                                  </Typography>
-
-                                  {editMode.vitals ? (
-                                    <TextField
-                                      fullWidth
-                                      variant="standard"
-                                      value={tempValues[item.key]}
-                                      onChange={handleTempChange(item.key)}
-                                      placeholder="—"
-                                      InputProps={{
-                                        disableUnderline: true,
-                                        sx: { fontSize: '1.25rem', fontWeight: 800, color: item.color }
-                                      }}
-                                    />
-                                  ) : (
-                                    <Typography variant="h5" fontWeight={900} sx={{ color: item.color }}>
-                                      {patient[item.key] || '—'}
-                                      {patient[item.key] && item.unit && <Typography component="span" variant="caption" sx={{ opacity: 0.7, ml: 0.5, fontWeight: 600 }}>{item.unit}</Typography>}
-                                    </Typography>
-                                  )}
-                                </Paper>
-                              </Grid>
-                            ))}
-                          </Grid>
-                        </Paper>
-                      </Grid>
-
-                      {/* Activity Timeline */}
-                      <Grid item xs={12} md={6}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 4,
-                            borderRadius: 5,
-                            height: '100%',
-                            border: '1px solid rgba(0,0,0,0.08)',
-                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
-                          }}
-                        >
-                          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 4 }}>
-                            <Avatar sx={{ width: 48, height: 48, bgcolor: (t) => alpha(t.palette.info.main, 0.1), color: 'info.main', borderRadius: 2.5 }}>
-                              <AssignmentIcon />
-                            </Avatar>
-                            <Typography variant="h6" fontWeight={900}>
-                              {label('Recent Activity', 'النشاط الأخير')}
-                            </Typography>
-                          </Stack>
-                          <Stack spacing={2.5}>
-                            {/* Latest appointment */}
-                            {appts.length > 0 && (
-                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #2196f3' }}>
-                                <Stack direction="row" spacing={2} alignItems="center">
-                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'primary.light', color: 'white' }}>
-                                    <EventIcon fontSize="small" />
-                                  </Box>
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography variant="subtitle2" fontWeight={800}>
-                                      {label('Appointment', 'موعد')}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                      {fmtNiceDateTime(appts[0]?.date)} • {appts[0]?.status}
-                                    </Typography>
-                                  </Box>
-                                </Stack>
-                              </Paper>
-                            )}
-                            {/* Latest report */}
-                            {reports.length > 0 && (
-                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #9c27b0' }}>
-                                <Stack direction="row" spacing={2} alignItems="center">
-                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'secondary.light', color: 'white' }}>
-                                    <DescriptionIcon fontSize="small" />
-                                  </Box>
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography variant="subtitle2" fontWeight={800}>
-                                      {label('Report Added', 'تقرير مضاف')}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                      {fmtNiceDateTime(reports[0]?.date)} • {reports[0]?.titleEn || reports[0]?.title || 'Report'}
-                                    </Typography>
-                                  </Box>
-                                </Stack>
-                              </Paper>
-                            )}
-                            {/* Notes updated */}
-                            {patient.notesUpdatedAt && (
-                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 3, borderLeft: '4px solid #ed6c02' }}>
-                                <Stack direction="row" spacing={2} alignItems="center">
-                                  <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'warning.light', color: 'white' }}>
-                                    <EditOutlinedIcon fontSize="small" />
-                                  </Box>
-                                  <Box sx={{ flex: 1 }}>
-                                    <Typography variant="subtitle2" fontWeight={800}>
-                                      {label('Notes Updated', 'تحديث الملاحظات')}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                                      {fmtNiceDateTime(patient.notesUpdatedAt)} • {patient.notesUpdatedBy || 'Staff'}
-                                    </Typography>
-                                  </Box>
-                                </Stack>
-                              </Paper>
-                            )}
-                            {/* If no activity */}
-                            {!appts.length && !reports.length && !patient.notesUpdatedAt && (
-                              <Box sx={{ textAlign: 'center', py: 4, opacity: 0.6 }}>
-                                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-                                  {label('No recent activity', 'لا يوجد نشاط حديث')}
-                                </Typography>
-                              </Box>
-                            )}
-                          </Stack>
-                        </Paper>
-                      </Grid>
-                    </Grid>
-
-                    <Grid container spacing={4}>
-                      {/* Contact Info */}
-                      <Grid item xs={12} md={5}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 4,
-                            borderRadius: 5,
-                            height: '100%',
-                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.info.main, 0.03)} 100%)`,
-                            border: (t) => `1px solid ${alpha(t.palette.info.main, 0.1)}`,
-                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
-                          }}
-                        >
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 4 }}>
-                            <Typography variant="h6" fontWeight={900}>
-                              {label('Contact Information', 'معلومات الاتصال')}
-                            </Typography>
-                            {!editMode.contact ? (
-                              <IconButton onClick={() => handleEditModeToggle('contact')} sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon />
-                              </IconButton>
-                            ) : (
-                              <Stack direction="row" spacing={1}>
-                                <Button size="small" onClick={() => handleCancelEdit('contact')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
-                                <Button size="small" variant="contained" onClick={() => handleSaveSection('contact')} disabled={savingSection === 'contact'}>
-                                  {label('Save', 'حفظ')}
-                                </Button>
-                              </Stack>
-                            )}
-                          </Stack>
-
-                          <Stack spacing={3}>
-                            {[
-                              { key: 'phone', label: label('Phone', 'الهاتف'), icon: <PhoneIcon fontSize="small" />, type: 'tel' },
-                              { key: 'email', label: label('Email', 'البريد'), icon: <EmailIcon fontSize="small" />, type: 'email' },
-                              { key: 'address', label: label('Address', 'العنوان'), icon: <PlaceIcon fontSize="small" />, type: 'text' }
-                            ].map((item) => (
-                              <Stack key={item.key} direction="row" spacing={2} alignItems="flex-start">
-                                <Avatar sx={{ width: 40, height: 40, bgcolor: 'action.hover', color: 'text.secondary', borderRadius: 2 }}>
-                                  {item.icon}
-                                </Avatar>
-                                <Box sx={{ flex: 1 }}>
-                                  <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ mb: 0.5, display: 'block' }}>
-                                    {item.label}
-                                  </Typography>
-
-                                  {editMode.contact ? (
-                                    <TextField
-                                      fullWidth
-                                      size="small"
-                                      value={tempValues[item.key]}
-                                      onChange={handleTempChange(item.key)}
-                                      placeholder={item.label}
-                                      variant="outlined"
-                                      sx={{ mt: 0.5 }}
-                                    />
-                                  ) : (
-                                    <Stack direction="row" alignItems="center" spacing={1}>
-                                      <Typography variant="body1" fontWeight={600}>
-                                        {patient[item.key] || '—'}
-                                      </Typography>
-                                      {patient[item.key] && (
-                                        <IconButton size="small" onClick={() => copy(patient[item.key])} sx={{ opacity: 0.5, p: 0.5 }}>
-                                          <ContentCopyIcon sx={{ fontSize: 14 }} />
-                                        </IconButton>
-                                      )}
-                                    </Stack>
-                                  )}
-
-                                  {!editMode.contact && patient[item.key] && (
-                                    <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                                      {item.key === 'phone' && (
-                                        <>
-                                          <Button size="small" variant="outlined" startIcon={<PhoneIcon />} component={Link} href={`tel:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
-                                            {label('Call', 'اتصال')}
-                                          </Button>
-                                          <Button size="small" variant="outlined" component={Link} href={`sms:${patient.phone}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
-                                            SMS
-                                          </Button>
-                                        </>
-                                      )}
-                                      {item.key === 'email' && (
-                                        <Button size="small" variant="outlined" startIcon={<EmailIcon />} component={Link} href={`mailto:${patient.email}`} sx={{ borderRadius: 2, py: 0.2, fontSize: '0.75rem', fontWeight: 600 }}>
-                                          {label('Email', 'إرسال')}
-                                        </Button>
-                                      )}
-                                    </Stack>
-                                  )}
-                                </Box>
-                              </Stack>
-                            ))}
-                          </Stack>
-                        </Paper>
-                      </Grid>
-
-                      {/* Clinical Profile */}
-                      <Grid item xs={12} md={7}>
-                        <Paper
-                          elevation={0}
-                          sx={{
-                            p: 4,
-                            borderRadius: 5,
-                            height: '100%',
-                            background: (t) => `linear-gradient(135deg, ${alpha(t.palette.background.paper, 1)} 0%, ${alpha(t.palette.secondary.main, 0.03)} 100%)`,
-                            border: (t) => `1px solid ${alpha(t.palette.secondary.main, 0.1)}`,
-                            boxShadow: '0 4px 24px rgba(0,0,0,0.04)'
-                          }}
-                        >
-                          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-                            <Typography variant="h6" fontWeight={900}>
-                              {label('Clinical Profile', 'الملف السريري')}
-                            </Typography>
-                            {!editMode.clinical ? (
-                              <IconButton onClick={() => handleEditModeToggle('clinical')} sx={{ bgcolor: 'action.hover' }}>
-                                <EditOutlinedIcon />
-                              </IconButton>
-                            ) : (
-                              <Stack direction="row" spacing={1}>
-                                <Button size="small" onClick={() => handleCancelEdit('clinical')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
-                                <Button size="small" variant="contained" onClick={() => handleSaveSection('clinical')} disabled={savingSection === 'clinical'}>
-                                  {label('Save', 'حفظ')}
-                                </Button>
-                              </Stack>
-                            )}
-                          </Stack>
-
-                          <MedicalFileIntake
-                            patientId={patient?.id}
-                            patient={patient}
-                            isArabic={isArabic}
-                            onExtract={async (extractedData) => {
-                              if (!patient?.id) return;
-                              try {
-                                const ref = doc(db, 'patients', patient.id);
-                                const updateData = {
-                                  ...extractedData,
-                                  updatedAt: new Date(),
-                                  updatedBy: user?.uid || user?.email || 'doctor'
-                                };
-
-                                await updateDoc(ref, updateData);
-                                setPatient((prev) => ({ ...prev, ...updateData }));
-                                setOkMsg(label('Medical information extracted and saved.', 'تم استخراج وحفظ المعلومات الطبية.'));
-                              } catch (e) {
-                                console.error(e);
-                                setError(label('Failed to save extracted data.', 'فشل حفظ البيانات المستخرجة.'));
-                              }
-                            }}
-                          />
-
-                          <Grid container spacing={3} sx={{ mt: 2 }}>
-                            <Grid item xs={12} sm={6}>
-                              <Labeled title={label('Marital Status', 'الحالة الاجتماعية')}>
-                                {editMode.clinical ? (
-                                  <TextField
-                                    select
-                                    fullWidth
-                                    size="small"
-                                    value={tempValues.maritalStatus}
-                                    onChange={handleTempChange('maritalStatus')}
-                                    SelectProps={{ native: true }}
-                                  >
-                                    <option value="">{label('Select...', 'اختر...')}</option>
-                                    <option value="Single">{label('Single', 'أعزب/عزباء')}</option>
-                                    <option value="Married">{label('Married', 'متزوج/ة')}</option>
-                                    <option value="Divorced">{label('Divorced', 'مطلق/ة')}</option>
-                                    <option value="Widowed">{label('Widowed', 'أرمل/ة')}</option>
-                                  </TextField>
-                                ) : (
-                                  <Chip label={patient?.maritalStatus || label('Unspecified', 'غير محدد')} variant="outlined" size="small" sx={{ fontWeight: 600 }} />
-                                )}
-                              </Labeled>
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                              <Labeled title={label('Last Visit', 'آخر زيارة')}>
-                                <Typography variant="body2" fontWeight={500}>{fmtNiceDate(patient.lastVisit)}</Typography>
-                              </Labeled>
-                            </Grid>
-
-                            {[
-                              { key: 'allergies', label: label('Allergies', 'الحساسيات'), color: 'error', bg: '#f44336' },
-                              { key: 'conditions', label: label('Chronic Conditions', 'الأمراض المزمنة'), color: 'warning', bg: '#ff9800' },
-                              { key: 'medications', label: label('Current Medications', 'الأدوية الحالية'), color: 'info', bg: '#0288d1' }
-                            ].map((section) => (
-                              <Grid item xs={12} key={section.key}>
-                                <Labeled title={section.label}>
-                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
-                                    {(editMode.clinical ? tempValues[section.key] : splitCsv(patient?.[section.key])).map((item, i) => (
-                                      <Chip
-                                        key={i}
-                                        label={item}
-                                        color={section.color}
-                                        variant="soft"
-                                        size="small"
-                                        onDelete={editMode.clinical ? () => handleRemoveChip(section.key, i) : undefined}
-                                        sx={{
-                                          bgcolor: alpha(section.bg, 0.1),
-                                          color: section.bg,
-                                          fontWeight: 600,
-                                          borderRadius: 1.5
-                                        }}
-                                      />
-                                    ))}
-                                    {editMode.clinical && (
-                                      <Box component="form"
-                                        onSubmit={(e) => {
-                                          e.preventDefault();
-                                          const val = e.target.elements.newChip.value;
-                                          handleAddChip(section.key, val);
-                                          e.target.reset();
-                                        }}
-                                        sx={{ display: 'inline-flex' }}
-                                      >
-                                        <TextField
-                                          name="newChip"
-                                          placeholder="+"
-                                          size="small"
-                                          sx={{
-                                            width: 80,
-                                            '& .MuiInputBase-root': { borderRadius: 2, fontSize: '0.8rem', height: 24, padding: 0 }
-                                          }}
-                                          InputProps={{
-                                            sx: { px: 1 }
-                                          }}
-                                        />
-                                      </Box>
-                                    )}
-                                    {!editMode.clinical && !splitCsv(patient?.[section.key]).length && (
-                                      <Typography variant="body2" color="text.secondary">—</Typography>
-                                    )}
-                                  </Stack>
-                                </Labeled>
-                              </Grid>
-                            ))}
-                          </Grid>
-
-                          <Box sx={{ mt: 3 }}>
-                            <HealthInfoSection
-                              patient={patient}
-                              isArabic={isArabic}
-                              t={label}
-                              onUpdate={handleHealthInfoUpdate}
-                            />
-                          </Box>
-                        </Paper>
-                      </Grid>
-                    </Grid>
-                  </Stack>
-                </CustomTabPanel>
-
-                {/* TAB 2: APPOINTMENTS */}
-                <CustomTabPanel value={tabValue} index={1}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-                    <Typography variant="h6" fontWeight={800}>
-                      {label('Appointment History', 'سجل المواعيد')}
-                    </Typography>
-                    <Button
-                      variant="contained"
-                      startIcon={<AddCircleOutlineIcon />}
-                      onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
-                      size="small"
+                        {stat.icon}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: String(stat.count).length > 8 ? '1.25rem' : '1.9rem',
+                        fontWeight: 900,
+                        color: '#0f172a',
+                        lineHeight: 1.2,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
                     >
-                      {label('New Appointment', 'موعد جديد')}
-                    </Button>
-                  </Stack>
+                      {stat.count}
+                    </div>
+                    <div style={{ fontSize: '0.74rem', fontWeight: 700, color: stat.color, marginTop: '6px' }}>
+                      {stat.sub}
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-                  {apptLoading ? (
-                    <Stack spacing={2}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} />)}</Stack>
-                  ) : appts.length === 0 ? (
-                    <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, bgcolor: 'background.default' }} variant="outlined">
-                      <LocalHospitalIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-                      <Typography color="text.secondary">
-                        {label('No appointments found for this patient.', 'لا توجد مواعيد لهذا المريض.')}
-                      </Typography>
-                    </Paper>
-                  ) : (
-                    <Grid container spacing={2}>
-                      {appts.map((a) => (
-                        <Grid item xs={12} md={6} key={a.id}>
-                          <Paper
-                            variant="outlined"
-                            sx={{
-                              p: 2,
-                              borderRadius: 3,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 2,
-                              transition: 'all 0.2s',
-                              '&:hover': { borderColor: 'primary.main', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }
-                            }}
-                          >
-                            <Avatar
-                              variant="rounded"
-                              sx={{
-                                width: 56, height: 56,
-                                bgcolor: alpha(statusColor(a?.status) === 'success' ? '#2e7d32' : '#1976d2', 0.1),
-                                color: statusColor(a?.status) === 'success' ? 'success.main' : 'primary.main'
+
+              {/* Glass Segmented Pill Tabs Bar with Live Counts */}
+              <Box sx={{ width: '100%' }}>
+                <div
+                  className="glass-panel"
+                  style={{
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    overflowX: 'auto',
+                  }}
+                >
+                  {[
+                    { idx: 0, text: label('Overview', 'نظرة عامة'), icon: <PersonIcon sx={{ fontSize: 18 }} /> },
+                    { idx: 1, text: `${label('Appointments', 'المواعيد')} (${appts.length})`, icon: <LocalHospitalIcon sx={{ fontSize: 18 }} /> },
+                    { idx: 2, text: `${label('Reports', 'التقارير')} (${reports.length})`, icon: <DescriptionIcon sx={{ fontSize: 18 }} /> },
+                    { idx: 3, text: label('Notes', 'الملاحظات'), icon: <EditOutlinedIcon sx={{ fontSize: 18 }} /> },
+                    { idx: 4, text: `${label('External Labs', 'معامل خارجية')} (${xLabResults.length})`, icon: <ScienceIcon sx={{ fontSize: 18 }} /> },
+                  ].map((tb) => {
+                    const active = tabValue === tb.idx;
+                    return (
+                      <button
+                        key={tb.idx}
+                        type="button"
+                        onClick={() => setTabValue(tb.idx)}
+                        className="shafy-tab-pill"
+                        style={{
+                          padding: '9px 16px',
+                          fontSize: '0.84rem',
+                          background: active ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : 'transparent',
+                          color: active ? '#ffffff' : '#475569',
+                          boxShadow: active ? '0 8px 18px -6px rgba(37, 99, 235, 0.48)' : 'none',
+                        }}
+                      >
+                        {tb.icon}
+                        <span>{tb.text}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* TAB 1: BALANCED 2-COLUMN CLINICAL WORKSPACE OVERVIEW */}
+                <CustomTabPanel value={tabValue} index={0}>
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.38fr) minmax(0, 0.88fr)' },
+                      gap: '22px',
+                      alignItems: 'start',
+                    }}
+                  >
+                    {/* PRIMARY COLUMN: Clinical Profile + AI Summary + Medical Intake */}
+                    <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+                      {/* Clinical Profile & Health Flags */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #2563eb' }}
+                      >
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2.5 }}>
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar sx={{ width: 42, height: 42, bgcolor: '#eff6ff', color: '#2563eb', borderRadius: '12px' }}>
+                              <LocalHospitalIcon />
+                            </Avatar>
+                            <Box>
+                              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                                {label('Clinical Profile', 'الملف السريري والخلفية الطبية')}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                                {label('Allergies, chronic conditions, medications & risk flags', 'الحساسيات، الأمراض المزمنة، الأدوية والمؤشرات')}
+                              </Typography>
+                            </Box>
+                          </Stack>
+                          {!editMode.clinical ? (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<EditOutlinedIcon sx={{ fontSize: 16 }} />}
+                              onClick={() => handleEditModeToggle('clinical')}
+                              sx={{ borderRadius: '10px' }}
+                            >
+                              {label('Edit', 'تعديل')}
+                            </Button>
+                          ) : (
+                            <Stack direction="row" spacing={1}>
+                              <Button size="small" onClick={() => handleCancelEdit('clinical')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                              <Button size="small" variant="contained" onClick={() => handleSaveSection('clinical')} disabled={savingSection === 'clinical'}>
+                                {label('Save', 'حفظ')}
+                              </Button>
+                            </Stack>
+                          )}
+                        </Stack>
+
+                        {/* Marital Status & Last Visit */}
+                        <Box
+                          sx={{
+                            display: 'grid',
+                            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                            gap: '12px',
+                            mb: 2.5,
+                          }}
+                        >
+                          <div style={{ padding: '12px 14px', borderRadius: '13px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                            <Labeled title={label('Marital Status', 'الحالة الاجتماعية')}>
+                              {editMode.clinical ? (
+                                <TextField
+                                  select
+                                  fullWidth
+                                  size="small"
+                                  value={tempValues.maritalStatus}
+                                  onChange={handleTempChange('maritalStatus')}
+                                  SelectProps={{ native: true }}
+                                >
+                                  <option value="">{label('Select...', 'اختر...')}</option>
+                                  <option value="Single">{label('Single', 'أعزب/عزباء')}</option>
+                                  <option value="Married">{label('Married', 'متزوج/ة')}</option>
+                                  <option value="Divorced">{label('Divorced', 'مطلق/ة')}</option>
+                                  <option value="Widowed">{label('Widowed', 'أرمل/ة')}</option>
+                                </TextField>
+                              ) : (
+                                <Typography variant="body2" fontWeight={800} sx={{ color: '#0f172a' }}>
+                                  {patient?.maritalStatus || label('Unspecified', 'غير محدد')}
+                                </Typography>
+                              )}
+                            </Labeled>
+                          </div>
+
+                          <div style={{ padding: '12px 14px', borderRadius: '13px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                            <Labeled title={label('Last Visit', 'آخر زيارة')}>
+                              <Typography variant="body2" fontWeight={800} sx={{ color: '#0f172a' }}>
+                                {fmtNiceDate(patient.lastVisit)}
+                              </Typography>
+                            </Labeled>
+                          </div>
+                        </Box>
+
+                        {/* Allergies / Chronic Conditions / Medications */}
+                        <Stack spacing={2}>
+                          {[
+                            { key: 'allergies', label: label('Allergies', 'الحساسيات'), color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+                            { key: 'conditions', label: label('Chronic Conditions', 'الأمراض المزمنة'), color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
+                            { key: 'medications', label: label('Current Medications', 'الأدوية الحالية'), color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+                          ].map((section) => (
+                            <div
+                              key={section.key}
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: '14px',
+                                background: '#ffffff',
+                                border: '1px solid #e2e8f0',
                               }}
                             >
-                              <EventIcon />
-                            </Avatar>
-                            <Box sx={{ flex: 1 }}>
-                              <Typography variant="subtitle1" fontWeight={700}>
-                                {fmtApptFull(a)}
+                              <Typography variant="caption" fontWeight={800} sx={{ color: '#64748b', display: 'block', mb: 1 }}>
+                                {section.label}
                               </Typography>
-                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                                <Typography variant="body2" color="text.secondary">
-                                  {a?.doctorName_en || a?.doctorName_ar || label('Doctor', 'طبيب')}
-                                </Typography>
-                                {/* Appointment Type Badge */}
-                                {(() => {
-                                  const typeInfo = getAppointmentTypeInfo(a, isArabic);
-                                  return (
-                                    <Chip 
+                              <Stack direction="row" spacing={0.85} useFlexGap flexWrap="wrap" alignItems="center">
+                                {(editMode.clinical ? tempValues[section.key] : splitCsv(patient?.[section.key])).map((item, i) => (
+                                  <Chip
+                                    key={i}
+                                    label={item}
+                                    size="small"
+                                    onDelete={editMode.clinical ? () => handleRemoveChip(section.key, i) : undefined}
+                                    sx={{
+                                      bgcolor: section.bg,
+                                      color: section.color,
+                                      border: `1px solid ${section.border}`,
+                                      fontWeight: 800,
+                                      borderRadius: '9px',
+                                    }}
+                                  />
+                                ))}
+                                {editMode.clinical && (
+                                  <Box
+                                    component="form"
+                                    onSubmit={(e) => {
+                                      e.preventDefault();
+                                      const val = e.target.elements.newChip.value;
+                                      handleAddChip(section.key, val);
+                                      e.target.reset();
+                                    }}
+                                    sx={{ display: 'inline-flex' }}
+                                  >
+                                    <TextField
+                                      name="newChip"
+                                      placeholder={label('+ Add & Enter', '+ أضف واضغط Enter')}
                                       size="small"
-                                      label={typeInfo.label} 
-                                      sx={{ 
-                                        height: 20, 
-                                        fontSize: '0.65rem',
-                                        bgcolor: typeInfo.bgcolor,
-                                        color: typeInfo.textColor,
-                                        fontWeight: 700,
-                                        border: '1px solid',
-                                        borderColor: typeInfo.border
-                                      }} 
+                                      sx={{
+                                        width: 150,
+                                        '& .MuiInputBase-root': { borderRadius: '10px', fontSize: '0.78rem', height: 28 },
+                                      }}
                                     />
-                                  );
-                                })()}
-                                {/* Source Badge */}
-                                {(() => {
-                                  const source = String(a?.source || '').trim();
-                                  const isDoctorApp = source === 'Doctor_app' || a?.fromDoctorApp === true;
-                                  const isPatientApp = source === 'patient_app' || a?.fromPatientApp === true;
-                                  
-                                  // Fallback for old data
-                                  const status = String(a?.status || '').toLowerCase();
-                                  const isOldDataWithoutSource = !source && !a?.fromDoctorApp && !a?.fromPatientApp;
-                                  const isLikelyDoctorApp = isOldDataWithoutSource && status === 'confirmed';
-                                  
-                                  if (isDoctorApp || isLikelyDoctorApp) {
-                                    return (
-                                      <Chip
-                                        size="small"
-                                        icon={<TagIcon sx={{ fontSize: 12 }} />}
-                                        label={isArabic ? 'تطبيق الطبيب' : 'Doctor App'}
-                                        sx={{
-                                          height: 20,
-                                          fontSize: '0.65rem',
-                                          bgcolor: 'rgba(93, 64, 66, 0.15)',
-                                          color: '#5D4042',
-                                          fontWeight: 700,
-                                          border: '1px solid',
-                                          borderColor: '#5D4042',
-                                          '& .MuiChip-icon': {
-                                            fontSize: '0.75rem',
-                                          },
-                                        }}
-                                      />
-                                    );
-                                  }
-                                  
-                                  if (isPatientApp) {
-                                    return (
-                                      <Chip
-                                        size="small"
-                                        icon={<TagIcon sx={{ fontSize: 12 }} />}
-                                        label={isArabic ? 'تطبيق المريض' : 'Patient App'}
-                                        sx={{
-                                          height: 20,
-                                          fontSize: '0.65rem',
-                                          bgcolor: 'rgba(30, 78, 140, 0.15)',
-                                          color: '#1E4E8C',
-                                          fontWeight: 700,
-                                          border: '1px solid',
-                                          borderColor: '#1E4E8C',
-                                          '& .MuiChip-icon': {
-                                            fontSize: '0.75rem',
-                                          },
-                                        }}
-                                      />
-                                    );
-                                  }
-                                  
-                                  return null;
-                                })()}
+                                  </Box>
+                                )}
+                                {!editMode.clinical && !splitCsv(patient?.[section.key]).length && (
+                                  <Typography variant="body2" sx={{ color: '#94a3b8', fontWeight: 600 }}>
+                                    {label('None recorded', 'لا يوجد مسجل')}
+                                  </Typography>
+                                )}
                               </Stack>
+                            </div>
+                          ))}
+                        </Stack>
+
+                        {/* Clinical Flags */}
+                        <HealthInfoSection
+                          patient={patient}
+                          isArabic={isArabic}
+                          t={label}
+                          onUpdate={handleHealthInfoUpdate}
+                        />
+                      </Paper>
+
+                      {/* AI Clinical Summary Card */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #4f46e5' }}
+                      >
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={2}
+                          alignItems={{ xs: 'flex-start', sm: 'center' }}
+                          justifyContent="space-between"
+                          sx={{ mb: 2 }}
+                        >
+                          <Stack direction="row" spacing={1.5} alignItems="center">
+                            <Avatar
+                              sx={{
+                                width: 44,
+                                height: 44,
+                                borderRadius: '13px',
+                                background: 'linear-gradient(135deg, #4f46e5, #2563eb)',
+                                boxShadow: '0 8px 18px -4px rgba(79, 70, 229, 0.4)',
+                              }}
+                            >
+                              <AutoAwesomeIcon sx={{ fontSize: 24, color: '#ffffff' }} />
+                            </Avatar>
+                            <Box>
+                              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                                {label('AI Clinical Summary', 'الملخص السريري الذكي')}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                                {label('Powered by Shafy AI • Synthesizes visits, labs & history', 'مدعوم بواسطة شافي AI • يلخص الزيارات والتحاليل والتاريخ الطبي')}
+                              </Typography>
                             </Box>
-                            <Stack alignItems="flex-end" spacing={1}>
-                              <Chip
-                                label={String(a?.status || 'pending')}
-                                color={statusColor(a?.status)}
-                                size="small"
-                                variant="soft"
-                                sx={{ fontWeight: 700, borderRadius: 1 }}
-                              />
+                          </Stack>
+                          <Button
+                            variant="contained"
+                            startIcon={aiBusy ? null : <AutoAwesomeIcon />}
+                            onClick={summarizeWithAI}
+                            disabled={aiBusy}
+                            sx={{ borderRadius: '12px', px: 2.5, whiteSpace: 'nowrap' }}
+                          >
+                            {aiBusy ? label('Generating...', 'جارٍ التوليد...') : label('Generate Summary', 'توليد الملخص')}
+                          </Button>
+                        </Stack>
+
+                        {!aiBusy && aiErr && <Alert severity="error" sx={{ borderRadius: 2, mb: 2 }}>{aiErr}</Alert>}
+
+                        <div
+                          style={{
+                            padding: '16px 18px',
+                            borderRadius: '15px',
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            minHeight: '88px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: aiText ? 'flex-start' : 'center',
+                          }}
+                        >
+                          {aiBusy ? (
+                            <Stack spacing={1.25} width="100%">
+                              <Skeleton variant="text" width="90%" height={24} />
+                              <Skeleton variant="text" width="78%" height={24} />
+                              <Skeleton variant="text" width="84%" height={24} />
+                            </Stack>
+                          ) : aiText ? (
+                            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.8, color: '#1e293b', fontWeight: 600 }}>
+                              {aiText}
+                            </Typography>
+                          ) : (
+                            <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', fontWeight: 600 }}>
+                              {label('Click "Generate Summary" for an instant AI overview of this patient.', 'اضغط على "توليد الملخص" للحصول على ملخص سريري فوري بالذكاء الاصطناعي.')}
+                            </Typography>
+                          )}
+                        </div>
+                      </Paper>
+
+                      {/* Dedicated Medical File Intake Card */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #0ea5e9' }}
+                      >
+                        <MedicalFileIntake
+                          patientId={patient?.id}
+                          patient={patient}
+                          isArabic={isArabic}
+                          onExtract={async (extractedData) => {
+                            if (!patient?.id) return;
+                            try {
+                              const ref = doc(db, 'patients', patient.id);
+                              const updateData = {
+                                ...extractedData,
+                                updatedAt: new Date(),
+                                updatedBy: user?.uid || user?.email || 'doctor',
+                              };
+                              await updateDoc(ref, updateData);
+                              setPatient((prev) => ({ ...prev, ...updateData }));
+                              setOkMsg(label('Medical information extracted and saved.', 'تم استخراج وحفظ المعلومات الطبية.'));
+                            } catch (e) {
+                              console.error(e);
+                              setError(label('Failed to save extracted data.', 'فشل حفظ البيانات المستخرجة.'));
+                            }
+                          }}
+                        />
+                      </Paper>
+                    </Stack>
+
+                    {/* SECONDARY SIDEBAR COLUMN: Vitals (2x2) + Contact + Activity Timeline */}
+                    <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+                      {/* Vitals & Metrics (Strict 2x2 CSS Grid) */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #ef4444' }}
+                      >
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.25 }}>
+                          <Stack direction="row" alignItems="center" spacing={1.25}>
+                            <Avatar sx={{ width: 42, height: 42, bgcolor: '#fef2f2', color: '#dc2626', borderRadius: '12px' }}>
+                              <BloodtypeIcon />
+                            </Avatar>
+                            <Box>
+                              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                                {label('Vitals & Metrics', 'المؤشرات الحيوية')}
+                              </Typography>
+                              {bmiInfo && (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    marginTop: '3px',
+                                    padding: '2px 9px',
+                                    borderRadius: '999px',
+                                    background: bmiInfo.bg,
+                                    color: bmiInfo.color,
+                                    fontSize: '0.7rem',
+                                    fontWeight: 900,
+                                  }}
+                                >
+                                  BMI: {bmiInfo.val} ({bmiInfo.tag})
+                                </span>
+                              )}
+                            </Box>
+                          </Stack>
+                          {!editMode.vitals ? (
+                            <IconButton size="small" onClick={() => handleEditModeToggle('vitals')} sx={{ bgcolor: '#f1f5f9' }}>
+                              <EditOutlinedIcon fontSize="small" />
+                            </IconButton>
+                          ) : (
+                            <Stack direction="row" spacing={0.75}>
+                              <Button size="small" onClick={() => handleCancelEdit('vitals')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                              <Button size="small" variant="contained" onClick={() => handleSaveSection('vitals')} disabled={savingSection === 'vitals'}>
+                                {label('Save', 'حفظ')}
+                              </Button>
+                            </Stack>
+                          )}
+                        </Stack>
+
+                        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+                          {[
+                            { key: 'weight', label: label('Weight', 'الوزن'), unit: 'kg', icon: '⚖️', color: '#2563eb', bg: '#eff6ff' },
+                            { key: 'height', label: label('Height', 'الطول'), unit: 'cm', icon: '📏', color: '#059669', bg: '#ecfdf5' },
+                            { key: 'bloodPressure', label: label('Blood Pressure', 'ضغط الدم'), unit: '', icon: '❤️', color: '#dc2626', bg: '#fef2f2' },
+                            { key: 'temperature', label: label('Temperature', 'الحرارة'), unit: '°C', icon: '🌡️', color: '#d97706', bg: '#fffbeb' },
+                          ].map((item) => (
+                            <div
+                              key={item.key}
+                              style={{
+                                padding: '14px',
+                                borderRadius: '14px',
+                                background: item.bg,
+                                border: `1px solid ${item.color}22`,
+                              }}
+                            >
+                              <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#475569', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px' }}>
+                                <span>{item.icon}</span>
+                                <span>{item.label}</span>
+                              </div>
+                              {editMode.vitals ? (
+                                <TextField
+                                  fullWidth
+                                  variant="standard"
+                                  value={tempValues[item.key]}
+                                  onChange={handleTempChange(item.key)}
+                                  placeholder="—"
+                                  InputProps={{
+                                    disableUnderline: true,
+                                    sx: { fontSize: '1.15rem', fontWeight: 900, color: item.color },
+                                  }}
+                                />
+                              ) : (
+                                <div style={{ fontSize: '1.3rem', fontWeight: 900, color: item.color, lineHeight: 1.15 }}>
+                                  {patient[item.key] || '—'}
+                                  {patient[item.key] && item.unit && (
+                                    <span style={{ fontSize: '0.72rem', fontWeight: 700, opacity: 0.75, marginInlineStart: '4px' }}>
+                                      {item.unit}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </Box>
+                      </Paper>
+
+                      {/* Contact Information Card */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #0ea5e9' }}
+                      >
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2.25 }}>
+                          <Typography variant="h6" fontWeight={900}>
+                            {label('Contact Information', 'معلومات الاتصال')}
+                          </Typography>
+                          {!editMode.contact ? (
+                            <IconButton size="small" onClick={() => handleEditModeToggle('contact')} sx={{ bgcolor: '#f1f5f9' }}>
+                              <EditOutlinedIcon fontSize="small" />
+                            </IconButton>
+                          ) : (
+                            <Stack direction="row" spacing={0.75}>
+                              <Button size="small" onClick={() => handleCancelEdit('contact')} color="inherit">{label('Cancel', 'إلغاء')}</Button>
+                              <Button size="small" variant="contained" onClick={() => handleSaveSection('contact')} disabled={savingSection === 'contact'}>
+                                {label('Save', 'حفظ')}
+                              </Button>
+                            </Stack>
+                          )}
+                        </Stack>
+
+                        <Stack spacing={1.75}>
+                          {[
+                            { key: 'phone', label: label('Phone', 'الهاتف'), icon: <PhoneIcon fontSize="small" /> },
+                            { key: 'email', label: label('Email', 'البريد'), icon: <EmailIcon fontSize="small" /> },
+                            { key: 'address', label: label('Address', 'العنوان'), icon: <PlaceIcon fontSize="small" /> },
+                          ].map((item) => (
+                            <div
+                              key={item.key}
+                              style={{
+                                padding: '11px 13px',
+                                borderRadius: '13px',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '11px',
+                              }}
+                            >
+                              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#ffffff', border: '1px solid #e2e8f0', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                {item.icon}
+                              </div>
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800, display: 'block' }}>
+                                  {item.label}
+                                </Typography>
+                                {editMode.contact ? (
+                                  <TextField
+                                    fullWidth
+                                    size="small"
+                                    value={tempValues[item.key]}
+                                    onChange={handleTempChange(item.key)}
+                                    placeholder={item.label}
+                                    sx={{ mt: 0.5 }}
+                                  />
+                                ) : (
+                                  <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mt: 0.25 }}>
+                                    <Typography variant="body2" fontWeight={800} sx={{ color: '#0f172a', wordBreak: 'break-word' }}>
+                                      {patient[item.key] || '—'}
+                                    </Typography>
+                                    {patient[item.key] && (
+                                      <IconButton size="small" onClick={() => copy(patient[item.key])} sx={{ opacity: 0.6, p: 0.35 }}>
+                                        <ContentCopyIcon sx={{ fontSize: 13 }} />
+                                      </IconButton>
+                                    )}
+                                  </Stack>
+                                )}
+
+                                {!editMode.contact && patient[item.key] && item.key === 'phone' && (
+                                  <Stack direction="row" spacing={0.75} sx={{ mt: 1 }}>
+                                    <Button size="small" variant="outlined" component={Link} href={`tel:${patient.phone}`} sx={{ borderRadius: '9px', py: 0.2, fontSize: '0.73rem' }}>
+                                      {label('Call', 'اتصال')}
+                                    </Button>
+                                    <Button size="small" variant="outlined" component={Link} href={`sms:${patient.phone}`} sx={{ borderRadius: '9px', py: 0.2, fontSize: '0.73rem' }}>
+                                      SMS
+                                    </Button>
+                                  </Stack>
+                                )}
+                              </Box>
+                            </div>
+                          ))}
+                        </Stack>
+                      </Paper>
+
+                      {/* Recent Activity Timeline */}
+                      <Paper
+                        elevation={0}
+                        className="glass-panel"
+                        sx={{ p: { xs: 2.5, sm: 3 }, borderTop: '4px solid #10b981' }}
+                      >
+                        <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 2 }}>
+                          <Avatar sx={{ width: 40, height: 40, bgcolor: '#ecfdf5', color: '#059669', borderRadius: '11px' }}>
+                            <AssignmentIcon fontSize="small" />
+                          </Avatar>
+                          <Typography variant="h6" fontWeight={900}>
+                            {label('Recent Activity', 'النشاط الأخير')}
+                          </Typography>
+                        </Stack>
+
+                        <Stack spacing={1.25}>
+                          {appts.length > 0 && (
+                            <div className="shafy-list-row" style={{ padding: '11px 13px' }}>
+                              <Stack direction="row" spacing={1.25} alignItems="center">
+                                <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <EventIcon fontSize="small" />
+                                </div>
+                                <Box>
+                                  <Typography variant="subtitle2" fontWeight={800}>{label('Latest Visit', 'آخر موعد')}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{fmtNiceDateTime(appts[0]?.date)} • {appts[0]?.status}</Typography>
+                                </Box>
+                              </Stack>
+                            </div>
+                          )}
+
+                          {reports.length > 0 && (
+                            <div className="shafy-list-row" style={{ padding: '11px 13px' }}>
+                              <Stack direction="row" spacing={1.25} alignItems="center">
+                                <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#eef2ff', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <DescriptionIcon fontSize="small" />
+                                </div>
+                                <Box>
+                                  <Typography variant="subtitle2" fontWeight={800}>{label('Latest Report', 'آخر تقرير')}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{fmtNiceDateTime(reports[0]?.date)} • {reports[0]?.titleAr || reports[0]?.titleEn || reports[0]?.title || 'Report'}</Typography>
+                                </Box>
+                              </Stack>
+                            </div>
+                          )}
+
+                          {patient.notesUpdatedAt && (
+                            <div className="shafy-list-row" style={{ padding: '11px 13px' }}>
+                              <Stack direction="row" spacing={1.25} alignItems="center">
+                                <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: '#fef3c7', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <EditOutlinedIcon fontSize="small" />
+                                </div>
+                                <Box>
+                                  <Typography variant="subtitle2" fontWeight={800}>{label('Notes Updated', 'تحديث الملاحظات')}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{fmtNiceDateTime(patient.notesUpdatedAt)}</Typography>
+                                </Box>
+                              </Stack>
+                            </div>
+                          )}
+
+                          {!appts.length && !reports.length && !patient.notesUpdatedAt && (
+                            <Box sx={{ textAlign: 'center', py: 3 }}>
+                              <Typography variant="body2" color="text.secondary">
+                                {label('No recent activity recorded', 'لا يوجد نشاط حديث مسجل')}
+                              </Typography>
+                            </Box>
+                          )}
+                        </Stack>
+                      </Paper>
+                    </Stack>
+                  </Box>
+                </CustomTabPanel>
+
+                {/* TAB 2: APPOINTMENTS (Clean 2-Column CSS Grid) */}
+                <CustomTabPanel value={tabValue} index={1}>
+                  <div className="glass-panel" style={{ padding: '24px' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5} sx={{ mb: 2.5 }}>
+                      <Typography variant="h6" fontWeight={900}>
+                        {label('Appointment History', 'سجل المواعيد')}
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        startIcon={<AddCircleOutlineIcon />}
+                        onClick={() => router.push(`/appointments/new?patientId=${patient.id}${isArabic ? '&lang=ar' : ''}`)}
+                        size="small"
+                      >
+                        {label('New Appointment', 'موعد جديد')}
+                      </Button>
+                    </Stack>
+
+                    {apptLoading ? (
+                      <Stack spacing={1.5}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} sx={{ borderRadius: '14px' }} />)}</Stack>
+                    ) : appts.length === 0 ? (
+                      <Box sx={{ p: 5, textAlign: 'center', borderRadius: '16px', bgcolor: '#f8fafc', border: '1.5px dashed #cbd5e1' }}>
+                        <LocalHospitalIcon sx={{ fontSize: 44, color: '#94a3b8', mb: 1 }} />
+                        <Typography color="text.secondary" fontWeight={700}>
+                          {label('No appointments found for this patient.', 'لا توجد مواعيد لهذا المريض.')}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: '14px' }}>
+                        {appts.map((a) => {
+                          const typeInfo = getAppointmentTypeInfo(a, isArabic);
+                          return (
+                            <div key={a.id} className="shafy-list-row" style={{ padding: '15px 16px' }}>
+                              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+                                <Avatar
+                                  variant="rounded"
+                                  sx={{
+                                    width: 46,
+                                    height: 46,
+                                    borderRadius: '12px',
+                                    bgcolor: statusColor(a?.status) === 'success' ? '#ecfdf5' : '#eff6ff',
+                                    color: statusColor(a?.status) === 'success' ? '#059669' : '#2563eb',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <EventIcon />
+                                </Avatar>
+                                <Box sx={{ minWidth: 0, flex: 1 }}>
+                                  <Typography variant="subtitle2" fontWeight={900} noWrap>
+                                    {fmtApptFull(a)}
+                                  </Typography>
+                                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                                    <Chip
+                                      size="small"
+                                      label={typeInfo.label}
+                                      sx={{ height: 20, fontSize: '0.67rem', bgcolor: typeInfo.bgcolor, color: typeInfo.textColor, fontWeight: 800 }}
+                                    />
+                                    <Chip
+                                      label={String(a?.status || 'pending')}
+                                      color={statusColor(a?.status)}
+                                      size="small"
+                                      sx={{ height: 20, fontSize: '0.67rem', fontWeight: 800 }}
+                                    />
+                                  </Stack>
+                                </Box>
+                              </Stack>
                               <Button
                                 size="small"
+                                variant="outlined"
                                 component={Link}
                                 href={`/appointments/${a.id}${isArabic ? '?lang=ar' : ''}`}
-                                endIcon={isArabic ? <ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} /> : <ArrowBackIcon sx={{ transform: 'rotate(180deg)' }} />}
+                                sx={{ borderRadius: '10px', flexShrink: 0 }}
                               >
                                 {label('Details', 'التفاصيل')}
                               </Button>
-                            </Stack>
-                          </Paper>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  )}
+                            </div>
+                          );
+                        })}
+                      </Box>
+                    )}
+                  </div>
                 </CustomTabPanel>
 
                 {/* TAB 3: REPORTS */}
                 <CustomTabPanel value={tabValue} index={2}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-                    <Typography variant="h6" fontWeight={800}>
-                      {label('Medical & Lab Reports', 'التقارير الطبية والمعملية')}
-                    </Typography>
-                    <Button
-                      variant="outlined"
-                      startIcon={<AddCircleOutlineIcon />}
-                      onClick={() => setLabOpen(true)}
-                      size="small"
-                    >
-                      {label('Add Report', 'إضافة تقرير')}
-                    </Button>
-                  </Stack>
-
-                  {repLoading ? (
-                    <Stack spacing={2}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} />)}</Stack>
-                  ) : reports.length === 0 ? (
-                    <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, bgcolor: 'background.default' }} variant="outlined">
-                      <DescriptionIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-                      <Typography color="text.secondary">
-                        {label('No reports recorded yet.', 'لا توجد تقارير مسجلة بعد.')}
+                  <div className="glass-panel" style={{ padding: '24px' }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5} sx={{ mb: 2.5 }}>
+                      <Typography variant="h6" fontWeight={900}>
+                        {label('Medical & Lab Reports', 'التقارير الطبية والمعملية')}
                       </Typography>
-                    </Paper>
-                  ) : (
-                    <Stack spacing={2}>
-                      {reports.map((r) => {
-                        const isLab = String(r?.type || '').toLowerCase() === 'lab';
-                        return (
-                          <Paper
-                            key={r.id}
-                            variant="outlined"
-                            sx={{
-                              p: 2,
-                              borderRadius: 3,
-                              display: 'flex',
-                              flexDirection: { xs: 'column', sm: 'row' },
-                              alignItems: { xs: 'flex-start', sm: 'center' },
-                              gap: 2,
-                              '&:hover': { borderColor: 'primary.main' }
-                            }}
-                          >
-                            <Avatar
-                              sx={{
-                                width: 48, height: 48,
-                                bgcolor: isLab ? alpha('#9c27b0', 0.1) : alpha('#1976d2', 0.1),
-                                color: isLab ? 'secondary.main' : 'primary.main'
-                              }}
-                            >
-                              {isLab ? <ScienceIcon /> : <DescriptionIcon />}
-                            </Avatar>
-
-                            <Box sx={{ flex: 1 }}>
-                              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                                <Typography variant="subtitle1" fontWeight={800}>
-                                  {r?.titleAr || r?.titleEn || r?.title || (isLab ? label('Lab Report', 'تقرير معملي') : label('Medical Report', 'تقرير طبي'))}
-                                </Typography>
-                                <Chip
-                                  label={isLab ? label('Lab', 'معمل') : label('Clinic', 'عيادة')}
-                                  size="small"
-                                  variant="outlined"
-                                  color={isLab ? 'secondary' : 'primary'}
-                                  sx={{ height: 20, fontSize: '0.7rem', fontWeight: 700 }}
-                                />
-                              </Stack>
-                              <Typography variant="body2" color="text.secondary">
-                                {fmtNiceDateTime(r?.date)} • {isLab ? (r?.labName || label('External Lab', 'معمل خارجي')) : (r?.diagnosis || label('No diagnosis', 'لا يوجد تشخيص'))}
-                              </Typography>
-                            </Box>
-
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              {r?.followUp && (
-                                <Chip
-                                  icon={<EventIcon fontSize="small" />}
-                                  label={fmtNiceDate(r.followUp)}
-                                  size="small"
-                                  color="warning"
-                                  variant="soft"
-                                />
-                              )}
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                onClick={() => setViewReport(r)}
-                              >
-                                {label('View', 'عرض')}
-                              </Button>
-                              {r?.appointmentId && (
-                                <IconButton
-                                  size="small"
-                                  component={Link}
-                                  href={`/appointments/${r.appointmentId}${isArabic ? '?lang=ar' : ''}`}
-                                  title={label('Go to appointment', 'الذهاب للموعد')}
-                                >
-                                  <VisibilityIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </Stack>
-                          </Paper>
-                        );
-                      })}
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        <Button
+                          variant="contained"
+                          size="small"
+                          startIcon={<DescriptionIcon />}
+                          onClick={() => router.push(`/prescription/new?patientId=${patient.id}${isArabic ? '&lang=ar' : '&lang=en'}`)}
+                        >
+                          {label('New Prescription', 'وصفة جديدة')}
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<ScienceIcon />}
+                          onClick={() => setLabOpen(true)}
+                        >
+                          {label('Add Lab Report', 'إضافة تحليل')}
+                        </Button>
+                      </Stack>
                     </Stack>
-                  )}
+
+                    {repLoading ? (
+                      <Stack spacing={1.5}>{[...Array(3)].map((_, i) => <Skeleton key={i} variant="rounded" height={80} sx={{ borderRadius: '14px' }} />)}</Stack>
+                    ) : reports.length === 0 ? (
+                      <Box sx={{ p: 5, textAlign: 'center', borderRadius: '16px', bgcolor: '#f8fafc', border: '1.5px dashed #cbd5e1' }}>
+                        <DescriptionIcon sx={{ fontSize: 44, color: '#94a3b8', mb: 1 }} />
+                        <Typography color="text.secondary" fontWeight={700}>
+                          {label('No reports recorded yet.', 'لا توجد تقارير مسجلة بعد.')}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Stack spacing={1.5}>
+                        {reports.map((r) => {
+                          const isLab = String(r?.type || '').toLowerCase() === 'lab';
+                          return (
+                            <div key={r.id} className="shafy-list-row">
+                              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+                                <Avatar
+                                  variant="rounded"
+                                  sx={{
+                                    width: 46,
+                                    height: 46,
+                                    borderRadius: '12px',
+                                    bgcolor: isLab ? '#eef2ff' : '#eff6ff',
+                                    color: isLab ? '#4f46e5' : '#2563eb',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {isLab ? <ScienceIcon /> : <DescriptionIcon />}
+                                </Avatar>
+                                <Box sx={{ minWidth: 0, flex: 1 }}>
+                                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                                    <Typography variant="subtitle1" fontWeight={900} noWrap>
+                                      {r?.titleAr || r?.titleEn || r?.title || (isLab ? label('Lab Report', 'تقرير معملي') : label('Medical Report', 'تقرير طبي'))}
+                                    </Typography>
+                                    <Chip
+                                      label={isLab ? label('Lab', 'معمل') : label('Clinic', 'عيادة')}
+                                      size="small"
+                                      sx={{
+                                        height: 20,
+                                        fontSize: '0.68rem',
+                                        fontWeight: 800,
+                                        bgcolor: isLab ? '#eef2ff' : '#eff6ff',
+                                        color: isLab ? '#4f46e5' : '#2563eb',
+                                      }}
+                                    />
+                                  </Stack>
+                                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                                    {fmtNiceDateTime(r?.date)} • {isLab ? (r?.labName || label('External Lab', 'معمل خارجي')) : (r?.diagnosis || label('Clinical report', 'تقرير سريري'))}
+                                  </Typography>
+                                </Box>
+                              </Stack>
+
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                {r?.followUp && (
+                                  <Chip icon={<EventIcon fontSize="small" />} label={fmtNiceDate(r.followUp)} size="small" color="warning" />
+                                )}
+                                <Button variant="outlined" size="small" onClick={() => setViewReport(r)} sx={{ borderRadius: '10px' }}>
+                                  {label('View', 'عرض')}
+                                </Button>
+                                {r?.appointmentId && (
+                                  <IconButton
+                                    size="small"
+                                    component={Link}
+                                    href={`/appointments/${r.appointmentId}${isArabic ? '?lang=ar' : ''}`}
+                                    title={label('Go to appointment', 'الذهاب للموعد')}
+                                  >
+                                    <VisibilityIcon fontSize="small" />
+                                  </IconButton>
+                                )}
+                              </Stack>
+                            </div>
+                          );
+                        })}
+                      </Stack>
+                    )}
+                  </div>
                 </CustomTabPanel>
 
-                {/* TAB 4: NOTES */}
+                {/* TAB 4: NOTES (Equal-Width 2-Column CSS Grid) */}
                 <CustomTabPanel value={tabValue} index={3}>
-                  <Grid container spacing={3}>
-                    {/* Medical Notes */}
-                    <Grid item xs={12} md={6}>
-                      <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.light', color: 'primary.dark' }}>
-                              <AssignmentIcon fontSize="small" />
-                            </Avatar>
-                            <Typography variant="h6" fontWeight={800}>
-                              {label('Medical Notes', 'ملاحظات طبية')}
-                            </Typography>
-                          </Stack>
-                          {canEditNotes && (
-                            <IconButton
-                              onClick={openEditAll}
-                              color="primary"
-                            >
-                              <EditOutlinedIcon />
-                            </IconButton>
-                          )}
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, gap: '20px' }}>
+                    <Paper elevation={0} className="glass-panel" sx={{ p: 3, borderTop: '4px solid #2563eb', display: 'flex', flexDirection: 'column' }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                        <Stack direction="row" spacing={1.25} alignItems="center">
+                          <Avatar sx={{ width: 38, height: 38, bgcolor: '#eff6ff', color: '#2563eb', borderRadius: '11px' }}>
+                            <AssignmentIcon fontSize="small" />
+                          </Avatar>
+                          <Typography variant="h6" fontWeight={900}>
+                            {label('Medical Notes', 'ملاحظات طبية')}
+                          </Typography>
                         </Stack>
-                        <Divider sx={{ mb: 2 }} />
-                        <Box sx={{ flex: 1, minHeight: 100 }}>
-                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: patient?.notes ? 'text.primary' : 'text.secondary' }}>
-                            {patient?.notes || label('No medical notes added.', 'لا توجد ملاحظات طبية.')}
-                          </Typography>
-                        </Box>
-                        {patient?.notesUpdatedAt && (
-                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-                            {label('Updated:', 'تحديث:')} {fmtNiceDateTime(patient.notesUpdatedAt)} {patient.notesUpdatedBy && `by ${patient.notesUpdatedBy}`}
-                          </Typography>
+                        {canEditNotes && (
+                          <Button size="small" variant="outlined" startIcon={<EditOutlinedIcon fontSize="small" />} onClick={() => openEditAll('flags')}>
+                            {label('Edit', 'تعديل')}
+                          </Button>
                         )}
-                      </Paper>
-                    </Grid>
+                      </Stack>
+                      <Divider sx={{ mb: 2 }} />
+                      <Box sx={{ flex: 1, minHeight: 110 }}>
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, color: patient?.notes ? '#0f172a' : '#94a3b8', fontWeight: 600 }}>
+                          {patient?.notes || label('No medical notes added.', 'لا توجد ملاحظات طبية مسجلة.')}
+                        </Typography>
+                      </Box>
+                      {patient?.notesUpdatedAt && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                          {label('Updated:', 'آخر تحديث:')} {fmtNiceDateTime(patient.notesUpdatedAt)}
+                        </Typography>
+                      )}
+                    </Paper>
 
-                    {/* Financial Notes */}
-                    <Grid item xs={12} md={6}>
-                      <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <Avatar sx={{ width: 32, height: 32, bgcolor: 'success.light', color: 'success.dark' }}>
-                              <AttachMoneyIcon fontSize="small" />
-                            </Avatar>
-                            <Typography variant="h6" fontWeight={800}>
-                              {label('Financial Notes', 'ملاحظات مالية')}
-                            </Typography>
-                          </Stack>
-                          <IconButton
-                            onClick={openEditAll}
-                            color="success"
-                          >
-                            <EditOutlinedIcon />
-                          </IconButton>
+                    <Paper elevation={0} className="glass-panel" sx={{ p: 3, borderTop: '4px solid #10b981', display: 'flex', flexDirection: 'column' }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                        <Stack direction="row" spacing={1.25} alignItems="center">
+                          <Avatar sx={{ width: 38, height: 38, bgcolor: '#ecfdf5', color: '#059669', borderRadius: '11px' }}>
+                            <AttachMoneyIcon fontSize="small" />
+                          </Avatar>
+                          <Typography variant="h6" fontWeight={900}>
+                            {label('Financial Notes', 'ملاحظات مالية')}
+                          </Typography>
                         </Stack>
-                        <Divider sx={{ mb: 2 }} />
-                        <Box sx={{ flex: 1, minHeight: 100 }}>
-                          <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: patient?.financialNotes ? 'text.primary' : 'text.secondary' }}>
-                            {patient?.financialNotes || label('No financial notes added.', 'لا توجد ملاحظات مالية.')}
-                          </Typography>
-                        </Box>
-                        {patient?.financialNotesUpdatedAt && (
-                          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
-                            {label('Updated:', 'تحديث:')} {fmtNiceDateTime(patient.financialNotesUpdatedAt)}
-                          </Typography>
-                        )}
-                      </Paper>
-                    </Grid>
-                  </Grid>
+                        <Button size="small" variant="outlined" color="success" startIcon={<EditOutlinedIcon fontSize="small" />} onClick={() => openEditAll('flags')}>
+                          {label('Edit', 'تعديل')}
+                        </Button>
+                      </Stack>
+                      <Divider sx={{ mb: 2 }} />
+                      <Box sx={{ flex: 1, minHeight: 110 }}>
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, color: patient?.financialNotes ? '#0f172a' : '#94a3b8', fontWeight: 600 }}>
+                          {patient?.financialNotes || label('No financial notes added.', 'لا توجد ملاحظات مالية مسجلة.')}
+                        </Typography>
+                      </Box>
+                      {patient?.financialNotesUpdatedAt && (
+                        <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+                          {label('Updated:', 'آخر تحديث:')} {fmtNiceDateTime(patient.financialNotesUpdatedAt)}
+                        </Typography>
+                      )}
+                    </Paper>
+                  </Box>
                 </CustomTabPanel>
 
                 {/* TAB 5: EXTERNAL LABS */}
                 <CustomTabPanel value={tabValue} index={4}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-                    <Typography variant="h6" fontWeight={800}>
-                      {label('External Lab Integration', 'ربط المعامل الخارجية')}
+                  <div className="glass-panel" style={{ padding: '24px' }}>
+                    <Typography variant="h6" fontWeight={900} sx={{ mb: 2.5 }}>
+                      {label('External Lab Integration', 'نتائج المعامل الخارجية')}
                     </Typography>
-                  </Stack>
 
-                  <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
-                    {xLabLoading ? (
-                      <Box sx={{ p: 3 }}><LinearProgress /></Box>
-                    ) : xLabResults.length === 0 ? (
-                      <Box sx={{ p: 5, textAlign: 'center' }}>
-                        <ScienceIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-                        <Typography color="text.secondary">
-                          {label('No external lab results found linked to this patient.', 'لا توجد نتائج معامل خارجية مرتبطة بهذا المريض.')}
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <Table size="medium">
-                        <TableHead sx={{ bgcolor: 'action.hover' }}>
-                          <TableRow>
-                            <TableCell><strong>{label('Date', 'التاريخ')}</strong></TableCell>
-                            <TableCell><strong>{label('Lab', 'المعمل')}</strong></TableCell>
-                            <TableCell><strong>{label('Status', 'الحالة')}</strong></TableCell>
-                            <TableCell><strong>{label('Result', 'النتيجة')}</strong></TableCell>
-                            <TableCell><strong>{label('Tests', 'الاختبارات')}</strong></TableCell>
-                            <TableCell><strong>{label('Notes', 'ملاحظات')}</strong></TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {xLabResults.map((l) => (
-                            <TableRow key={l.id} hover>
-                              <TableCell>{fmtNiceDateTime(l?.resultDate || l?.createdAt)}</TableCell>
-                              <TableCell>{l?.labId || '—'}</TableCell>
-                              <TableCell>
-                                <Chip label={l?.status || '—'} size="small" variant="outlined" />
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{l?.resultValue || '—'}</TableCell>
-                              <TableCell>{Number.isFinite(l?.testCount) ? l.testCount : '—'}</TableCell>
-                              <TableCell sx={{ color: 'text.secondary', maxWidth: 200 }} noWrap title={l?.notes}>{l?.notes || '—'}</TableCell>
+                    <Box sx={{ borderRadius: '16px', overflowX: 'auto', border: '1px solid #e2e8f0', bgcolor: '#ffffff' }}>
+                      {xLabLoading ? (
+                        <Box sx={{ p: 3 }}><LinearProgress /></Box>
+                      ) : xLabResults.length === 0 ? (
+                        <Box sx={{ p: 5, textAlign: 'center' }}>
+                          <ScienceIcon sx={{ fontSize: 44, color: '#94a3b8', mb: 1 }} />
+                          <Typography color="text.secondary" fontWeight={700}>
+                            {label('No external lab results found linked to this patient.', 'لا توجد نتائج معامل خارجية مرتبطة بهذا المريض.')}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Table size="medium" sx={{ minWidth: 640 }}>
+                          <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                            <TableRow>
+                              <TableCell><strong>{label('Date', 'التاريخ')}</strong></TableCell>
+                              <TableCell><strong>{label('Lab', 'المعمل')}</strong></TableCell>
+                              <TableCell><strong>{label('Status', 'الحالة')}</strong></TableCell>
+                              <TableCell><strong>{label('Result', 'النتيجة')}</strong></TableCell>
+                              <TableCell><strong>{label('Tests', 'الاختبارات')}</strong></TableCell>
+                              <TableCell><strong>{label('Notes', 'ملاحظات')}</strong></TableCell>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    )}
-                  </Paper>
+                          </TableHead>
+                          <TableBody>
+                            {xLabResults.map((l) => (
+                              <TableRow key={l.id} hover>
+                                <TableCell>{fmtNiceDateTime(l?.resultDate || l?.createdAt)}</TableCell>
+                                <TableCell>{l?.labId || '—'}</TableCell>
+                                <TableCell><Chip label={l?.status || '—'} size="small" variant="outlined" /></TableCell>
+                                <TableCell sx={{ fontWeight: 800 }}>{l?.resultValue || '—'}</TableCell>
+                                <TableCell>{Number.isFinite(l?.testCount) ? l.testCount : '—'}</TableCell>
+                                <TableCell sx={{ color: 'text.secondary', maxWidth: 220 }} noWrap title={l?.notes}>{l?.notes || '—'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
+                    </Box>
+                  </div>
                 </CustomTabPanel>
               </Box>
             </Stack>
@@ -2255,258 +2212,339 @@ export default function PatientDetailsPage() {
             onSaved={() => { setLabOpen(false); fetchReports(); }}
           />
 
-          {/* Unified profile editor */}
+          {/* Unified 3-Tab Royal Sapphire Profile Editor Drawer */}
           <Drawer
-            anchor="right"
+            anchor={isArabic ? 'left' : 'right'}
             open={editAllOpen}
             onClose={() => !savingAll && setEditAllOpen(false)}
             PaperProps={{
               sx: {
-                width: { xs: '100%', sm: 420, md: 520 },
-                p: 3,
-                pt: 2.5,
-                borderRadius: { xs: 0, sm: '18px 0 0 18px' },
-                bgcolor: (t) => alpha(t.palette.background.paper, 0.98),
+                width: { xs: '100%', sm: 480, md: 560 },
+                borderRadius: { xs: 0, sm: isArabic ? '0 24px 24px 0' : '24px 0 0 24px' },
+                bgcolor: '#f8fafc',
+                direction: isArabic ? 'rtl' : 'ltr',
+                textAlign: isArabic ? 'right' : 'left',
+                overflow: 'hidden',
               },
             }}
           >
-            <Stack spacing={2} sx={{ height: '100%' }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="h6" fontWeight={900}>
-                  {label('Update Patient Profile', 'تحديث ملف المريض')}
-                </Typography>
-                <Button onClick={() => setEditAllOpen(false)} size="small" disabled={savingAll}>
-                  {label('Close', 'إغلاق')}
-                </Button>
-              </Stack>
-              <Typography variant="body2" color="text.secondary">
-                {label(
-                  'Edit demographics, contact, clinical flags, and notes from a single place.',
-                  'حدّث البيانات الديموغرافية والتواصل والأعلام الصحية والملاحظات من مكان واحد.'
-                )}
-              </Typography>
-              <Divider />
+            <Stack sx={{ height: '100%' }}>
+              {/* Gradient Drawer Header */}
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, #0b1936 0%, #15347a 52%, #2563eb 100%)',
+                  color: '#ffffff',
+                  padding: '20px 24px 16px',
+                }}
+              >
+                <Stack direction="row" justifyContent="space-between" alignItems="center">
+                  <Box>
+                    <Typography variant="h6" fontWeight={900}>
+                      {label('Update Patient Profile', 'إعداد وتحديث ملف المريض')}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#dbeafe', fontWeight: 600 }}>
+                      {editAllValues?.name || patient?.name} • {label(`Completeness ${profileCompleteness}%`, `اكتمال الملف ${profileCompleteness}%`)}
+                    </Typography>
+                  </Box>
+                  <Button
+                    onClick={() => setEditAllOpen(false)}
+                    size="small"
+                    disabled={savingAll}
+                    sx={{ color: '#ffffff', bgcolor: 'rgba(255,255,255,0.14)', borderRadius: '10px', px: 1.5 }}
+                  >
+                    {label('Close', 'إغلاق')}
+                  </Button>
+                </Stack>
+
+                {/* 3 Pill Sub-Tabs */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '6px',
+                    marginTop: '14px',
+                    background: 'rgba(255,255,255,0.12)',
+                    padding: '4px',
+                    borderRadius: '13px',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                  }}
+                >
+                  {[
+                    { id: 'basics', txt: label('1. Basics', '١. الأساسيات') },
+                    { id: 'medical', txt: label('2. Medical & Vitals', '٢. الطبي والمؤشرات') },
+                    { id: 'flags', txt: label('3. Flags & Notes', '٣. الأعلام والملاحظات') },
+                  ].map((tb) => (
+                    <button
+                      key={tb.id}
+                      type="button"
+                      onClick={() => setDrawerTab(tb.id)}
+                      className="shafy-tab-pill"
+                      style={{
+                        flex: 1,
+                        justifyContent: 'center',
+                        padding: '7px 10px',
+                        fontSize: '0.78rem',
+                        background: drawerTab === tb.id ? '#ffffff' : 'transparent',
+                        color: drawerTab === tb.id ? '#1d4ed8' : '#e2e8f0',
+                      }}
+                    >
+                      {tb.txt}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {editAllValues ? (
-                <Stack spacing={2} sx={{ overflowY: 'auto', pr: 0.5, flex: 1 }}>
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
-                      {label('Basics & Contact', 'البيانات الأساسية والتواصل')}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label={label('Full Name', 'الاسم الكامل')}
-                          value={editAllValues.name}
-                          onChange={handleEditInput('name')}
-                          required
-                        />
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          label={label('Age', 'العمر')}
-                          type="number"
-                          value={editAllValues.age}
-                          onChange={handleEditInput('age')}
-                        />
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          select
-                          label={label('Gender', 'النوع')}
-                          value={editAllValues.gender}
-                          onChange={handleEditInput('gender')}
-                        >
-                          <MenuItem value="male">{label('Male', 'ذكر')}</MenuItem>
-                          <MenuItem value="female">{label('Female', 'أنثى')}</MenuItem>
-                          <MenuItem value="other">{label('Other', 'أخرى')}</MenuItem>
-                        </TextField>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          select
-                          label={label('Blood Type', 'فصيلة الدم')}
-                          value={editAllValues.bloodType}
-                          onChange={handleEditInput('bloodType')}
-                        >
-                          {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => (
-                            <MenuItem key={b} value={b}>{b}</MenuItem>
-                          ))}
-                        </TextField>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          fullWidth
-                          select
-                          label={label('Marital Status', 'الحالة الاجتماعية')}
-                          value={editAllValues.maritalStatus}
-                          onChange={handleEditInput('maritalStatus')}
-                        >
-                          <MenuItem value="single">{label('Single', 'أعزب')}</MenuItem>
-                          <MenuItem value="married">{label('Married', 'متزوج')}</MenuItem>
-                          <MenuItem value="divorced">{label('Divorced', 'مطلق')}</MenuItem>
-                          <MenuItem value="widowed">{label('Widowed', 'أرمل')}</MenuItem>
-                        </TextField>
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label={label('Phone', 'الهاتف')}
-                          value={editAllValues.phone}
-                          onChange={handleEditInput('phone')}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label={label('Email', 'البريد الإلكتروني')}
-                          type="email"
-                          value={editAllValues.email}
-                          onChange={handleEditInput('email')}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label={label('Address', 'العنوان')}
-                          multiline
-                          minRows={2}
-                          value={editAllValues.address}
-                          onChange={handleEditInput('address')}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          type="datetime-local"
-                          label={label('Last Visit', 'آخر زيارة')}
-                          value={editAllValues.lastVisit}
-                          onChange={handleEditInput('lastVisit')}
-                          InputLabelProps={{ shrink: true }}
-                        />
-                      </Grid>
-                    </Grid>
-                  </Paper>
+                <Box sx={{ overflowY: 'auto', p: 2.5, flex: 1 }}>
+                  {drawerTab === 'basics' && (
+                    <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
+                      <Stack spacing={2}>
+                        <TextField fullWidth label={label('Full Name *', 'الاسم الكامل *')} value={editAllValues.name} onChange={handleEditInput('name')} required />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '0.85fr 1.15fr' }, gap: '12px', alignItems: 'end' }}>
+                          <TextField fullWidth label={label('Age', 'العمر')} type="number" value={editAllValues.age} onChange={handleEditInput('age')} />
+                          <Box>
+                            <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800, display: 'block', mb: 0.75 }}>
+                              {label('Gender', 'النوع')}
+                            </Typography>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                              {[
+                                { val: 'male', txt: label('Male', 'ذكر'), color: '#2563eb', bg: '#eff6ff' },
+                                { val: 'female', txt: label('Female', 'أنثى'), color: '#db2777', bg: '#fdf2f8' },
+                              ].map((g) => {
+                                const sel = String(editAllValues.gender || '').toLowerCase() === g.val;
+                                return (
+                                  <button
+                                    key={g.val}
+                                    type="button"
+                                    onClick={() => setEditAllValues((p) => ({ ...p, gender: g.val }))}
+                                    style={{
+                                      padding: '10px',
+                                      borderRadius: '12px',
+                                      border: `1.5px solid ${sel ? g.color : '#e2e8f0'}`,
+                                      background: sel ? g.bg : '#ffffff',
+                                      color: sel ? g.color : '#475569',
+                                      fontWeight: 800,
+                                      fontSize: '0.84rem',
+                                      cursor: 'pointer',
+                                      fontFamily: 'inherit',
+                                    }}
+                                  >
+                                    {g.txt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </Box>
+                        </Box>
 
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
-                      {label('Medical Background', 'الخلفية الطبية')}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={2}
-                          label={label('Allergies', 'الحساسية')}
-                          value={editAllValues.allergies}
-                          onChange={handleEditInput('allergies')}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={2}
-                          label={label('Chronic Conditions', 'الأمراض المزمنة')}
-                          value={editAllValues.conditions}
-                          onChange={handleEditInput('conditions')}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={2}
-                          label={label('Current Medications', 'الأدوية الحالية')}
-                          value={editAllValues.medications}
-                          onChange={handleEditInput('medications')}
-                        />
-                      </Grid>
-                    </Grid>
-                  </Paper>
+                        <Box>
+                          <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800, display: 'block', mb: 0.75 }}>
+                            {label('Blood Type (Quick Select)', 'فصيلة الدم')}
+                          </Typography>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+                            {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => {
+                              const sel = editAllValues.bloodType === b;
+                              return (
+                                <button
+                                  key={b}
+                                  type="button"
+                                  onClick={() => setEditAllValues((p) => ({ ...p, bloodType: sel ? '' : b }))}
+                                  style={{
+                                    minWidth: '48px',
+                                    padding: '6px 10px',
+                                    borderRadius: '10px',
+                                    border: `1.5px solid ${sel ? '#dc2626' : '#e2e8f0'}`,
+                                    background: sel ? '#fef2f2' : '#ffffff',
+                                    color: sel ? '#b91c1c' : '#334155',
+                                    fontWeight: 900,
+                                    fontSize: '0.8rem',
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                  }}
+                                >
+                                  {b}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </Box>
 
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
-                      {label('Health Flags', 'الأعلام الصحية')}
-                    </Typography>
-                    <Stack spacing={1}>
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.isDiabetic} onChange={handleEditToggle('isDiabetic')} />}
-                        label={label('Diabetic', 'مريض سكري')}
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.hadSurgeries} onChange={handleEditToggle('hadSurgeries')} />}
-                        label={label('Past Surgeries', 'عمليات جراحية سابقة')}
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.isSmoker} onChange={handleEditToggle('isSmoker')} />}
-                        label={label('Smoker', 'مدخن')}
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.drinksAlcohol} onChange={handleEditToggle('drinksAlcohol')} />}
-                        label={label('Alcohol Intake', 'يتناول الكحول')}
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.familyHistory} onChange={handleEditToggle('familyHistory')} />}
-                        label={label('Family History', 'تاريخ عائلي مشابه')}
-                      />
-                      <FormControlLabel
-                        control={<Switch checked={!!editAllValues.isPregnant} onChange={handleEditToggle('isPregnant')} />}
-                        label={label('Pregnant', 'حامل')}
-                      />
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: '12px' }}>
+                          <TextField fullWidth label={label('Phone', 'الهاتف')} value={editAllValues.phone} onChange={handleEditInput('phone')} />
+                          <TextField fullWidth select label={label('Marital Status', 'الحالة الاجتماعية')} value={editAllValues.maritalStatus} onChange={handleEditInput('maritalStatus')}>
+                            <MenuItem value="">{label('Unspecified', 'غير محدد')}</MenuItem>
+                            <MenuItem value="single">{label('Single', 'أعزب')}</MenuItem>
+                            <MenuItem value="married">{label('Married', 'متزوج')}</MenuItem>
+                            <MenuItem value="divorced">{label('Divorced', 'مطلق')}</MenuItem>
+                            <MenuItem value="widowed">{label('Widowed', 'أرمل')}</MenuItem>
+                          </TextField>
+                        </Box>
+
+                        <TextField fullWidth label={label('Email', 'البريد الإلكتروني')} type="email" value={editAllValues.email} onChange={handleEditInput('email')} />
+                        <TextField fullWidth label={label('Address', 'العنوان')} multiline minRows={2} value={editAllValues.address} onChange={handleEditInput('address')} />
+                        <TextField fullWidth type="datetime-local" label={label('Last Visit', 'آخر زيارة')} value={editAllValues.lastVisit} onChange={handleEditInput('lastVisit')} InputLabelProps={{ shrink: true }} />
+                      </Stack>
+                    </div>
+                  )}
+
+                  {drawerTab === 'medical' && (
+                    <Stack spacing={2}>
+                      <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
+                        <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.5, color: '#0f172a' }}>
+                          {label('Vital Measurements', 'المؤشرات الحيوية الأساسية')}
+                        </Typography>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
+                          <TextField fullWidth size="small" label={label('Weight (kg)', 'الوزن (كجم)')} value={editAllValues.weight} onChange={handleEditInput('weight')} />
+                          <TextField fullWidth size="small" label={label('Height (cm)', 'الطول (سم)')} value={editAllValues.height} onChange={handleEditInput('height')} />
+                          <TextField fullWidth size="small" label={label('Blood Pressure', 'ضغط الدم')} placeholder="120/80" value={editAllValues.bloodPressure} onChange={handleEditInput('bloodPressure')} />
+                          <TextField fullWidth size="small" label={label('Temperature (°C)', 'الحرارة (°C)')} placeholder="37.0" value={editAllValues.temperature} onChange={handleEditInput('temperature')} />
+                        </Box>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
+                        <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.5, color: '#0f172a' }}>
+                          {label('Allergies, Chronic Conditions & Meds', 'الحساسيات والأمراض المزمنة والأدوية')}
+                        </Typography>
+                        <Stack spacing={2}>
+                          <Box>
+                            <TextField fullWidth multiline minRows={2} label={label('Allergies', 'الحساسية')} value={editAllValues.allergies} onChange={handleEditInput('allergies')} />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '7px' }}>
+                              {(isArabic ? ['بنسلين', 'أسبرين', 'سلفا', 'لا يوجد'] : ['Penicillin', 'Aspirin', 'Sulfa', 'None']).map((tok) => (
+                                <button
+                                  key={tok}
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = splitCsv(editAllValues.allergies);
+                                    const next = cur.includes(tok) ? cur.filter((x) => x !== tok) : [...cur, tok];
+                                    setEditAllValues((p) => ({ ...p, allergies: next.join(', ') }));
+                                  }}
+                                  style={{
+                                    padding: '3px 10px',
+                                    borderRadius: '999px',
+                                    border: '1px solid #fecaca',
+                                    background: '#fef2f2',
+                                    color: '#b91c1c',
+                                    fontSize: '0.73rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                  }}
+                                >
+                                  + {tok}
+                                </button>
+                              ))}
+                            </div>
+                          </Box>
+
+                          <Box>
+                            <TextField fullWidth multiline minRows={2} label={label('Chronic Conditions', 'الأمراض المزمنة')} value={editAllValues.conditions} onChange={handleEditInput('conditions')} />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '7px' }}>
+                              {(isArabic ? ['سكري', 'ضغط دم', 'ربو', 'قلب', 'غدة درقية'] : ['Diabetes', 'Hypertension', 'Asthma', 'Heart', 'Thyroid']).map((tok) => (
+                                <button
+                                  key={tok}
+                                  type="button"
+                                  onClick={() => {
+                                    const cur = splitCsv(editAllValues.conditions);
+                                    const next = cur.includes(tok) ? cur.filter((x) => x !== tok) : [...cur, tok];
+                                    setEditAllValues((p) => ({ ...p, conditions: next.join(', ') }));
+                                  }}
+                                  style={{
+                                    padding: '3px 10px',
+                                    borderRadius: '999px',
+                                    border: '1px solid #fde68a',
+                                    background: '#fef3c7',
+                                    color: '#92400e',
+                                    fontSize: '0.73rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    fontFamily: 'inherit',
+                                  }}
+                                >
+                                  + {tok}
+                                </button>
+                              ))}
+                            </div>
+                          </Box>
+
+                          <TextField fullWidth multiline minRows={2} label={label('Current Medications', 'الأدوية الحالية')} value={editAllValues.medications} onChange={handleEditInput('medications')} />
+                        </Stack>
+                      </div>
                     </Stack>
-                  </Paper>
+                  )}
 
-                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 3 }}>
-                    <Typography variant="subtitle2" fontWeight={800} gutterBottom>
-                      {label('Notes', 'الملاحظات')}
-                    </Typography>
-                    <Grid container spacing={1.5}>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={3}
-                          label={label('Medical Notes', 'ملاحظات طبية')}
-                          value={editAllValues.notes}
-                          onChange={handleEditInput('notes')}
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          multiline
-                          minRows={3}
-                          label={label('Financial Notes', 'ملاحظات مالية')}
-                          value={editAllValues.financialNotes}
-                          onChange={handleEditInput('financialNotes')}
-                        />
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Stack>
+                  {drawerTab === 'flags' && (
+                    <Stack spacing={2}>
+                      <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
+                        <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.5, color: '#0f172a' }}>
+                          {label('Clinical Health Flags', 'الأعلام والمؤشرات الصحية')}
+                        </Typography>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          {[
+                            { key: 'isDiabetic', txt: label('Diabetic', 'مريض سكري') },
+                            { key: 'hadSurgeries', txt: label('Past Surgeries', 'عمليات سابقة') },
+                            { key: 'isSmoker', txt: label('Smoker', 'مدخن') },
+                            { key: 'drinksAlcohol', txt: label('Alcohol', 'كحول') },
+                            { key: 'familyHistory', txt: label('Family History', 'تاريخ عائلي') },
+                            { key: 'isPregnant', txt: label('Pregnant', 'حامل') },
+                          ].map((fl) => {
+                            const on = !!editAllValues[fl.key];
+                            return (
+                              <div
+                                key={fl.key}
+                                style={{
+                                  padding: '8px 12px',
+                                  borderRadius: '12px',
+                                  background: on ? '#eff6ff' : '#f8fafc',
+                                  border: `1px solid ${on ? '#93c5fd' : '#e2e8f0'}`,
+                                }}
+                              >
+                                <FormControlLabel
+                                  sx={{ m: 0, width: '100%', justifyContent: 'space-between' }}
+                                  labelPlacement="start"
+                                  control={<Switch size="small" checked={on} onChange={handleEditToggle(fl.key)} />}
+                                  label={<Typography variant="body2" fontWeight={800}>{fl.txt}</Typography>}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#ffffff', padding: '18px', borderRadius: '18px', border: '1px solid #e2e8f0' }}>
+                        <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.5, color: '#0f172a' }}>
+                          {label('Medical & Financial Notes', 'الملاحظات الطبية والمالية')}
+                        </Typography>
+                        <Stack spacing={2}>
+                          <TextField fullWidth multiline minRows={3} label={label('Medical Notes', 'ملاحظات طبية')} value={editAllValues.notes} onChange={handleEditInput('notes')} />
+                          <TextField fullWidth multiline minRows={3} label={label('Financial Notes', 'ملاحظات مالية')} value={editAllValues.financialNotes} onChange={handleEditInput('financialNotes')} />
+                        </Stack>
+                      </div>
+                    </Stack>
+                  )}
+                </Box>
               ) : (
                 <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
                   <Typography color="text.secondary">{label('Loading profile…', 'جاري تحميل الملف…')}</Typography>
                 </Box>
               )}
 
-              <Stack direction="row" spacing={1} justifyContent="flex-end">
-                <Button onClick={() => setEditAllOpen(false)} disabled={savingAll}>
+              {/* Sticky Drawer Footer */}
+              <Stack
+                direction="row"
+                spacing={1.5}
+                justifyContent="flex-end"
+                sx={{ p: 2, bgcolor: '#ffffff', borderTop: '1px solid #e2e8f0' }}
+              >
+                <Button variant="outlined" onClick={() => setEditAllOpen(false)} disabled={savingAll} sx={{ borderRadius: '12px', px: 2.5 }}>
                   {label('Cancel', 'إلغاء')}
                 </Button>
                 <Button
                   variant="contained"
                   onClick={handleSaveProfile}
                   disabled={savingAll}
-                  sx={{ textTransform: 'none' }}
+                  sx={{ borderRadius: '12px', px: 3.5 }}
                 >
-                  {savingAll ? label('Saving…', 'جارٍ الحفظ…') : label('Save Profile', 'حفظ الملف')}
+                  {savingAll ? label('Saving…', 'جارٍ الحفظ…') : label('Save Profile', 'حفظ التغييرات')}
                 </Button>
               </Stack>
             </Stack>

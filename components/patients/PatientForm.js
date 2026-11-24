@@ -1,342 +1,428 @@
 'use client';
 import * as React from 'react';
-import {
-    Grid, TextField, MenuItem, Stack, Button, Box, Typography,
-    Paper, Accordion, AccordionSummary, AccordionDetails, InputAdornment
-} from '@mui/material';
-import PersonIcon from '@mui/icons-material/Person';
-import PhoneIcon from '@mui/icons-material/Phone';
-import EmailIcon from '@mui/icons-material/Email';
-import HomeIcon from '@mui/icons-material/Home';
-import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import BloodtypeIcon from '@mui/icons-material/Bloodtype';
-import CakeIcon from '@mui/icons-material/Cake';
-import WcIcon from '@mui/icons-material/Wc';
-import EventIcon from '@mui/icons-material/Event';
+import { Box, TextField, MenuItem, Stack, Button, Typography, InputAdornment } from '@mui/material';
+import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
+import PhoneRoundedIcon from '@mui/icons-material/PhoneRounded';
+import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
+import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
+import MedicalServicesRoundedIcon from '@mui/icons-material/MedicalServicesRounded';
+import BloodtypeRoundedIcon from '@mui/icons-material/BloodtypeRounded';
+import CakeRoundedIcon from '@mui/icons-material/CakeRounded';
+import MaleRoundedIcon from '@mui/icons-material/MaleRounded';
+import FemaleRoundedIcon from '@mui/icons-material/FemaleRounded';
+import EventRoundedIcon from '@mui/icons-material/EventRounded';
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded';
+import HealthInfoSection from '@/components/patients/HealthInfoSection';
 
-export default function PatientForm({ isArabic, initialValues, onSubmit }) {
-    const [values, setValues] = React.useState(
-        initialValues || {
-            name: '',
-            age: '',
-            gender: '',
-            bloodType: '',
-            phone: '',
-            email: '',
-            address: '',
-            allergies: '',
-            conditions: '',
-            medications: '',
-            maritalStatus: '',
-            lastVisit: ''
-        }
-    );
-    const [submitting, setSubmitting] = React.useState(false);
-    const [expanded, setExpanded] = React.useState('basic');
+const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+const QUICK_ALLERGIES_AR = ['بنسلين', 'أسبرين', 'سلفا', 'لا يوجد'];
+const QUICK_ALLERGIES_EN = ['Penicillin', 'Aspirin', 'Sulfa', 'None'];
+const QUICK_CONDITIONS_AR = ['سكري', 'ضغط دم', 'ربو', 'قلب', 'غدة درقية'];
+const QUICK_CONDITIONS_EN = ['Diabetes', 'Hypertension', 'Asthma', 'Heart Disease', 'Thyroid'];
 
-    const handleChange = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
+function toggleCsvToken(current, token) {
+  const list = String(current || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (list.some((x) => x.toLowerCase() === token.toLowerCase())) {
+    return list.filter((x) => x.toLowerCase() !== token.toLowerCase()).join(', ');
+  }
+  return [...list, token].join(', ');
+}
 
-    const handleAccordion = (panel) => (event, isExpanded) => {
-        setExpanded(isExpanded ? panel : false);
-    };
+function hasCsvToken(current, token) {
+  return String(current || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .includes(token.toLowerCase());
+}
 
-    const submit = async (e) => {
-        e.preventDefault();
-        setSubmitting(true);
-        await onSubmit?.(values, { setSubmitting });
-    };
+export default function PatientForm({ isArabic = true, initialValues, onSubmit }) {
+  const [values, setValues] = React.useState(
+    initialValues || {
+      name: '',
+      age: '',
+      gender: '',
+      bloodType: '',
+      phone: '',
+      email: '',
+      address: '',
+      allergies: '',
+      conditions: '',
+      medications: '',
+      maritalStatus: '',
+      lastVisit: '',
+      isDiabetic: false,
+      hadSurgeries: false,
+      isSmoker: false,
+      drinksAlcohol: false,
+      familyHistory: false,
+      isPregnant: false,
+    }
+  );
+  const [submitting, setSubmitting] = React.useState(false);
 
-    const label = (en, ar) => isArabic ? ar : en;
+  const handleChange = (key) => (e) => setValues((v) => ({ ...v, [key]: e.target.value }));
 
-    return (
-        <form onSubmit={submit}>
-            <Stack spacing={2}>
-                {/* Basic Information */}
-                <Accordion
-                    expanded={expanded === 'basic'}
-                    onChange={handleAccordion('basic')}
-                    sx={{ borderRadius: 2, '&:before': { display: 'none' } }}
-                    elevation={0}
-                >
-                    <AccordionSummary
-                        expandIcon={<ExpandMoreIcon />}
-                        sx={{
-                            bgcolor: 'action.hover',
-                            borderRadius: expanded === 'basic' ? '8px 8px 0 0' : 2,
-                            '&:hover': { bgcolor: 'action.selected' }
+  const submit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    await onSubmit?.(values, { setSubmitting });
+  };
+
+  const label = (en, ar) => (isArabic ? ar : en);
+  const allergyChips = isArabic ? QUICK_ALLERGIES_AR : QUICK_ALLERGIES_EN;
+  const conditionChips = isArabic ? QUICK_CONDITIONS_AR : QUICK_CONDITIONS_EN;
+
+  return (
+    <form onSubmit={submit} dir={isArabic ? 'rtl' : 'ltr'}>
+      <Stack spacing={2.5}>
+        {/* Section 1: Basic Demographics & Contact */}
+        <div className="glass-panel" style={{ padding: '24px', borderTop: '4px solid #2563eb' }}>
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2.5 }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <PersonRoundedIcon />
+            </div>
+            <div>
+              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                {label('Basic & Contact Information', 'البيانات الأساسية والتواصل')}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                {label('Identity, demographics, blood type and phone', 'الهوية، العمر، النوع، فصيلة الدم والهاتف')}
+              </Typography>
+            </div>
+          </Stack>
+
+          <Stack spacing={2.25}>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+                gap: 2,
+              }}
+            >
+              <TextField
+                fullWidth
+                label={label('Patient Name *', 'اسم المريض *')}
+                value={values.name}
+                onChange={handleChange('name')}
+                required
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <PersonRoundedIcon fontSize="small" sx={{ color: '#64748b' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <TextField
+                fullWidth
+                label={label('Phone Number', 'رقم الهاتف')}
+                value={values.phone}
+                onChange={handleChange('phone')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <PhoneRoundedIcon fontSize="small" sx={{ color: '#2563eb' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 0.72fr) minmax(0, 1.28fr)' },
+                gap: 2,
+                alignItems: 'end',
+              }}
+            >
+              <TextField
+                fullWidth
+                label={label('Age', 'العمر')}
+                type="number"
+                value={values.age}
+                onChange={handleChange('age')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <CakeRoundedIcon fontSize="small" sx={{ color: '#64748b' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800, display: 'block', mb: 0.75 }}>
+                  {label('Gender', 'النوع')}
+                </Typography>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  {[
+                    { val: 'male', txt: label('Male', 'ذكر'), icon: MaleRoundedIcon, color: '#2563eb', bg: '#eff6ff' },
+                    { val: 'female', txt: label('Female', 'أنثى'), icon: FemaleRoundedIcon, color: '#db2777', bg: '#fdf2f8' },
+                  ].map((g) => {
+                    const selected = values.gender === g.val;
+                    const GIcon = g.icon;
+                    return (
+                      <button
+                        key={g.val}
+                        type="button"
+                        onClick={() => setValues((v) => ({ ...v, gender: selected ? '' : g.val }))}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          padding: '11px 14px',
+                          borderRadius: '13px',
+                          border: `1.5px solid ${selected ? g.color : '#e2e8f0'}`,
+                          background: selected ? g.bg : '#ffffff',
+                          color: selected ? g.color : '#475569',
+                          fontWeight: 800,
+                          fontSize: '0.88rem',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
                         }}
-                    >
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <PersonIcon color="primary" />
-                            <Typography fontWeight={700}>{label('Basic Information', 'المعلومات الأساسية')}</Typography>
-                        </Stack>
-                    </AccordionSummary>
-                    <AccordionDetails sx={{ pt: 3 }}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Patient Name', 'اسم المريض')}
-                                    value={values.name}
-                                    onChange={handleChange('name')}
-                                    required
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <PersonIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Age', 'العمر')}
-                                    type="number"
-                                    value={values.age}
-                                    onChange={handleChange('age')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <CakeIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    select
-                                    label={label('Gender', 'النوع')}
-                                    value={values.gender}
-                                    onChange={handleChange('gender')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <WcIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                >
-                                    <MenuItem value="male">{label('Male', 'ذكر')}</MenuItem>
-                                    <MenuItem value="female">{label('Female', 'أنثى')}</MenuItem>
-                                    <MenuItem value="other">{label('Other', 'آخر')}</MenuItem>
-                                </TextField>
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    select
-                                    label={label('Blood Type', 'فصيلة الدم')}
-                                    value={values.bloodType}
-                                    onChange={handleChange('bloodType')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <BloodtypeIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                >
-                                    <MenuItem value="A+">A+</MenuItem>
-                                    <MenuItem value="A-">A-</MenuItem>
-                                    <MenuItem value="B+">B+</MenuItem>
-                                    <MenuItem value="B-">B-</MenuItem>
-                                    <MenuItem value="AB+">AB+</MenuItem>
-                                    <MenuItem value="AB-">AB-</MenuItem>
-                                    <MenuItem value="O+">O+</MenuItem>
-                                    <MenuItem value="O-">O-</MenuItem>
-                                </TextField>
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    select
-                                    label={label('Marital Status', 'الحالة الاجتماعية')}
-                                    value={values.maritalStatus}
-                                    onChange={handleChange('maritalStatus')}
-                                >
-                                    <MenuItem value="single">{label('Single', 'أعزب')}</MenuItem>
-                                    <MenuItem value="married">{label('Married', 'متزوج')}</MenuItem>
-                                    <MenuItem value="divorced">{label('Divorced', 'مطلق')}</MenuItem>
-                                    <MenuItem value="widowed">{label('Widowed', 'أرمل')}</MenuItem>
-                                </TextField>
-                            </Grid>
-                        </Grid>
-                    </AccordionDetails>
-                </Accordion>
+                      >
+                        <GIcon sx={{ fontSize: 19 }} />
+                        <span>{g.txt}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Box>
+            </Box>
 
-                {/* Contact Information */}
-                <Accordion
-                    expanded={expanded === 'contact'}
-                    onChange={handleAccordion('contact')}
-                    sx={{ borderRadius: 2, '&:before': { display: 'none' } }}
-                    elevation={0}
-                >
-                    <AccordionSummary
-                        expandIcon={<ExpandMoreIcon />}
-                        sx={{
-                            bgcolor: 'action.hover',
-                            borderRadius: expanded === 'contact' ? '8px 8px 0 0' : 2,
-                            '&:hover': { bgcolor: 'action.selected' }
-                        }}
+            <Box>
+              <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 1 }}>
+                <BloodtypeRoundedIcon sx={{ fontSize: 18, color: '#dc2626' }} />
+                <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 800 }}>
+                  {label('Blood Type', 'فصيلة الدم')}
+                </Typography>
+              </Stack>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {BLOOD_TYPES.map((bt) => {
+                  const selected = values.bloodType === bt;
+                  return (
+                    <button
+                      key={bt}
+                      type="button"
+                      onClick={() => setValues((v) => ({ ...v, bloodType: selected ? '' : bt }))}
+                      style={{
+                        minWidth: '54px',
+                        padding: '7px 13px',
+                        borderRadius: '11px',
+                        border: `1.5px solid ${selected ? '#dc2626' : '#e2e8f0'}`,
+                        background: selected ? '#fef2f2' : '#ffffff',
+                        color: selected ? '#b91c1c' : '#334155',
+                        fontWeight: 900,
+                        fontSize: '0.84rem',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
                     >
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <PhoneIcon color="success" />
-                            <Typography fontWeight={700}>{label('Contact Information', 'معلومات الاتصال')}</Typography>
-                        </Stack>
-                    </AccordionSummary>
-                    <AccordionDetails sx={{ pt: 3 }}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Phone Number', 'رقم الهاتف')}
-                                    value={values.phone}
-                                    onChange={handleChange('phone')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <PhoneIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                            <Grid item xs={12} sm={6}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Email', 'البريد الإلكتروني')}
-                                    type="email"
-                                    value={values.email}
-                                    onChange={handleChange('email')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <EmailIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Address', 'العنوان')}
-                                    multiline
-                                    rows={2}
-                                    value={values.address}
-                                    onChange={handleChange('address')}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start" sx={{ alignSelf: 'flex-start', mt: 1.5 }}>
-                                                <HomeIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                        </Grid>
-                    </AccordionDetails>
-                </Accordion>
+                      {bt}
+                    </button>
+                  );
+                })}
+              </div>
+            </Box>
 
-                {/* Medical Background */}
-                <Accordion
-                    expanded={expanded === 'medical'}
-                    onChange={handleAccordion('medical')}
-                    sx={{ borderRadius: 2, '&:before': { display: 'none' } }}
-                    elevation={0}
-                >
-                    <AccordionSummary
-                        expandIcon={<ExpandMoreIcon />}
-                        sx={{
-                            bgcolor: 'action.hover',
-                            borderRadius: expanded === 'medical' ? '8px 8px 0 0' : 2,
-                            '&:hover': { bgcolor: 'action.selected' }
-                        }}
-                    >
-                        <Stack direction="row" spacing={1} alignItems="center">
-                            <MedicalServicesIcon color="error" />
-                            <Typography fontWeight={700}>{label('Medical Background', 'الخلفية الطبية')}</Typography>
-                        </Stack>
-                    </AccordionSummary>
-                    <AccordionDetails sx={{ pt: 3 }}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Allergies (comma-separated)', 'الحساسيات (مفصولة بفاصلة)')}
-                                    multiline
-                                    rows={2}
-                                    value={values.allergies}
-                                    onChange={handleChange('allergies')}
-                                    placeholder={label('e.g., Penicillin, Peanuts', 'مثلا: بنسلين، فول سوداني')}
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Chronic Conditions (comma-separated)', 'الأمراض المزمنة (مفصولة بفاصلة)')}
-                                    multiline
-                                    rows={2}
-                                    value={values.conditions}
-                                    onChange={handleChange('conditions')}
-                                    placeholder={label('e.g., Diabetes, Hypertension', 'مثلا: سكري، ضغط دم')}
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Current Medications (comma-separated)', 'الأدوية الحالية (مفصولة بفاصلة)')}
-                                    multiline
-                                    rows={2}
-                                    value={values.medications}
-                                    onChange={handleChange('medications')}
-                                    placeholder={label('e.g., Metformin, Aspirin', 'مثلا: ميتفورمين، أسبرين')}
-                                />
-                            </Grid>
-                            <Grid item xs={12}>
-                                <TextField
-                                    fullWidth
-                                    label={label('Last Visit', 'آخر زيارة')}
-                                    type="datetime-local"
-                                    value={values.lastVisit}
-                                    onChange={handleChange('lastVisit')}
-                                    InputLabelProps={{ shrink: true }}
-                                    InputProps={{
-                                        startAdornment: (
-                                            <InputAdornment position="start">
-                                                <EventIcon fontSize="small" />
-                                            </InputAdornment>
-                                        ),
-                                    }}
-                                />
-                            </Grid>
-                        </Grid>
-                    </AccordionDetails>
-                </Accordion>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+                gap: 2,
+              }}
+            >
+              <TextField
+                fullWidth
+                select
+                label={label('Marital Status', 'الحالة الاجتماعية')}
+                value={values.maritalStatus}
+                onChange={handleChange('maritalStatus')}
+              >
+                <MenuItem value="">{label('Unspecified', 'غير محدد')}</MenuItem>
+                <MenuItem value="single">{label('Single', 'أعزب / عزباء')}</MenuItem>
+                <MenuItem value="married">{label('Married', 'متزوج / ة')}</MenuItem>
+                <MenuItem value="divorced">{label('Divorced', 'مطلق / ة')}</MenuItem>
+                <MenuItem value="widowed">{label('Widowed', 'أرمل / ة')}</MenuItem>
+              </TextField>
+              <TextField
+                fullWidth
+                label={label('Email', 'البريد الإلكتروني')}
+                type="email"
+                value={values.email}
+                onChange={handleChange('email')}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <EmailRoundedIcon fontSize="small" sx={{ color: '#64748b' }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
 
-                {/* Submit Button */}
-                <Stack direction="row" spacing={1} justifyContent="flex-end" sx={{ mt: 2 }}>
-                    <Button
-                        type="submit"
-                        variant="contained"
-                        disabled={submitting}
-                        size="large"
-                        sx={{
-                            borderRadius: 2,
-                            textTransform: 'none',
-                            fontWeight: 700,
-                            px: 4
-                        }}
+            <TextField
+              fullWidth
+              label={label('Address', 'العنوان')}
+              value={values.address}
+              onChange={handleChange('address')}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <HomeRoundedIcon fontSize="small" sx={{ color: '#64748b' }} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Stack>
+        </div>
+
+        {/* Section 2: Medical Background & Health Flags */}
+        <div className="glass-panel" style={{ padding: '24px', borderTop: '4px solid #4f46e5' }}>
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2.5 }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#eef2ff', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <MedicalServicesRoundedIcon />
+            </div>
+            <div>
+              <Typography variant="h6" fontWeight={900} sx={{ lineHeight: 1.2 }}>
+                {label('Clinical & Medical Background', 'الخلفية الطبية والأمراض المزمنة')}
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 600 }}>
+                {label('Allergies, chronic conditions, medications & clinical flags', 'الحساسيات، الأمراض المزمنة، الأدوية والمؤشرات الصحية')}
+              </Typography>
+            </div>
+          </Stack>
+
+          <Stack spacing={2.25}>
+            <Box>
+              <TextField
+                fullWidth
+                label={label('Allergies', 'الحساسيات')}
+                value={values.allergies}
+                onChange={handleChange('allergies')}
+                placeholder={label('e.g., Penicillin, Peanuts', 'مثال: بنسلين، فول سوداني')}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                {allergyChips.map((chip) => {
+                  const active = hasCsvToken(values.allergies, chip);
+                  return (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setValues((v) => ({ ...v, allergies: toggleCsvToken(v.allergies, chip) }))}
+                      style={{
+                        padding: '4px 11px',
+                        borderRadius: '999px',
+                        border: `1px solid ${active ? '#ef4444' : '#e2e8f0'}`,
+                        background: active ? '#fef2f2' : '#f8fafc',
+                        color: active ? '#b91c1c' : '#475569',
+                        fontWeight: 700,
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
                     >
-                        {submitting ? label('Saving...', 'جارٍ الحفظ...') : label('Save Patient', 'حفظ المريض')}
-                    </Button>
-                </Stack>
-            </Stack>
-        </form>
-    );
+                      {active ? '✓ ' : '+ '}
+                      {chip}
+                    </button>
+                  );
+                })}
+              </div>
+            </Box>
+
+            <Box>
+              <TextField
+                fullWidth
+                label={label('Chronic Conditions', 'الأمراض المزمنة')}
+                value={values.conditions}
+                onChange={handleChange('conditions')}
+                placeholder={label('e.g., Diabetes, Hypertension', 'مثال: سكري، ضغط دم')}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                {conditionChips.map((chip) => {
+                  const active = hasCsvToken(values.conditions, chip);
+                  return (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setValues((v) => ({ ...v, conditions: toggleCsvToken(v.conditions, chip) }))}
+                      style={{
+                        padding: '4px 11px',
+                        borderRadius: '999px',
+                        border: `1px solid ${active ? '#d97706' : '#e2e8f0'}`,
+                        background: active ? '#fef3c7' : '#f8fafc',
+                        color: active ? '#92400e' : '#475569',
+                        fontWeight: 700,
+                        fontSize: '0.74rem',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      {active ? '✓ ' : '+ '}
+                      {chip}
+                    </button>
+                  );
+                })}
+              </div>
+            </Box>
+
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1.35fr) minmax(0, 0.85fr)' },
+                gap: 2,
+                alignItems: 'start',
+              }}
+            >
+              <TextField
+                fullWidth
+                label={label('Current Medications', 'الأدوية الحالية')}
+                multiline
+                minRows={2}
+                value={values.medications}
+                onChange={handleChange('medications')}
+                placeholder={label('e.g., Metformin, Aspirin', 'مثال: ميتفورمين، أسبرين')}
+              />
+
+              <TextField
+                fullWidth
+                label={label('Last Visit', 'آخر زيارة')}
+                type="datetime-local"
+                value={values.lastVisit}
+                onChange={handleChange('lastVisit')}
+                InputLabelProps={{ shrink: true }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <EventRoundedIcon fontSize="small" />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+          </Stack>
+
+          <HealthInfoSection form={values} setForm={setValues} t={label} isArabic={isArabic} />
+        </div>
+
+        {/* Sticky Submit Bar */}
+        <Stack direction="row" spacing={1.5} justifyContent="flex-end">
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={submitting}
+            size="large"
+            startIcon={<CheckRoundedIcon />}
+            sx={{ borderRadius: '14px', px: 4, py: 1.3 }}
+          >
+            {submitting ? label('Saving...', 'جارٍ الحفظ...') : label('Save Patient Profile', 'حفظ ملف المريض')}
+          </Button>
+        </Stack>
+      </Stack>
+    </form>
+  );
 }
