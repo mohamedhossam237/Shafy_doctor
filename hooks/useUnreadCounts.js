@@ -1,76 +1,131 @@
+// /hooks/useUnreadCounts.js
 import * as React from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, limit as qLimit, collectionGroup } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit as qLimit } from 'firebase/firestore';
 import { useAuth } from '@/providers/AuthProvider';
+import globalCache from '@/lib/cache';
 
-export function useUnreadCounts() {
-  const { user } = useAuth();
-  const [unreadCounts, setUnreadCounts] = React.useState({ notifications: 0, messages: 0 });
+// Singleton subscription manager so route transitions NEVER tear down and re-subscribe Firestore listeners
+let activeUid = null;
+let currentCounts = { notifications: 0, messages: 0 };
+let unsubMessages = null;
+let unsubNotifications = null;
+let idleTimer = null;
+const subscribers = new Set();
 
-  // messages: sum unreadCounts[uid]
-  React.useEffect(() => {
-    if (!user?.uid) { setUnreadCounts((u) => ({ ...u, messages: 0 })); return; }
-    
-    // Safety check for collection availability (optional but good practice)
+function emitCounts() {
+  globalCache.unreadCounts = currentCounts;
+  subscribers.forEach((fn) => fn(currentCounts));
+}
+
+function teardownSingleton() {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+  if (unsubMessages) {
+    try { unsubMessages(); } catch {}
+    unsubMessages = null;
+  }
+  if (unsubNotifications) {
+    try { unsubNotifications(); } catch {}
+    unsubNotifications = null;
+  }
+  activeUid = null;
+}
+
+function ensureListenersForUid(uid) {
+  if (!uid) {
+    teardownSingleton();
+    if (currentCounts.messages !== 0 || currentCounts.notifications !== 0) {
+      currentCounts = { notifications: 0, messages: 0 };
+      emitCounts();
+    }
+    return;
+  }
+
+  if (activeUid === uid) return;
+
+  teardownSingleton();
+  activeUid = uid;
+
+  // Defer non-critical badge listeners slightly so primary page data always loads first
+  idleTimer = setTimeout(() => {
+    if (activeUid !== uid) return;
+
+    // 1. Messages unread count (bounded to 80 recent threads)
     try {
-        const qRef = query(
-          collection(db, 'messages_threads'),
-          where('participants', 'array-contains', user.uid),
-          qLimit(500)
-        );
-        const unsub = onSnapshot(qRef, (snap) => {
+      const qRef = query(
+        collection(db, 'messages_threads'),
+        where('participants', 'array-contains', uid),
+        qLimit(80)
+      );
+      unsubMessages = onSnapshot(
+        qRef,
+        (snap) => {
           let total = 0;
           snap.forEach((d) => {
             const counts = (d.data() || {}).unreadCounts || {};
-            const n = Number(counts[user.uid] || 0);
+            const n = Number(counts[uid] || 0);
             if (!Number.isNaN(n)) total += n;
           });
-          setUnreadCounts((u) => ({ ...u, messages: total }));
-        }, (err) => {
-            console.warn("Message listener error:", err);
-            setUnreadCounts((u) => ({ ...u, messages: 0 }));
-        });
-        return () => unsub();
-    } catch(e) {
-        console.warn("Failed to init message listener", e);
+          if (currentCounts.messages !== total) {
+            currentCounts = { ...currentCounts, messages: total };
+            emitCounts();
+          }
+        },
+        (err) => {
+          console.warn('Message listener error:', err);
+        }
+      );
+    } catch (e) {
+      console.warn('Failed to init message listener', e);
     }
-  }, [user?.uid]);
 
-  // notifications: any 'notifications' subcollection
-  function pathTargetsUser(docRef, uid) {
-    const p = String(docRef?.path || '');
-    return new RegExp(`/(doctors|users|patients|profiles)/${uid}/notifications/`, 'i').test(p);
-  }
+    // 2. Doctor notifications subcollection (scoped strictly to this doctor instead of full-DB collectionGroup scan!)
+    try {
+      const notifRef = query(
+        collection(db, 'doctors', uid, 'notifications'),
+        where('read', '==', false),
+        qLimit(50)
+      );
+      unsubNotifications = onSnapshot(
+        notifRef,
+        (snap) => {
+          const total = snap.size;
+          if (currentCounts.notifications !== total) {
+            currentCounts = { ...currentCounts, notifications: total };
+            emitCounts();
+          }
+        },
+        () => {
+          // Graceful fallback if subcollection/index doesn't exist
+          if (currentCounts.notifications !== 0) {
+            currentCounts = { ...currentCounts, notifications: 0 };
+            emitCounts();
+          }
+        }
+      );
+    } catch (e) {
+      console.warn('Failed to init notification listener', e);
+    }
+  }, 250);
+}
+
+export function useUnreadCounts() {
+  const { user } = useAuth();
+  const [unreadCounts, setUnreadCounts] = React.useState(
+    () => globalCache.unreadCounts || currentCounts
+  );
 
   React.useEffect(() => {
-    if (!user?.uid) { setUnreadCounts((u) => ({ ...u, notifications: 0 })); return; }
-    
-    try {
-        const cgRef = collectionGroup(db, 'notifications');
-        // Ideally we should filter this significantly more in firestore rules/queries to avoid reading *every* notification 
-        // But for now, keeping logic parity, just ensuring it doesn't break.
-        // NOTE: collectionGroup queries typically need an index.
-        const unsub = onSnapshot(cgRef, (snap) => {
-          let total = 0;
-          snap.forEach((d) => {
-            const n = d.data() || {};
-            const isRead = (typeof n.read === 'boolean' ? n.read : n.isRead) === true;
-            const recipientMatch =
-              [
-                'userUID','userId','doctorUID','doctorId','uid','toUID','toId',
-                'recipientUID','recipientId','ownerUID','ownerId',
-              ].some((k) => String(n?.[k] || '') === user.uid) || pathTargetsUser(d.ref, user.uid);
-            if (!isRead && recipientMatch) total += 1;
-          });
-          setUnreadCounts((u) => ({ ...u, notifications: total }));
-        }, (err) => {
-            console.warn("Notification listener error:", err);
-            setUnreadCounts((u) => ({ ...u, notifications: 0 }));
-        });
-        return () => unsub();
-    } catch (e) {
-        console.warn("Failed to init notification listener", e);
-    }
+    subscribers.add(setUnreadCounts);
+    ensureListenersForUid(user?.uid || null);
+    setUnreadCounts(currentCounts);
+
+    return () => {
+      subscribers.delete(setUnreadCounts);
+    };
   }, [user?.uid]);
 
   return unreadCounts;

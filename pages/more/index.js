@@ -25,7 +25,8 @@ import AppLayout from '@/components/AppLayout';
 import Protected from '@/components/Protected';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getCountFromServer, query, where } from 'firebase/firestore';
+import globalCache from '@/lib/cache';
 
 // Icons
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
@@ -74,26 +75,28 @@ function Tile({ href, icon, title, subtitle, count, isArabic, withLang, dense })
         focusRipple
       >
         <Paper
-          elevation={dense ? 0 : 1}
+          elevation={0}
+          className="glass-panel glass-panel-lift"
           sx={{
-            p: { xs: 1.25, sm: 1.75 },
-            borderRadius: 3,
+            p: { xs: 1.5, sm: 2 },
+            borderRadius: '18px',
             display: 'flex',
             alignItems: 'center',
-            gap: { xs: 1.25, sm: 1.5 },
-            transition: 'transform .16s ease, box-shadow .16s ease',
-            '&:active': { transform: 'scale(0.995)' },
-            boxShadow: dense ? '0 1px 3px rgba(0,0,0,.06)' : '0 2px 10px rgba(0,0,0,.06)',
+            gap: { xs: 1.25, sm: 1.75 },
+            width: '100%',
             flexDirection: isArabic ? 'row-reverse' : 'row',
-            minHeight: { xs: 72, sm: 88 },
+            minHeight: { xs: 76, sm: 92 },
           }}
         >
           <Avatar
+            variant="rounded"
             sx={{
-              bgcolor: 'primary.main',
-              color: 'primary.contrastText',
-              width: { xs: 40, sm: 52 },
-              height: { xs: 40, sm: 52 },
+              background: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)',
+              color: '#ffffff',
+              width: { xs: 42, sm: 50 },
+              height: { xs: 42, sm: 50 },
+              borderRadius: '14px',
+              boxShadow: '0 6px 16px -4px rgba(37, 99, 235, 0.35)',
               flexShrink: 0,
             }}
           >
@@ -174,31 +177,44 @@ export default function MorePage() {
 
   const label = React.useCallback((en, ar) => (isArabic ? ar : en), [isArabic]);
 
-  const [loading, setLoading] = React.useState(true);
-  const [pharmCount, setPharmCount] = React.useState(null);
-  const [labsCount, setLabsCount] = React.useState(null);
+  const [loading, setLoading] = React.useState(() => !globalCache.moreCounts);
+  const [pharmCount, setPharmCount] = React.useState(() => globalCache.moreCounts?.pharmCount ?? null);
+  const [labsCount, setLabsCount] = React.useState(() => globalCache.moreCounts?.labsCount ?? null);
 
   React.useEffect(() => {
-    if (!user) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const pq = query(collection(db, 'pharmacies'), where('doctorUID', '==', user.uid));
-        const ps = await getDocs(pq);
-        setPharmCount(ps.size);
+    if (!user?.uid) return;
+    let cancelled = false;
 
-        const lq = query(collection(db, 'labs'), where('doctorUID', '==', user.uid));
-        const ls = await getDocs(lq);
-        setLabsCount(ls.size);
+    if (globalCache.moreCounts) {
+      setPharmCount(globalCache.moreCounts.pharmCount);
+      setLabsCount(globalCache.moreCounts.labsCount);
+      setLoading(false);
+    }
+
+    (async () => {
+      if (!globalCache.moreCounts) setLoading(true);
+      try {
+        const [pSnap, lSnap] = await Promise.all([
+          getCountFromServer(query(collection(db, 'pharmacies'), where('doctorUID', '==', user.uid))),
+          getCountFromServer(query(collection(db, 'labs'), where('doctorUID', '==', user.uid))),
+        ]);
+        if (cancelled) return;
+        const pCount = pSnap.data().count;
+        const lCount = lSnap.data().count;
+        setPharmCount(pCount);
+        setLabsCount(lCount);
+        globalCache.moreCounts = { pharmCount: pCount, labsCount: lCount };
       } catch (e) {
         console.error(e);
-        setPharmCount(null);
-        setLabsCount(null);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [user]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   return (
     <Protected>
@@ -212,45 +228,40 @@ export default function MorePage() {
         >
           <Container disableGutters maxWidth="lg">
             {/* Header */}
-            <Box
-              sx={{
-                mt: { xs: 0.5, sm: 1 },
-                p: { xs: 1.25, md: 3 },
-                borderRadius: 3,
-                backgroundImage: (t) => grad(t.palette.primary.light, '#ffffff'),
-                border: (t) => `1px solid ${t.palette.divider}`,
-              }}
-            >
+            <div className="shafy-hero-shell" style={{ padding: '24px 28px', marginBottom: '20px' }}>
               <Stack
                 direction={isArabic ? 'row-reverse' : 'row'}
                 alignItems="center"
                 justifyContent="space-between"
+                sx={{ position: 'relative', zIndex: 2 }}
               >
                 <Box>
                   <Typography
-                    variant={isXs ? 'h6' : 'h5'}
-                    fontWeight={800}
-                    sx={{ lineHeight: 1.2 }}
+                    variant={isXs ? 'h6' : 'h4'}
+                    fontWeight={900}
+                    sx={{ lineHeight: 1.2, color: '#ffffff' }}
                   >
-                    {label('More', 'المزيد')}
+                    {label('More & Clinic Tools', 'المزيد وأدوات العيادة')}
                   </Typography>
                   <Typography
                     variant="body2"
-                    color="text.secondary"
-                    sx={{ mt: 0.25, display: { xs: 'none', sm: 'block' } }}
+                    sx={{ mt: 0.5, color: '#dbeafe', fontWeight: 600, display: { xs: 'none', sm: 'block' } }}
                   >
                     {label('Profile, support, and connected services', 'الملف الشخصي، الدعم، والخدمات المرتبطة')}
                   </Typography>
                 </Box>
                 <Chip
-                  icon={<RocketLaunchRoundedIcon />}
-                  label={label('New & improved', 'تحسينات جديدة')}
-                  color="primary"
-                  variant="outlined"
-                  sx={{ fontWeight: 800 }}
+                  icon={<RocketLaunchRoundedIcon sx={{ color: '#fef08a !important' }} />}
+                  label={label('Shafy Pro', 'شافي برو')}
+                  sx={{
+                    fontWeight: 900,
+                    bgcolor: 'rgba(255,255,255,0.16)',
+                    color: '#ffffff',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                  }}
                 />
               </Stack>
-            </Box>
+            </div>
 
             <Divider sx={{ my: { xs: 1.25, sm: 2 } }} />
 

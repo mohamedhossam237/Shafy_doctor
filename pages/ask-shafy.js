@@ -1,152 +1,99 @@
 // /pages/ask-shafy.js
 'use client';
 import * as React from 'react';
-import { Container, Box, Typography, Paper, Stack } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { useRouter } from 'next/router';
+import { Box, Stack, Typography } from '@mui/material';
 import AppLayout from '@/components/AppLayout';
 import AskShafyChat from '@/components/AskShafy/AskShafyChat';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import PsychologyIcon from '@mui/icons-material/Psychology';
+import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
+import PsychologyRoundedIcon from '@mui/icons-material/PsychologyRounded';
+import VerifiedRoundedIcon from '@mui/icons-material/VerifiedRounded';
 
 export default function AskShafyPage() {
-  // Arabic as the default UI language
-  const isArabic = true;
+  const router = useRouter();
+  const isArabic = React.useMemo(() => {
+    const q = router?.query || {};
+    if (q.lang) return String(q.lang).toLowerCase().startsWith('ar');
+    return true;
+  }, [router.query]);
 
   return (
-    <AppLayout>
-      <Box
-        sx={{
-          minHeight: 'calc(100vh - 64px)',
-          background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.03)} 0%, ${alpha(t.palette.secondary.main, 0.02)} 100%)`,
-          py: 3,
-          position: 'relative',
-          overflow: 'hidden'
-        }}
-      >
-        {/* Decorative Background Elements */}
-        <Box
-          sx={{
-            position: 'absolute',
-            top: -100,
-            right: isArabic ? 'auto' : -100,
-            left: isArabic ? -100 : 'auto',
-            width: 400,
-            height: 400,
-            borderRadius: '50%',
-            background: (t) => `radial-gradient(circle, ${alpha(t.palette.primary.main, 0.08)} 0%, transparent 70%)`,
-            zIndex: 0,
-            pointerEvents: 'none'
-          }}
-        />
-        <Box
-          sx={{
-            position: 'absolute',
-            bottom: -150,
-            right: isArabic ? -150 : 'auto',
-            left: isArabic ? 'auto' : -150,
-            width: 500,
-            height: 500,
-            borderRadius: '50%',
-            background: (t) => `radial-gradient(circle, ${alpha(t.palette.secondary.main, 0.06)} 0%, transparent 70%)`,
-            zIndex: 0,
-            pointerEvents: 'none'
-          }}
-        />
-
-        <Container maxWidth="lg" sx={{ position: 'relative', zIndex: 1 }}>
-          {/* Premium Header */}
-          <Paper
-            elevation={0}
-            sx={{
-              p: 4,
-              mb: 3,
-              borderRadius: 4,
-              background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.main, 0.08)} 0%, ${alpha(t.palette.background.paper, 0.95)} 100%)`,
-              border: (t) => `1px solid ${alpha(t.palette.primary.main, 0.1)}`,
-              backdropFilter: 'blur(10px)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
+    <AppLayout
+      title={isArabic ? 'المساعد الطبي الذكي شافي AI' : 'Shafy AI Clinical Copilot'}
+      subtitle={
+        isArabic
+          ? 'استشارات إكلينيكية ذكية وتحليل فوري لبيانات مرضاك ومواعيدك'
+          : 'Intelligent medical copilot connected to your clinic data'
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        {/* Physio-Matched Luxury Hero Shell in Royal Sapphire */}
+        <div className="shafy-hero-shell" style={{ padding: '26px 28px' }}>
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={2.5}
+            alignItems={{ xs: 'flex-start', sm: 'center' }}
+            justifyContent="space-between"
+            sx={{ position: 'relative', zIndex: 2 }}
           >
-            {/* Animated Glow */}
-            <Box
-              sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                width: '150%',
-                height: '150%',
-                background: (t) => `radial-gradient(circle, ${alpha(t.palette.primary.main, 0.05)} 0%, transparent 60%)`,
-                animation: 'pulse 3s ease-in-out infinite',
-                '@keyframes pulse': {
-                  '0%, 100%': { transform: 'translate(-50%, -50%) scale(1)', opacity: 0.5 },
-                  '50%': { transform: 'translate(-50%, -50%) scale(1.1)', opacity: 0.8 }
-                }
-              }}
-            />
-
-            <Stack
-              direction="row"
-              spacing={2}
-              alignItems="center"
-              sx={{ position: 'relative', zIndex: 1 }}
-            >
-              {/* Icon with Gradient Background */}
+            <Stack direction="row" spacing={2} alignItems="center">
               <Box
                 sx={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: 3,
-                  background: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.secondary.main} 100%)`,
+                  width: 64,
+                  height: 64,
+                  borderRadius: '18px',
+                  background: 'linear-gradient(135deg, rgba(255,255,255,0.24), rgba(56,189,248,0.22))',
+                  border: '1.5px solid rgba(255,255,255,0.4)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 8px 32px rgba(25, 118, 210, 0.3)',
-                  position: 'relative',
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    inset: -2,
-                    borderRadius: 3,
-                    background: (t) => `linear-gradient(135deg, ${alpha(t.palette.primary.light, 0.3)} 0%, ${alpha(t.palette.secondary.light, 0.3)} 100%)`,
-                    zIndex: -1,
-                    filter: 'blur(8px)'
-                  }
+                  boxShadow: '0 12px 28px rgba(0, 0, 0, 0.22)',
+                  flexShrink: 0,
                 }}
               >
-                <PsychologyIcon sx={{ fontSize: 40, color: 'white' }} />
+                <PsychologyRoundedIcon sx={{ fontSize: 36, color: '#ffffff' }} />
               </Box>
-
               <Box>
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Typography
-                    variant="h3"
-                    fontWeight={900}
-                    sx={{
-                      background: (t) => `linear-gradient(135deg, ${t.palette.primary.main} 0%, ${t.palette.secondary.main} 100%)`,
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      backgroundClip: 'text'
-                    }}
-                  >
-                    {isArabic ? 'شافي AI' : 'Shafy AI'}
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Typography variant="h4" fontWeight={900} sx={{ color: '#ffffff', fontSize: { xs: '1.35rem', md: '1.65rem' } }}>
+                    {isArabic ? 'مساعد شافي الإكلينيكي الذكي' : 'Shafy AI Clinical Copilot'}
                   </Typography>
-                  <AutoAwesomeIcon sx={{ color: 'primary.main', fontSize: 28 }} />
+                  <AutoAwesomeRoundedIcon sx={{ color: '#fef08a', fontSize: 24 }} />
                 </Stack>
-                <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5, fontWeight: 500 }}>
+                <Typography variant="body2" sx={{ color: '#dbeafe', mt: 0.5, fontWeight: 600 }}>
                   {isArabic
-                    ? 'مساعدك الذكي الطبي - اسأل أي شيء عن مرضاك، تشخيصاتك، ومواعيدك'
-                    : 'Your intelligent medical assistant - Ask anything about your patients, diagnoses, and appointments'}
+                    ? 'اسأل أي شيء عن مرضاك، التشخيصات، الأدوية، التقارير، وجدول مواعيدك اليومي'
+                    : 'Ask anything about your patients, diagnoses, prescriptions, reports, and schedule'}
                 </Typography>
               </Box>
             </Stack>
-          </Paper>
 
-          {/* Chat Interface */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '999px',
+                background: 'rgba(255, 255, 255, 0.16)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: '#fef08a',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                flexShrink: 0,
+              }}
+            >
+              <VerifiedRoundedIcon sx={{ fontSize: 15 }} />
+              <span>{isArabic ? 'متصل بملفات العيادة' : 'Live Clinic Context'}</span>
+            </div>
+          </Stack>
+        </div>
+
+        {/* Chat Interface inside Glass Panel */}
+        <div className="glass-panel" style={{ padding: '16px', overflow: 'hidden' }}>
           <AskShafyChat isArabic={isArabic} />
-        </Container>
-      </Box>
+        </div>
+      </div>
     </AppLayout>
   );
 }

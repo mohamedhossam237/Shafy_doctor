@@ -18,14 +18,14 @@ import AppLayout from '@/components/AppLayout';
 import { useAuth } from '@/providers/AuthProvider';
 import { db } from '@/lib/firebase';
 import {
-  collection, onSnapshot, query, where, addDoc, serverTimestamp
+  collection, getDocs, query, where, addDoc, serverTimestamp
 } from 'firebase/firestore';
 
 import dynamic from 'next/dynamic';
 import PatientSearchBar from '@/components/patients/PatientSearchBar';
 import PatientCard from '@/components/patients/PatientCard';
 import PatientListEmpty from '@/components/patients/PatientListEmpty';
-import globalCache from '@/lib/cache';
+import globalCache, { readSessionCache, writeSessionCache } from '@/lib/cache';
 
 const AddPatientDialog = dynamic(() => import('@/components/patients/AddPatientDialog'), {
   ssr: false,
@@ -53,13 +53,13 @@ export default function PatientsIndexPage() {
   /* ------------------------------------------------------------ */
   React.useEffect(() => {
     if (!user?.uid) return;
+    const sessionKey = `patients_${user.uid}`;
+    const cached = globalCache.patients || readSessionCache(sessionKey, 5 * 60 * 1000);
 
-    if (globalCache.patients) {
-      setPatients(globalCache.patients);
+    if (cached && Array.isArray(cached)) {
+      setPatients(cached);
       setLoading(false);
-    }
-
-    if (!globalCache.patients) {
+    } else {
       setLoading(true);
     }
 
@@ -71,10 +71,7 @@ export default function PatientsIndexPage() {
         const q1 = query(patientsCol, where('associatedDoctors', 'array-contains', user.uid));
         const q2 = query(patientsCol, where('registeredBy', '==', user.uid));
 
-        const [snap1, snap2] = await Promise.all([
-          getDocs(q1),
-          getDocs(q2)
-        ]);
+        const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
 
         if (!isMounted) return;
 
@@ -89,12 +86,10 @@ export default function PatientsIndexPage() {
           }, {})
         );
 
-        // Filter only patients with a valid phone number or mobile
         const withPhone = unique.filter(
           (p) => (typeof p.phone === 'string' && p.phone.trim() !== '') || (typeof p.mobile === 'string' && p.mobile.trim() !== '')
         );
 
-        // Sort alphabetically
         withPhone.sort((a, b) =>
           String(a?.name ?? '').localeCompare(String(b?.name ?? ''), undefined, { sensitivity: 'base' })
         );
@@ -102,8 +97,9 @@ export default function PatientsIndexPage() {
         setPatients(withPhone);
         setLoading(false);
         globalCache.patients = withPhone;
+        writeSessionCache(sessionKey, withPhone);
       } catch (err) {
-        console.error("Error loading patients:", err);
+        console.error('Error loading patients:', err);
         if (isMounted) {
           setError(isArabic ? 'حدث خطأ أثناء تحميل المرضى' : 'Error loading patients');
           setLoading(false);
@@ -114,7 +110,7 @@ export default function PatientsIndexPage() {
     return () => {
       isMounted = false;
     };
-  }, [user?.uid, isArabic]);
+  }, [user?.uid]);
 
   /* ------------------------------------------------------------ */
   /* 🔍 Filter by search text                                    */
@@ -258,93 +254,116 @@ export default function PatientsIndexPage() {
         </Dialog>
 
         {/* Main Content */}
-        <Box
-          sx={{
-            minHeight: '100vh',
-            pb: 4,
-            bgcolor: 'background.default',
-          }}
-        >
-          <Container maxWidth="lg" sx={{ mt: 3 }}>
+        <Box sx={{ pb: 4 }}>
+          <Container maxWidth={false} disableGutters>
             <Stack spacing={3}>
-              {/* Header */}
-              <Paper elevation={1} sx={{ p: 3, borderRadius: 2 }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2} flexWrap="wrap">
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <PeopleIcon sx={{ fontSize: 32, color: 'primary.main' }} />
-                    <Typography variant="h5" fontWeight={700}>
-                      {isArabic ? 'قائمة المرضى' : 'Patients List'}
+              {/* Physio-style Glass Top Action Bar */}
+              <div
+                className="glass-panel"
+                style={{
+                  padding: '20px 24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '16px',
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.75 }}>
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '14px',
+                      background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 8px 20px -4px rgba(37, 99, 235, 0.42)',
+                    }}
+                  >
+                    <PeopleIcon sx={{ fontSize: 26 }} />
+                  </div>
+                  <Box>
+                    <Typography variant="h5" fontWeight={900} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                      {isArabic ? 'سجلات المرضى' : 'Patients Roster'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
+                      {isArabic ? `${filtered.length} مريض مسجل في عيادتك` : `${filtered.length} registered patients`}
                     </Typography>
                   </Box>
-                  <Stack direction="row" spacing={1.5} flexWrap="wrap">
-                    <Button
-                      variant="contained"
-                      startIcon={<PersonAddAlt1Icon />}
-                      onClick={() => setOpenAddPatient(true)}
-                      sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-                    >
-                      {isArabic ? 'إضافة مريض' : 'Add Patient'}
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      startIcon={<MailOutlineIcon />}
-                      onClick={() => setOpenMsg(true)}
-                      sx={{ borderRadius: 2, textTransform: 'none', fontWeight: 600 }}
-                    >
-                      {isArabic ? 'رسالة جديدة' : 'New Message'}
-                    </Button>
-                  </Stack>
+                </Box>
+                <Stack direction="row" spacing={1.5} flexWrap="wrap">
+                  <Button
+                    variant="contained"
+                    startIcon={<PersonAddAlt1Icon />}
+                    onClick={() => setOpenAddPatient(true)}
+                    sx={{ borderRadius: '13px', px: 2.5, py: 1 }}
+                  >
+                    {isArabic ? 'إضافة مريض' : 'Add Patient'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<MailOutlineIcon />}
+                    onClick={() => setOpenMsg(true)}
+                    sx={{ borderRadius: '13px', px: 2.2, py: 1, bgcolor: '#ffffff' }}
+                  >
+                    {isArabic ? 'رسالة جديدة' : 'New Message'}
+                  </Button>
                 </Stack>
-              </Paper>
+              </div>
 
-              {/* Statistics Cards */}
+              {/* Statistics KPI Cards (Physio-style top accent border) */}
               {!loading && (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <PersonIcon sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="primary.main">
-                        {stats.total}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #2563eb' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'إجمالي المرضى' : 'Total Patients'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <AccessTimeIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="success.main">
-                        {stats.addedLast24Hours}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <PersonIcon sx={{ fontSize: 22 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.total}</div>
+                  </div>
+
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #10b981' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'أضيف في آخر 24 ساعة' : 'Added Last 24 Hours'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <TrendingUpIcon sx={{ fontSize: 32, color: 'info.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="info.main">
-                        {stats.addedThisWeek}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <AccessTimeIcon sx={{ fontSize: 22 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.addedLast24Hours}</div>
+                  </div>
+
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #6366f1' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'أضيف هذا الأسبوع' : 'Added This Week'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                </Grid>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#eef2ff', color: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <TrendingUpIcon sx={{ fontSize: 22 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.addedThisWeek}</div>
+                  </div>
+                </div>
               )}
 
               {/* Search Bar */}
-              <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+              <div className="glass-panel" style={{ padding: '16px 20px' }}>
                 <PatientSearchBar
                   isArabic={isArabic}
                   value={queryText}
                   onChange={(v) => setQueryText(v)}
                   onAddNew={() => setOpenAddPatient(true)}
                 />
-              </Paper>
+              </div>
 
               {/* Content */}
               {loading ? (

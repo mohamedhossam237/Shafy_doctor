@@ -50,7 +50,7 @@ import {
 } from 'firebase/firestore';
 import { getAppointmentTypeInfo, getTodayEgyptDate } from '@/lib/appointmentUtils';
 import { toDayKey } from '@/lib/dates';
-import globalCache from '@/lib/cache';
+import globalCache, { readSessionCache, writeSessionCache } from '@/lib/cache';
 
 /* ---------------- utils ---------------- */
 
@@ -219,16 +219,16 @@ function AppointmentCard({ appt, isArabic, onConfirm, confirming, detailHref, cl
         alignItems: 'center',
         gap: 3,
         background: cancelled 
-          ? 'linear-gradient(135deg, rgba(245,245,245,0.85) 0%, rgba(250,250,250,0.95) 100%)'
-          : 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.95) 100%)',
-        backdropFilter: 'blur(20px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-        border: '1.5px solid',
-        borderColor: cancelled ? 'rgba(200,200,200,0.5)' : 'rgba(255,255,255,0.8)',
+          ? '#f8fafc'
+          : '#ffffff',
+        border: '1px solid',
+        borderColor: cancelled ? 'rgba(203,213,225,0.7)' : 'rgba(226,232,240,0.9)',
         boxShadow: cancelled 
-          ? '0 4px 16px rgba(0,0,0,0.03), 0 1px 4px rgba(0,0,0,0.02)'
-          : '0 8px 32px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04)',
-        transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+          ? '0 4px 14px rgba(15,23,42,0.03)'
+          : '0 8px 24px -6px rgba(37,99,235,0.08), 0 2px 6px rgba(15,23,42,0.04)',
+        contentVisibility: 'auto',
+        containIntrinsicSize: '0 140px',
+        transition: 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.22s ease, border-color 0.22s ease',
         position: 'relative',
         overflow: 'hidden',
         cursor: cancelled ? 'default' : 'pointer',
@@ -765,16 +765,20 @@ export default function AppointmentsPage() {
 
   // Load today's appointments for this doctor
   React.useEffect(() => {
-    if (!user) return; // Protected will redirect if not signed in
+    if (!user?.uid) return;
+    let cancelled = false;
+    const sessionKey = `appts_${user.uid}`;
 
-    if (globalCache.appointments) {
-      setTodayRows(globalCache.appointments);
-      todayRowsRef.current = globalCache.appointments;
+    const cachedRaw = globalCache.appointments || readSessionCache(sessionKey, 3 * 60 * 1000);
+    if (cachedRaw && Array.isArray(cachedRaw)) {
+      const hydrated = cachedRaw.map((r) => ({ ...r, _dt: apptDate(r) }));
+      setTodayRows(hydrated);
+      todayRowsRef.current = hydrated;
       setLoading(false);
     }
 
     (async () => {
-      if (!globalCache.appointments) {
+      if (!cachedRaw) {
         setLoading(true);
       }
       setError('');
@@ -792,89 +796,82 @@ export default function AppointmentsPage() {
           getDocs(query(col, where('doctorId', '==', user.uid), where('date', '==', todayStr))),
         ]);
 
+        if (cancelled) return;
+
         const map = new Map();
-        [
-          ...snapOldDate.docs,
-          ...snapNewDate.docs
-        ].forEach((d) => {
-          map.set(d.id, { id: d.id, ...d.data() });
+        [...snapOldDate.docs, ...snapNewDate.docs].forEach((docSnap) => {
+          map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
         });
         const initialRows = Array.from(map.values());
 
-        // Deduplicate logically: same patient + same time
-        // We use a robust identity check to handle different field names (patientId, patientID, etc.)
         const uniqueMap = new Map();
-        initialRows.forEach(row => {
+        initialRows.forEach((row) => {
           const t = row.time || '00:00';
           const pid = getPatientId(row) || row.patientName || 'unknown';
           const key = `${t}_${pid}`;
-          
+
           if (!uniqueMap.has(key)) {
             uniqueMap.set(key, row);
           } else {
-            // Priority: completed > confirmed > pending
             const existing = uniqueMap.get(key);
             const statusNew = normStatus(row.status);
             const statusOld = normStatus(existing.status);
-            
+
             if (statusNew === 'completed' && statusOld !== 'completed') {
-               uniqueMap.set(key, row);
+              uniqueMap.set(key, row);
             } else if (statusNew === 'confirmed' && statusOld !== 'completed' && statusOld !== 'confirmed') {
-               uniqueMap.set(key, row);
+              uniqueMap.set(key, row);
             }
           }
         });
         const rows = Array.from(uniqueMap.values());
 
-        // Normalize date and keep only today (do not assign queue here; we'll do it after filtering)
         const todayOnly = rows
           .map((r) => ({ ...r, _dt: apptDate(r) }))
           .filter((r) => isToday(r._dt));
 
-        // Auto-complete confirmed appointments that have passed their time
+        // Optimistically mark passed confirmed appointments & persist in background (non-blocking!)
         const now = new Date();
+        const buffer = 5 * 60 * 1000;
         const toUpdate = todayOnly.filter((r) => {
-          const status = normStatus(r?.status);
-          if (status !== 'confirmed') return false;
+          if (normStatus(r?.status) !== 'confirmed') return false;
           const dt = r._dt;
-          if (!dt || !(dt instanceof Date)) return false;
-          // Check if appointment time has passed (with 5 minutes buffer)
-          const buffer = 5 * 60 * 1000; // 5 minutes in milliseconds
-          return dt.getTime() + buffer < now.getTime();
+          return dt instanceof Date && dt.getTime() + buffer < now.getTime();
         });
 
-        // Update appointments in Firestore
         if (toUpdate.length > 0) {
-          const updatePromises = toUpdate.map((r) =>
-            updateDoc(doc(db, 'appointments', r.id), {
-              status: 'completed',
-              updatedAt: serverTimestamp(),
-            }).catch((err) => {
-              console.error(`Failed to auto-complete appointment ${r.id}:`, err);
-              return null;
-            })
-          );
-          await Promise.all(updatePromises);
-          
-          // Update local state
+          const updateIds = new Set(toUpdate.map((u) => u.id));
           todayOnly.forEach((r) => {
-            if (toUpdate.some((u) => u.id === r.id)) {
-               r.status = 'completed';
-            }
+            if (updateIds.has(r.id)) r.status = 'completed';
           });
+          Promise.all(
+            toUpdate.map((r) =>
+              updateDoc(doc(db, 'appointments', r.id), {
+                status: 'completed',
+                updatedAt: serverTimestamp(),
+              }).catch(() => null)
+            )
+          );
         }
 
         setTodayRows(todayOnly);
         todayRowsRef.current = todayOnly;
         globalCache.appointments = todayOnly;
+        writeSessionCache(sessionKey, todayOnly);
       } catch (e) {
-        console.error(e);
-        setError(isArabic ? 'تعذر تحميل المواعيد' : 'Failed to load appointments');
+        if (!cancelled) {
+          console.error(e);
+          setError(isArabic ? 'تعذر تحميل المواعيد' : 'Failed to load appointments');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [user, isArabic]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   // Keep ref in sync with state
   React.useEffect(() => {
@@ -1038,60 +1035,15 @@ export default function AppointmentsPage() {
   return (
     <Protected>
       <AppLayout>
-        <Box
-          sx={{
-            position: 'relative',
-            minHeight: '100vh',
-            pb: 4,
-            background: 'linear-gradient(135deg, rgba(25, 118, 210, 0.03) 0%, rgba(66, 165, 245, 0.01) 50%, rgba(255, 152, 0, 0.02) 100%)',
-            '&::before': {
-              content: '""',
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'radial-gradient(circle at 20% 50%, rgba(25, 118, 210, 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 80%, rgba(66, 165, 245, 0.06) 0%, transparent 50%), radial-gradient(circle at 40% 20%, rgba(255, 152, 0, 0.05) 0%, transparent 50%)',
-              pointerEvents: 'none',
-              zIndex: 0,
-            },
-            '& > *': {
-              position: 'relative',
-              zIndex: 1,
-            },
-          }}
-        >
-          <Container maxWidth="md">
-            <Stack spacing={3} sx={{ mt: 2 }}>
+        <Box sx={{ position: 'relative', pb: 4 }}>
+          <Container maxWidth={false} disableGutters>
+            <Stack spacing={3}>
               {/* Header + actions */}
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 4,
-                  borderRadius: 5,
-                  background: 'linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%)',
-                  backdropFilter: 'blur(30px) saturate(180%)',
-                  WebkitBackdropFilter: 'blur(30px) saturate(180%)',
-                  border: '1.5px solid',
-                  borderColor: 'rgba(255,255,255,0.8)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  '&::before': {
-                    content: '""',
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: '4px',
-                    background: 'linear-gradient(90deg, #1976d2 0%, #42a5f5 50%, #1976d2 100%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 3s ease-in-out infinite',
-                  },
-                  '@keyframes shimmer': {
-                    '0%': { backgroundPosition: '200% 0' },
-                    '100%': { backgroundPosition: '-200% 0' },
-                  },
+              <div
+                className="glass-panel"
+                style={{
+                  padding: '22px 26px',
+                  borderTop: '4px solid #2563eb',
                 }}
               >
                 <Box
@@ -1106,34 +1058,24 @@ export default function AppointmentsPage() {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Box
                       sx={{
-                        width: 56,
-                        height: 56,
-                        borderRadius: 3,
-                        background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
+                        width: 54,
+                        height: 54,
+                        borderRadius: '16px',
+                        background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        boxShadow: '0 4px 16px rgba(25, 118, 210, 0.3)',
+                        boxShadow: '0 8px 22px -4px rgba(37, 99, 235, 0.42)',
                       }}
                     >
-                      <CalendarTodayIcon sx={{ fontSize: 28, color: 'white' }} />
+                      <CalendarTodayIcon sx={{ fontSize: 27, color: 'white' }} />
                     </Box>
                     <Box>
-                      <Typography
-                        variant="h4"
-                        fontWeight={800}
-                        sx={{
-                          background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                          backgroundClip: 'text',
-                          WebkitBackgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent',
-                          mb: 0.5,
-                        }}
-                      >
+                      <Typography variant="h4" fontWeight={900} sx={{ color: '#0f172a', fontSize: { xs: '1.35rem', md: '1.6rem' }, mb: 0.25 }}>
                         {isArabic ? 'مواعيد اليوم' : "Today's Appointments"}
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <TrendingUpIcon sx={{ fontSize: 16 }} />
+                      <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <TrendingUpIcon sx={{ fontSize: 16, color: '#2563eb' }} />
                         {filtered.length} {isArabic ? 'مواعيد' : 'appointment'}{filtered.length !== 1 ? 's' : ''}
                       </Typography>
                     </Box>
@@ -1145,19 +1087,7 @@ export default function AppointmentsPage() {
                       href={historyHref}
                       variant="outlined"
                       startIcon={<HistoryIcon />}
-                      sx={{
-                        borderRadius: 2.5,
-                        textTransform: 'none',
-                        fontWeight: 700,
-                        px: 2.5,
-                        borderWidth: 2,
-                        '&:hover': {
-                          borderWidth: 2,
-                          transform: 'translateY(-2px)',
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                        },
-                        transition: 'all 0.2s ease',
-                      }}
+                      sx={{ borderRadius: '13px', px: 2.5, py: 1, bgcolor: '#ffffff' }}
                     >
                       {isArabic ? 'السجل' : 'History'}
                     </Button>
@@ -1166,64 +1096,53 @@ export default function AppointmentsPage() {
                       href={newHref}
                       variant="contained"
                       startIcon={<AddIcon />}
-                      sx={{
-                        borderRadius: 2.5,
-                        textTransform: 'none',
-                        fontWeight: 700,
-                        px: 2.5,
-                        background: 'linear-gradient(135deg, #1976d2 0%, #42a5f5 100%)',
-                        boxShadow: '0 4px 16px rgba(25, 118, 210, 0.3)',
-                        '&:hover': {
-                          background: 'linear-gradient(135deg, #1565c0 0%, #1976d2 100%)',
-                          boxShadow: '0 6px 20px rgba(25, 118, 210, 0.4)',
-                          transform: 'translateY(-2px)',
-                        },
-                        transition: 'all 0.2s ease',
-                      }}
+                      sx={{ borderRadius: '13px', px: 2.5, py: 1 }}
                     >
                       {isArabic ? 'موعد جديد' : 'New Appointment'}
                     </Button>
                   </Stack>
                 </Box>
-              </Paper>
+              </div>
 
-              {/* Statistics Cards */}
+              {/* Statistics Cards (Physio Accent KPIs) */}
               {!loading && (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <CalendarTodayIcon sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="primary.main">
-                        {stats.total}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #2563eb' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'إجمالي المواعيد' : 'Total Appointments'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <EventAvailableIcon sx={{ fontSize: 32, color: 'info.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="info.main">
-                        {stats.confirmed}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <CalendarTodayIcon sx={{ fontSize: 21 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.total}</div>
+                  </div>
+
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #0ea5e9' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'مؤكد' : 'Confirmed'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={12} sm={4}>
-                    <Paper elevation={1} sx={{ p: 2.5, borderRadius: 2, textAlign: 'center' }}>
-                      <DoneAllIcon sx={{ fontSize: 32, color: 'success.main', mb: 1 }} />
-                      <Typography variant="h4" fontWeight={700} color="success.main">
-                        {stats.completed}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary" fontWeight={600}>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <EventAvailableIcon sx={{ fontSize: 21 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.confirmed}</div>
+                  </div>
+
+                  <div className="glass-panel glass-panel-lift" style={{ padding: '20px', borderTop: '4px solid #10b981' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#475569' }}>
                         {isArabic ? 'منجز' : 'Completed'}
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                </Grid>
+                      </span>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <DoneAllIcon sx={{ fontSize: 21 }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '2rem', fontWeight: 900, color: '#0f172a', lineHeight: 1.1 }}>{stats.completed}</div>
+                  </div>
+                </div>
               )}
 
               {/* Clinic filter (toggle chips) */}

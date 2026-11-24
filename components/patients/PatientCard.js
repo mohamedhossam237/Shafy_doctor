@@ -92,32 +92,29 @@ export default function PatientCard({ patient, isArabic, onDeleted, onUpdated })
     <>
       <Link href={href} style={{ textDecoration: 'none', width: '100%', display: 'block', height: '100%' }}>
         <Paper
-          elevation={1}
+          elevation={0}
+          className="glass-panel glass-panel-lift"
           sx={{
-            p: 2,
-            borderRadius: 2,
+            p: 2.25,
+            borderRadius: '18px',
             display: 'flex',
             alignItems: 'center',
             gap: 2,
             height: '100%',
-            minHeight: 120,
-            border: '1px solid',
-            borderColor: 'divider',
-            transition: 'all 0.2s ease',
-            '&:hover': {
-              boxShadow: 3,
-              borderColor: 'primary.main',
-              transform: 'translateY(-2px)',
-            },
+            minHeight: 118,
           }}
         >
           <Avatar
+            variant="rounded"
             sx={{
-              bgcolor: 'primary.main',
-              fontWeight: 600,
+              background: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)',
+              color: '#ffffff',
+              fontWeight: 900,
               width: 48,
               height: 48,
-              fontSize: '1rem',
+              borderRadius: '14px',
+              fontSize: '1.05rem',
+              boxShadow: '0 6px 14px -4px rgba(37, 99, 235, 0.36)',
             }}
           >
             {initials}
