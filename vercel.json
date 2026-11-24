@@ -1,8 +1,8 @@
 {
+  "installCommand": "ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm install",
   "functions": {
     "pages/api/intake-medical-file.js": {
       "maxDuration": 300
     }
   }
 }
-
