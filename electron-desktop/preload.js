@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   
   // System
+  isElectron: true,
   platform: process.platform,
-  version: app.getVersion(),
+  version: process.versions.electron || '1.0.0',
 });

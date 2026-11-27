@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "desktop:dev": "cd electron-desktop && npm run dev",
+    "desktop:sync": "cd electron-desktop && npm run prebuild",
+    "desktop:pack": "npm run build && cd electron-desktop && npm run pack",
+    "desktop:dist": "npm run build && cd electron-desktop && npm run dist"
   },
   "dependencies": {
     "@emotion/cache": "^11.14.0",

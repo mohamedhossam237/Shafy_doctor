@@ -196,58 +196,45 @@ async function startNextServer() {
     console.log(`App path: ${appPath}`);
     console.log(`Next path: ${nextPath}`);
     
-    // Find next executable - try multiple locations
-    const electronDesktopPath = path.dirname(__dirname);
-    const possibleNextBins = [
-      // Packaged app locations (unpacked)
-      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'next', 'dist', 'bin', 'next'),
-      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '.bin', 'next'),
-      // Packaged app locations (in app)
-      path.join(appPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
-      path.join(appPath, 'node_modules', '.bin', 'next'),
-      // Development locations
-      path.join(electronDesktopPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
-      path.join(electronDesktopPath, 'node_modules', '.bin', 'next'),
-      path.join(appPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
-    ];
-    
-    let nextBin = null;
-    let useNpx = false;
-    
-    for (const testBin of possibleNextBins) {
-      if (fs.existsSync(testBin)) {
-        nextBin = testBin;
-        console.log('Found Next.js executable at:', nextBin);
-        break;
-      }
-      // Try .cmd on Windows
-      if (process.platform === 'win32') {
-        const testBinCmd = testBin + '.cmd';
-        if (fs.existsSync(testBinCmd)) {
-          nextBin = testBinCmd;
-          console.log('Found Next.js executable at:', nextBin);
+    // Check if custom server.js exists
+    const serverScript = path.join(appPath, 'server.js');
+    let spawnCommand, spawnArgs;
+
+    if (fs.existsSync(serverScript)) {
+      console.log('Found custom server.js at:', serverScript);
+      spawnCommand = process.execPath;
+      spawnArgs = [serverScript];
+    } else {
+      // Find next executable - try multiple locations
+      const electronDesktopPath = path.dirname(__dirname);
+      const possibleNextBins = [
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'next', 'dist', 'bin', 'next'),
+        path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '.bin', 'next'),
+        path.join(appPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
+        path.join(appPath, 'node_modules', '.bin', 'next'),
+        path.join(electronDesktopPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
+        path.join(electronDesktopPath, 'node_modules', '.bin', 'next'),
+      ];
+      
+      let nextBin = null;
+      for (const testBin of possibleNextBins) {
+        if (fs.existsSync(testBin)) {
+          nextBin = testBin;
+          break;
+        }
+        if (process.platform === 'win32' && fs.existsSync(testBin + '.cmd')) {
+          nextBin = testBin + '.cmd';
           break;
         }
       }
-    }
-    
-    // If still not found, use npx as fallback
-    if (!nextBin) {
-      console.warn('Next.js executable not found in node_modules, using npx as fallback...');
-      useNpx = true;
-    }
 
-    // Start Next.js server
-    let spawnCommand, spawnArgs;
-    
-    if (useNpx) {
-      // Use npx to run next
-      spawnCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-      spawnArgs = ['next', 'start', '-p', PORT.toString()];
-    } else {
-      // Use node to run next executable directly
-      spawnCommand = 'node';
-      spawnArgs = [nextBin, 'start', '-p', PORT.toString()];
+      if (nextBin) {
+        spawnCommand = process.execPath;
+        spawnArgs = [nextBin, 'start', '-p', PORT.toString(), '-H', '127.0.0.1'];
+      } else {
+        spawnCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+        spawnArgs = ['next', 'start', '-p', PORT.toString(), '-H', '127.0.0.1'];
+      }
     }
     
     console.log(`Starting Next.js server with: ${spawnCommand} ${spawnArgs.join(' ')}`);
@@ -257,11 +244,13 @@ async function startNextServer() {
       cwd: appPath,
       env: {
         ...process.env,
+        ELECTRON_RUN_AS_NODE: '1',
         NODE_ENV: 'production',
-        PORT: PORT.toString()
+        PORT: PORT.toString(),
+        HOSTNAME: '127.0.0.1'
       },
       stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32' // Use shell on Windows for npx
+      shell: spawnCommand.endsWith('.cmd')
     });
 
     // Log server output

@@ -27,7 +27,6 @@ if (!fs.existsSync(nextBuildPath)) {
 console.log('✓ Found .next build directory');
 
 // Files/directories to copy
-// Note: We don't copy package.json because it would overwrite the Electron package.json
 const itemsToCopy = [
   { from: '.next', to: '.next' },
   { from: 'public', to: 'public' },
@@ -35,7 +34,16 @@ const itemsToCopy = [
   { from: 'node_modules/react', to: 'node_modules/react' },
   { from: 'node_modules/react-dom', to: 'node_modules/react-dom' },
   { from: 'node_modules/@emotion', to: 'node_modules/@emotion' },
-  { from: 'node_modules/@mui', to: 'node_modules/@mui' }
+  { from: 'node_modules/@mui', to: 'node_modules/@mui' },
+  { from: 'node_modules/dayjs', to: 'node_modules/dayjs' },
+  { from: 'node_modules/cookie', to: 'node_modules/cookie' },
+  { from: 'node_modules/firebase', to: 'node_modules/firebase' },
+  { from: 'node_modules/framer-motion', to: 'node_modules/framer-motion' },
+  { from: 'node_modules/recharts', to: 'node_modules/recharts' },
+  { from: 'node_modules/bidi-js', to: 'node_modules/bidi-js' },
+  { from: 'node_modules/arabic-persian-reshaper', to: 'node_modules/arabic-persian-reshaper' },
+  { from: 'node_modules/arabic-reshaper', to: 'node_modules/arabic-reshaper' },
+  { from: 'node_modules/next-seo', to: 'node_modules/next-seo' }
 ];
 
 function copyRecursive(src, dest) {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const { initDatabase, getDatabase } = require('./database/init');
 const { setupIPC } = require('./database/ipc-handlers');
@@ -10,73 +10,94 @@ const { startNextServer, stopNextServer } = require('./services/next-server');
 let mainWindow;
 let db;
 
-// Initialize database when app is ready
-app.whenReady().then(async () => {
-  try {
-    // Initialize SQLite database
-    db = await initDatabase();
-    console.log('Database initialized successfully');
-    
-    // Setup IPC handlers for database operations
-    setupIPC(db);
-    
-    // Setup authentication service (must be before sync services)
-    setupAuthService(db);
-    
-    // Setup appointment sync service
-    setupAppointmentSync(db);
-    
-    // Setup article sync service
-    setupArticleSync(db);
-    
-    // Start Next.js server if in production mode
-    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-    let serverUrl = null;
-    
-    if (!isDev) {
-      try {
-        console.log('Starting Next.js server for production...');
-        serverUrl = await startNextServer();
-        console.log(`Next.js server started at ${serverUrl}`);
-      } catch (error) {
-        console.error('Failed to start Next.js server:', error);
-        const errorMessage = error.message || 'Unknown error';
-        dialog.showErrorBox(
-          'Server Start Failed',
-          `Failed to start Next.js server:\n\n${errorMessage}\n\n` +
-          `To fix this issue:\n` +
-          `1. Make sure you've built the Next.js app first:\n` +
-          `   Run "npm run build" in the project root\n\n` +
-          `2. Copy the build files:\n` +
-          `   Run "cd electron-desktop && npm run prebuild"\n\n` +
-          `3. Then build the Electron app:\n` +
-          `   Run "npm run build:electron"\n\n` +
-          `If you're in development mode, make sure the Next.js dev server is running on port 3000.`
-        );
-        app.quit();
-        return;
-      }
-    } else {
-      serverUrl = 'http://localhost:3000';
+// Enforce single instance lock to prevent port clashes
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('Another instance is already running. Quitting.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
-    
-    // Create main window with the server URL
-    createWindow(serverUrl);
-  } catch (error) {
-    console.error('Failed to initialize app:', error);
-    dialog.showErrorBox('Initialization Error', `Failed to initialize application: ${error.message}`);
-    app.quit();
-  }
-});
+  });
+
+  // Initialize database when app is ready
+  app.whenReady().then(async () => {
+    try {
+      // Initialize SQLite database
+      db = await initDatabase();
+      console.log('Database initialized successfully');
+      
+      // Setup IPC handlers for database operations
+      setupIPC(db);
+      
+      // Setup authentication service (must be before sync services)
+      setupAuthService(db);
+      
+      // Setup appointment sync service
+      setupAppointmentSync(db);
+      
+      // Setup article sync service
+      setupArticleSync(db);
+      
+      // Start Next.js server if in production mode
+      const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+      let serverUrl = null;
+      
+      if (!isDev) {
+        try {
+          console.log('Starting Next.js server for production...');
+          serverUrl = await startNextServer();
+          console.log(`Next.js server started at ${serverUrl}`);
+        } catch (error) {
+          console.error('Failed to start Next.js server:', error);
+          const errorMessage = error.message || 'Unknown error';
+          dialog.showErrorBox(
+            'Server Start Failed',
+            `Failed to start Next.js server:\n\n${errorMessage}\n\n` +
+            `To fix this issue:\n` +
+            `1. Make sure you've built the Next.js app first:\n` +
+            `   Run "npm run build" in the project root\n\n` +
+            `2. Copy the build files:\n` +
+            `   Run "cd electron-desktop && npm run prebuild"\n\n` +
+            `3. Then build the Electron app:\n` +
+            `   Run "npm run build:electron"\n\n` +
+            `If you're in development mode, make sure the Next.js dev server is running on port 3000.`
+          );
+          app.quit();
+          return;
+        }
+      } else {
+        serverUrl = 'http://localhost:3000';
+      }
+      
+      // Create main window with the server URL
+      createWindow(serverUrl);
+    } catch (error) {
+      console.error('Failed to initialize app:', error);
+      dialog.showErrorBox('Initialization Error', `Failed to initialize application: ${error.message}`);
+      app.quit();
+    }
+  });
+}
 
 function createWindow(serverUrl = null) {
   const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
   
+  // Resolve icon path safely
+  let iconPath = path.join(__dirname, 'public/logo.png');
+  if (!require('fs').existsSync(iconPath)) {
+    iconPath = path.join(__dirname, '../public/logo.png');
+  }
+
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 768,
+    width: 1440,
+    height: 920,
+    minWidth: 1080,
+    minHeight: 720,
+    title: 'Shafy Doctor | شافي دكتور',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -84,9 +105,23 @@ function createWindow(serverUrl = null) {
       enableRemoteModule: false,
       webSecurity: true
     },
-    icon: path.join(__dirname, '../public/logo.png'),
+    icon: iconPath,
     show: false,
-    backgroundColor: '#ffffff'
+    autoHideMenuBar: true,
+    backgroundColor: '#0b1936' // Royal Sapphire dark startup tone matching webapp
+  });
+
+  // Remove the legacy Windows File/Edit/View menu for clean modern appearance
+  mainWindow.removeMenu();
+  mainWindow.setMenuBarVisibility(false);
+
+  // Open external links (whatsapp, external protocols, outside domains) in system browser
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://wa.me/') || url.startsWith('whatsapp:') || url.startsWith('mailto:') || url.startsWith('tel:') || !url.includes('localhost')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
   });
 
   // Load the app - use provided serverUrl or default to dev port
@@ -97,7 +132,6 @@ function createWindow(serverUrl = null) {
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error('Failed to load:', errorCode, errorDescription);
     if (errorCode === -106) {
-      // ERR_INTERNET_DISCONNECTED or similar
       dialog.showErrorBox(
         'Connection Error',
         `Failed to load the application. Please ensure Next.js server is running.\n\nError: ${errorDescription}`
@@ -118,7 +152,7 @@ function createWindow(serverUrl = null) {
     mainWindow.webContents.openDevTools();
   }
 
-  // Show window when ready
+  // Show window smoothly when content is ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
