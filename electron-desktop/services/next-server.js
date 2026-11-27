@@ -1,295 +1,141 @@
-const { spawn } = require('child_process');
-const path = require('path');
 const http = require('http');
+const { parse } = require('url');
+const path = require('path');
+const fs = require('fs');
 
-let nextServerProcess = null;
-const PORT = 3001; // Use a different port to avoid conflicts with other Next.js apps
-const MAX_RETRIES = 10;
-const RETRY_DELAY = 1000;
-
-/**
- * Check if a port is available
- */
-function checkPort(port) {
-  return new Promise((resolve) => {
-    const server = http.createServer();
-    server.listen(port, () => {
-      server.once('close', () => resolve(true));
-      server.close();
-    });
-    server.on('error', () => resolve(false));
-  });
-}
+let httpServer = null;
+let nextApp = null;
+const PORT = 3001;
 
 /**
- * Wait for server to be ready
+ * Start Next.js production server in-process using Electron's Node runtime
  */
-function waitForServer(url, retries = MAX_RETRIES) {
-  return new Promise((resolve, reject) => {
-    if (retries === 0) {
-      return reject(new Error('Server failed to start'));
-    }
-
-    const check = () => {
-      http.get(url, (res) => {
-        if (res.statusCode === 200 || res.statusCode === 404) {
-          resolve();
-        } else {
-          setTimeout(check, RETRY_DELAY);
-        }
-      }).on('error', () => {
-        setTimeout(() => waitForServer(url, retries - 1).then(resolve).catch(reject), RETRY_DELAY);
-      });
-    };
-
-    check();
-  });
-}
-
-/**
- * Start Next.js production server
- */
-async function startNextServer() {
-  if (nextServerProcess) {
+async function startNextServer(electronApp = null) {
+  if (httpServer) {
     console.log('Next.js server already running');
-    return `http://localhost:${PORT}`;
+    return `http://127.0.0.1:${PORT}`;
   }
 
-  const { app } = require('electron');
-  const fs = require('fs');
-  const isPackaged = app.isPackaged;
+  let appInstance = electronApp;
+  if (!appInstance) {
+    try {
+      const electron = require('electron');
+      appInstance = electron.app || (typeof electron === 'object' ? electron : null);
+    } catch (e) {}
+  }
+
+  const isPackaged = Boolean(
+    appInstance?.isPackaged ?? 
+    (process.resourcesPath && typeof process.resourcesPath === 'string' && fs.existsSync(process.resourcesPath))
+  );
   
-  // Store app reference for path checks
-  const electronApp = app;
-  
-  // Determine the correct paths
-  let appPath, nextPath;
+  // Determine the directory containing .next
+  let appPath = null;
   
   if (isPackaged) {
-    // In packaged app, files are in resources/app.asar.unpacked
-    // The .next directory should be unpacked (not in asar)
-    const possiblePaths = [
-      path.join(process.resourcesPath, 'app.asar.unpacked'), // Unpacked files (most likely)
-      path.join(process.resourcesPath, 'app'), // Packed in asar (unlikely but check)
-      path.join(process.resourcesPath), // Root of resources
-      path.dirname(process.execPath), // Directory where executable is
-      path.join(path.dirname(process.execPath), 'resources', 'app.asar.unpacked'), // Alternative path
+    const candidatePaths = [
+      path.join(process.resourcesPath, 'app'),
+      path.join(process.resourcesPath, 'app.asar.unpacked'),
+      process.resourcesPath,
+      path.dirname(process.execPath),
     ];
     
-    // Find which path has .next
-    let foundPath = null;
-    for (const testPath of possiblePaths) {
-      const testNextPath = path.join(testPath, '.next');
-      console.log(`Checking path: ${testNextPath}`);
-      if (fs.existsSync(testNextPath)) {
-        foundPath = testPath;
-        console.log(`✓ Found .next at: ${testNextPath}`);
+    for (const cand of candidatePaths) {
+      if (fs.existsSync(path.join(cand, '.next', 'BUILD_ID'))) {
+        appPath = cand;
         break;
       }
     }
     
-    if (foundPath) {
-      appPath = foundPath;
-    } else {
-      // Default to app.asar.unpacked - this is where electron-builder puts unpacked files
-      appPath = path.join(process.resourcesPath, 'app.asar.unpacked');
-      console.log(`Using default app path: ${appPath}`);
-    }
-    nextPath = path.join(appPath, '.next');
-  } else {
-    // In development, check if .next exists in electron-desktop (after copy) or parent
-    const electronDesktopPath = path.dirname(__dirname);
-    const electronDesktopNext = path.join(electronDesktopPath, '.next');
-    const parentNext = path.join(electronDesktopPath, '..', '.next');
-    
-    if (fs.existsSync(electronDesktopNext)) {
-      appPath = electronDesktopPath;
-      nextPath = electronDesktopNext;
-    } else {
-      // Fallback to parent directory (project root)
-      appPath = path.resolve(__dirname, '../..');
-      nextPath = path.join(appPath, '.next');
-    }
-  }
-
-  // Check if .next directory exists
-  console.log('\n=== Checking Next.js Build ===');
-  console.log('  isPackaged:', isPackaged);
-  console.log('  appPath:', appPath);
-  console.log('  nextPath:', nextPath);
-  console.log('  __dirname:', __dirname);
-  console.log('  process.execPath:', process.execPath);
-  console.log('  process.resourcesPath:', process.resourcesPath);
-  console.log('  electronApp.getAppPath():', electronApp.getAppPath());
-  
-  if (!fs.existsSync(nextPath)) {
-    // Try alternative paths (more comprehensive search)
-    const altPaths = [
-      path.join(process.resourcesPath, 'app.asar.unpacked', '.next'),
-      path.join(process.resourcesPath, 'app.asar.unpacked', '..', '.next'), // Parent of unpacked
-      path.join(process.resourcesPath, 'app', '.next'),
-      path.join(process.resourcesPath, '.next'), // Root of resources
-      path.join(__dirname, '..', '.next'), // Same level as electron-desktop
-      path.join(__dirname, '../..', '.next'), // Project root
-      path.join(electronApp.getAppPath(), '.next'), // Electron app path
-      path.join(electronApp.getAppPath(), '..', '.next'), // Parent of app path
-    ];
-    
-    let foundPath = null;
-    for (const altPath of altPaths) {
-      try {
-        if (fs.existsSync(altPath)) {
-          foundPath = altPath;
-          appPath = path.dirname(altPath);
-          nextPath = altPath;
-          console.log('Found .next at alternative path:', nextPath);
+    if (!appPath) {
+      for (const cand of candidatePaths) {
+        if (fs.existsSync(path.join(cand, '.next'))) {
+          appPath = cand;
           break;
         }
-      } catch (e) {
-        // Skip invalid paths
       }
     }
     
-    if (!foundPath) {
-      const allPaths = [...altPaths, nextPath];
-      const errorMessage = `Next.js build not found. Checked:\n${allPaths.join('\n')}\n\n` +
-        `To fix this:\n` +
-        `1. In the project root directory, run: npm run build\n` +
-        `2. Then run: cd electron-desktop && npm run prebuild\n` +
-        `3. Finally, build the Electron app: npm run build:electron\n\n` +
-        `Current app path: ${electronApp.getAppPath()}\n` +
-        `Resources path: ${process.resourcesPath || 'N/A'}\n` +
-        `__dirname: ${__dirname}`;
-      throw new Error(errorMessage);
+    if (!appPath) {
+      appPath = path.join(process.resourcesPath, 'app');
     }
-  }
-  
-  // Verify this is the correct project by checking package.json
-  const packageJsonPath = path.join(appPath, 'package.json');
-  if (fs.existsSync(packageJsonPath)) {
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    console.log('Project name:', packageJson.name);
-    if (packageJson.name !== 'shafy_doctor') {
-      console.warn(`Warning: Expected project 'shafy_doctor' but found '${packageJson.name}'`);
+  } else {
+    // In dev / unpack test mode
+    const electronDesktopDir = path.dirname(__dirname);
+    if (fs.existsSync(path.join(electronDesktopDir, '.next'))) {
+      appPath = electronDesktopDir;
+    } else {
+      appPath = path.resolve(electronDesktopDir, '..');
     }
   }
 
-  // Set NODE_ENV to production
+  console.log(`[NextServer] Initializing Next.js in directory: ${appPath}`);
+  console.log(`[NextServer] .next exists: ${fs.existsSync(path.join(appPath, '.next'))}`);
+  console.log(`[NextServer] BUILD_ID exists: ${fs.existsSync(path.join(appPath, '.next', 'BUILD_ID'))}`);
+
+  // Require next from the app's node_modules or global resolve
+  let next;
+  try {
+    next = require('next');
+  } catch (e) {
+    const localNext = path.join(appPath, 'node_modules', 'next');
+    next = require(localNext);
+  }
+
   process.env.NODE_ENV = 'production';
   process.env.PORT = PORT.toString();
 
-  // Change to the app directory
-  const originalCwd = process.cwd();
-  process.chdir(appPath);
+  nextApp = next({
+    dev: false,
+    hostname: '127.0.0.1',
+    port: PORT,
+    dir: appPath,
+  });
 
-  try {
-    // Check if port is available
-    const portAvailable = await checkPort(PORT);
-    if (!portAvailable) {
-      console.warn(`Port ${PORT} is already in use! This might load a different Next.js app.`);
-      console.warn('Please close any other Next.js servers running on this port.');
-      // Don't use existing server - it might be the wrong project
-      throw new Error(`Port ${PORT} is already in use by another application. Please close it first.`);
-    }
+  const handle = nextApp.getRequestHandler();
 
-    console.log('Starting Next.js production server...');
-    console.log(`App path: ${appPath}`);
-    console.log(`Next path: ${nextPath}`);
-    
-    // Check if custom server.js exists
-    const serverScript = path.join(appPath, 'server.js');
-    let spawnCommand, spawnArgs;
+  console.log('[NextServer] Preparing Next.js application...');
+  await nextApp.prepare();
+  console.log('[NextServer] Next.js prepared successfully');
 
-    if (fs.existsSync(serverScript)) {
-      console.log('Found custom server.js at:', serverScript);
-      spawnCommand = process.execPath;
-      spawnArgs = [serverScript];
-    } else {
-      // Find next executable - try multiple locations
-      const electronDesktopPath = path.dirname(__dirname);
-      const possibleNextBins = [
-        path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'next', 'dist', 'bin', 'next'),
-        path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '.bin', 'next'),
-        path.join(appPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
-        path.join(appPath, 'node_modules', '.bin', 'next'),
-        path.join(electronDesktopPath, 'node_modules', 'next', 'dist', 'bin', 'next'),
-        path.join(electronDesktopPath, 'node_modules', '.bin', 'next'),
-      ];
-      
-      let nextBin = null;
-      for (const testBin of possibleNextBins) {
-        if (fs.existsSync(testBin)) {
-          nextBin = testBin;
-          break;
-        }
-        if (process.platform === 'win32' && fs.existsSync(testBin + '.cmd')) {
-          nextBin = testBin + '.cmd';
-          break;
-        }
+  return new Promise((resolve, reject) => {
+    httpServer = http.createServer(async (req, res) => {
+      try {
+        const parsedUrl = parse(req.url, true);
+        await handle(req, res, parsedUrl);
+      } catch (err) {
+        console.error('[NextServer] Request error:', err);
+        res.statusCode = 500;
+        res.end('Internal Server Error');
       }
-
-      if (nextBin) {
-        spawnCommand = process.execPath;
-        spawnArgs = [nextBin, 'start', '-p', PORT.toString(), '-H', '127.0.0.1'];
-      } else {
-        spawnCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-        spawnArgs = ['next', 'start', '-p', PORT.toString(), '-H', '127.0.0.1'];
-      }
-    }
-    
-    console.log(`Starting Next.js server with: ${spawnCommand} ${spawnArgs.join(' ')}`);
-    console.log(`Working directory: ${appPath}`);
-    
-    nextServerProcess = spawn(spawnCommand, spawnArgs, {
-      cwd: appPath,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: '1',
-        NODE_ENV: 'production',
-        PORT: PORT.toString(),
-        HOSTNAME: '127.0.0.1'
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: spawnCommand.endsWith('.cmd')
     });
 
-    // Log server output
-    nextServerProcess.stdout.on('data', (data) => {
-      console.log(`Next.js: ${data.toString()}`);
+    httpServer.on('error', (err) => {
+      console.error('[NextServer] HTTP Server error:', err);
+      reject(err);
     });
 
-    nextServerProcess.stderr.on('data', (data) => {
-      console.error(`Next.js Error: ${data.toString()}`);
+    httpServer.listen(PORT, '127.0.0.1', () => {
+      console.log(`[NextServer] Listening on http://127.0.0.1:${PORT}`);
+      resolve(`http://127.0.0.1:${PORT}`);
     });
-
-    nextServerProcess.on('exit', (code) => {
-      console.log(`Next.js server exited with code ${code}`);
-      nextServerProcess = null;
-    });
-
-    // Wait for server to be ready
-    const serverUrl = `http://localhost:${PORT}`;
-    await waitForServer(serverUrl);
-    
-    console.log('Next.js server started successfully');
-    return serverUrl;
-  } catch (error) {
-    console.error('Failed to start Next.js server:', error);
-    throw error;
-  } finally {
-    // Restore original working directory
-    process.chdir(originalCwd);
-  }
+  });
 }
 
 /**
  * Stop Next.js server
  */
 function stopNextServer() {
-  if (nextServerProcess) {
-    console.log('Stopping Next.js server...');
-    nextServerProcess.kill();
-    nextServerProcess = null;
+  if (httpServer) {
+    console.log('[NextServer] Stopping Next.js server...');
+    httpServer.close();
+    httpServer = null;
+  }
+  if (nextApp) {
+    try {
+      nextApp.close();
+    } catch (e) {}
+    nextApp = null;
   }
 }
 

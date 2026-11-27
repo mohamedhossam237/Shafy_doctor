@@ -49,7 +49,7 @@ if (!gotTheLock) {
       if (!isDev) {
         try {
           console.log('Starting Next.js server for production...');
-          serverUrl = await startNextServer();
+          serverUrl = await startNextServer(app);
           console.log(`Next.js server started at ${serverUrl}`);
         } catch (error) {
           console.error('Failed to start Next.js server:', error);
