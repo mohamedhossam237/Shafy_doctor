@@ -390,10 +390,10 @@ export default function AddArticleDialog({ open, onClose, onCreated }) {
         publishedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'articles'), articleData);
+      const docRef = await addDoc(collection(db, 'articles'), articleData);
       
       if (onCreated) {
-        onCreated();
+        onCreated(docRef.id);
       }
       
       reset();

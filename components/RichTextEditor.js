@@ -1,11 +1,19 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import 'react-quill/dist/quill.snow.css';
 import { Box, useTheme, alpha } from '@mui/material';
 
-// Dynamic import to avoid SSR issues with react-quill
-const ReactQuill = dynamic(() => import('react-quill'), { ssr: false });
+// CSS must be imported inside a useEffect or dynamic wrapper to avoid SSR/Electron crashes
+// The import happens automatically when ReactQuill loads in the browser
+
+// Dynamic import to avoid SSR/Electron CSS crash — CSS loaded inside the lazy chunk
+const ReactQuill = dynamic(
+  async () => {
+    await import('react-quill/dist/quill.snow.css');
+    return import('react-quill');
+  },
+  { ssr: false }
+);
 
 const modules = {
   toolbar: [

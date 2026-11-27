@@ -846,6 +846,22 @@ export default function MarketingPage() {
                                 {fmtDate(item.publishedAt || item.createdAt, isAr)}
                               </Typography>
                             </CardContent>
+                            <CardActions sx={{ px: 2, pb: 2, pt: 0 }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<OpenInNewIcon />}
+                                onClick={() => {
+                                  const url = item.type === 'infographic'
+                                    ? `https://blog.shafy.dev/infographic/${item.id}`
+                                    : `https://blog.shafy.dev/article/${item.id}`;
+                                  window.open(url, '_blank');
+                                }}
+                                sx={{ textTransform: 'none', borderRadius: 2, fontSize: '0.75rem' }}
+                              >
+                                {t('View on Shafy Blog', 'عرض على مدونة شافي')}
+                              </Button>
+                            </CardActions>
                           </Card>
                         </Grid>
                       ))}
@@ -861,8 +877,8 @@ export default function MarketingPage() {
             <AddArticleDialog
               open={articleDialogOpen}
               onClose={closeArticleDialog}
-              onCreated={async () => {
-                // Reload articles using API (same pattern as initial load)
+              onCreated={async (newDocId) => {
+                // Reload articles
                 try {
                   const [articlesRes, infographicsRes] = await Promise.all([
                     fetch(`/api/articles?authorId=${user.uid}`),
@@ -872,17 +888,13 @@ export default function MarketingPage() {
                   let articlesData = [];
                   if (articlesRes.ok) {
                     const data = await articlesRes.json();
-                    if (data.success) {
-                      articlesData = data.articles || [];
-                    }
+                    if (data.success) articlesData = data.articles || [];
                   }
                   
                   let infographicsData = [];
                   if (infographicsRes.ok) {
                     const data = await infographicsRes.json();
-                    if (data.success) {
-                      infographicsData = data.infographics || [];
-                    }
+                    if (data.success) infographicsData = data.infographics || [];
                   }
                   
                   const allItems = [...articlesData, ...infographicsData];
@@ -896,6 +908,20 @@ export default function MarketingPage() {
                   console.error('Error reloading articles:', e);
                 }
                 closeArticleDialog();
+                // Show success snackbar with blog link
+                if (newDocId) {
+                  const blogUrl = `https://blog.shafy.dev/article/${newDocId}`;
+                  setSnack({
+                    open: true,
+                    severity: 'success',
+                    msg: isAr
+                      ? `✅ تم نشر المقال! شاهده على: ${blogUrl}`
+                      : `✅ Article published! View at: ${blogUrl}`,
+                    blogUrl,
+                  });
+                } else {
+                  setSnack({ open: true, severity: 'success', msg: t('Article published successfully', 'تم نشر المقال بنجاح') });
+                }
               }}
             />
           ) : (
@@ -1234,6 +1260,19 @@ export default function MarketingPage() {
 
           {/* Actions Menu */}
           <Menu anchorEl={anchorEl} open={menuOpen} onClose={handleMenuClose}>
+            <MenuItem onClick={() => {
+              if (!selectedItem) return;
+              const url = selectedItem.type === 'infographic'
+                ? `https://blog.shafy.dev/infographic/${selectedItem.id}`
+                : `https://blog.shafy.dev/article/${selectedItem.id}`;
+              window.open(url, '_blank');
+              handleMenuClose();
+            }}>
+              <ListItemIcon>
+                <OpenInNewIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>{t('View on Shafy Blog', 'عرض على مدونة شافي')}</ListItemText>
+            </MenuItem>
             <MenuItem onClick={handleEdit}>
               <ListItemIcon>
                 <EditIcon fontSize="small" />
@@ -1251,12 +1290,30 @@ export default function MarketingPage() {
           {/* Snackbar */}
           <Snackbar
             open={snack.open}
-            autoHideDuration={4000}
+            autoHideDuration={snack.blogUrl ? 10000 : 4000}
             onClose={() => setSnack((s) => ({ ...s, open: false }))}
             anchorOrigin={{ vertical: 'bottom', horizontal: isAr ? 'left' : 'right' }}
           >
-            <Alert severity={snack.severity} onClose={() => setSnack((s) => ({ ...s, open: false }))}>
-              {snack.msg}
+            <Alert
+              severity={snack.severity}
+              onClose={() => setSnack((s) => ({ ...s, open: false }))}
+              action={
+                snack.blogUrl ? (
+                  <Button
+                    color="inherit"
+                    size="small"
+                    startIcon={<OpenInNewIcon />}
+                    onClick={() => window.open(snack.blogUrl, '_blank')}
+                    sx={{ textTransform: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
+                  >
+                    {t('View Article', 'عرض المقال')}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {snack.blogUrl
+                ? t('Article published successfully!', 'تم نشر المقال بنجاح!')
+                : snack.msg}
             </Alert>
           </Snackbar>
         </Box>
